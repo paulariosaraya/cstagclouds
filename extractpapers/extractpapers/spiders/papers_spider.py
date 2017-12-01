@@ -6,12 +6,21 @@ from extractpapers.items import ExtractpapersItem
 class PapersSpider(scrapy.Spider):
     name = "papers"
 
-    def __init__(self, **kw):
-        super(PapersSpider, self).__init__(**kw)
-        url = kw.get('url') or kw.get('domain')
+    def __init__(self, *args, **kwargs):
+        #super(PapersSpider, self).__init__(**kw)
+        #url = kw.get('url')
+        #if not url:
+        #    raise ValueError('No url given')
         #if not url.startswith('http://') and not url.startswith('https://'):
         #    url = 'http://%s/' % url*
-        self.url = "https://jbiomedsem.biomedcentral.com/articles/10.1186/s13326-017-0112-6"
+
+        super(PapersSpider, self).__init__(*args, **kwargs)
+
+        url = kwargs.get('url')
+        if not url:
+            raise ValueError('No url given')
+        self.url = url
+        #self.url = "https://jbiomedsem.biomedcentral.com/articles/10.1186/s13326-017-0112-6"
 
 
     def start_requests(self):
