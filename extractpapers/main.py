@@ -22,6 +22,7 @@ def main(argv):
 
     process.start()
 
+
 def get_papers_links(name):
     sparql = SPARQLWrapper("http://dblp.l3s.de/d2r/sparql")
     sparql.setQuery("""
@@ -37,6 +38,7 @@ def get_papers_links(name):
         """)
     sparql.setReturnFormat(JSON)
     return sparql.query().convert()
+
 
 if __name__ == "__main__":
    main(sys.argv[1])

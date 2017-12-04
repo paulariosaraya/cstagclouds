@@ -27,7 +27,8 @@ class PapersSpider(scrapy.Spider):
         return [Request(self.url, callback=self.parse, dont_filter=True)]
 
     def parse(self, response):
-        pdf_urls = response.xpath('//a[contains(text(), "PDF") or contains(text(), "Download") or contains(text(), "Download PDF")]/@href').extract()
+        pdf_urls = response.xpath('//a[contains(text(), "PDF") or contains(text(), "Download") or contains(text(), '
+                                  '"Download PDF")]/@href').extract()
         for url in pdf_urls:
             yield Request(
                 url=response.urljoin(url),
@@ -35,9 +36,9 @@ class PapersSpider(scrapy.Spider):
             )
 
     def save_pdf(self, response):
-        newpath = os.getcwd()+"/pdfs/"+self.name
-        if not os.path.exists(newpath):
-            os.makedirs(newpath)
-        path = newpath+response.url.split('/')[-1]
+        new_path = os.getcwd()+"/pdfs/"+self.name
+        if not os.path.exists(new_path):
+            os.makedirs(new_path)
+        path = new_path+response.url.split('/')[-1]
         with open(path, 'wb') as f:
             f.write(response.body)
