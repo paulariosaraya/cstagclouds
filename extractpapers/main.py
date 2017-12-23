@@ -1,6 +1,5 @@
 from extractpapers.spiders.papers_spider import PapersSpider
 from scrapy.crawler import CrawlerProcess
-from SPARQLWrapper import SPARQLWrapper, JSON
 from fake_useragent import UserAgent
 from getlinks import get_links
 import sys
@@ -12,18 +11,18 @@ def main(argv):
     results = get_links.get_papers_links(name)
 
     ua = UserAgent()
-    #process = CrawlerProcess({
-    #        'USER_AGENT': ua.random
-    #})
+    process = CrawlerProcess({
+            'USER_AGENT': ua.random
+    })
 
     for result in results:
-        #process.crawl(PapersSpider(url=result,name=name),
-        #              url=result,
-        #              name=name)
+        process.crawl(PapersSpider(url=result,name=name),
+                      url=result,
+                      name=name)
         print(result)
 
-    #process.start()
+    process.start()
 
 
 if __name__ == "__main__":
-   main(sys.argv[1])
+    main(sys.argv[1])
