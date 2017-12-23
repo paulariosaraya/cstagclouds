@@ -7,6 +7,7 @@ import sys
 
 def main(argv):
     name = str(argv)
+    print name
     results = get_papers_links(name)
 
     ua = UserAgent()
