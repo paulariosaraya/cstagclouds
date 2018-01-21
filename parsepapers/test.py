@@ -1,9 +1,30 @@
-import PyPDF2
+from cStringIO import StringIO
+from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
+from pdfminer.converter import TextConverter
+from pdfminer.layout import LAParams
+from pdfminer.pdfpage import PDFPage
 
-pdf_file = open('978-3-642-41338-4_18')
-read_pdf = PyPDF2.PdfFileReader(pdf_file)
-number_of_pages = read_pdf.getNumPages()
-page = read_pdf.getPage(0)
-page_content = page.extractText()
-print page_content
+def convert(fname, pages=None):
+    if not pages:
+        pagenums = set()
+    else:
+        pagenums = set(pages)
 
+    output = StringIO()
+    manager = PDFResourceManager()
+    converter = TextConverter(manager, output, laparams=LAParams())
+    interpreter = PDFPageInterpreter(manager, converter)
+
+    infile = file(fname, 'rb')
+    for page in PDFPage.get_pages(infile, pagenums):
+        interpreter.process_page(page)
+    infile.close()
+    converter.close()
+    text = output.getvalue()
+    output.close
+    return text
+
+text = convert("1202.0984.pdf")  # get string of text content of pdf
+textFilename = "1202.0984.txt"
+textFile = open(textFilename, "w")  # make text file
+textFile.write(text)  # write text to text file
