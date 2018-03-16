@@ -1,23 +1,47 @@
-import PyPDF2
-from nltk.tokenize import word_tokenize
-from nltk.corpus import stopwords
+# -*- coding: utf-8 -*-
 
-#write a for-loop to open many files -- leave a comment if you'd #like to learn how
-filename = 'enter the name of the file here'
-#open allows you to read the file
-pdfFileObj = open("1202.0984.pdf",'rb')
-#The pdfReader variable is a readable object that will be parsed
-pdfReader = PyPDF2.PdfFileReader(pdfFileObj)
-#discerning the number of pages will allow us to parse through all #the pages
-num_pages = pdfReader.numPages
-count = 0
-text = ""
-#The while loop will read each page
-while count < num_pages:
-    pageObj = pdfReader.getPage(count)
-    count +=1
-    text += pageObj.extractText()
+import re
+from cStringIO import StringIO
 
-tokens = word_tokenize(text)
-for el in tokens:
-    print el
+from pdfminer.converter import TextConverter
+from pdfminer.layout import LAParams
+from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
+from pdfminer.pdfpage import PDFPage
+from unidecode import unidecode
+
+
+from rake_nltk import Rake
+
+def convert(fname, pages=None):
+    if not pages:
+        pagenums = set()
+    else:
+        pagenums = set(pages)
+
+    output = StringIO()
+    manager = PDFResourceManager()
+    converter = TextConverter(manager, output, laparams=LAParams())
+    interpreter = PDFPageInterpreter(manager, converter)
+
+    infile = file(fname, 'rb')
+    for page in PDFPage.get_pages(infile, pagenums):
+        interpreter.process_page(page)
+    infile.close()
+    converter.close()
+    text = output.getvalue()
+    output.close
+    return text
+
+
+text = convert("1202.0984.pdf")  # get string of text content of pdf
+text = re.sub(r'(\w+)(-\s+)(\w+\s)', r'\1\3\n', text, flags=re.MULTILINE)
+text = unidecode(unicode(text, encoding = "utf-8"))
+
+textFilename = "1202.0984.txt"
+textFile = open(textFilename, "w")  # make text file
+textFile.write(text)  # write text to text file
+textFile.close()
+
+r = Rake()
+r.extract_keywords_from_text(text)
+print "Keywords with scores: ", r.get_ranked_phrases_with_scores()
