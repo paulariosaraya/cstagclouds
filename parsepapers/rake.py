@@ -72,7 +72,7 @@ def split_sentences(text):
     Utility function to return a list of sentences.
     @param text The text that must be split in to sentences.
     """
-    sentence_delimiters = re.compile(u'[\\[\\]\n.!?,;:\t\\-\\"\\(\\)\\\'\u2019\u2013]')
+    sentence_delimiters = re.compile(u'[\\[\\]\n!?,;:\t\\-\\"\\(\\)\\\'\u2019\u2013]|[.]\s')
     sentences = sentence_delimiters.split(text)
     return sentences
 
@@ -203,6 +203,10 @@ def is_acceptable(phrase, min_char_length, max_words_length):
     # a phrase must have more alpha than digits characters
     if digits > alpha:
         return 0
+
+    # if len(words) == 1 and phrase in common_words_list:
+    #    return 0
+
     return 1
 
 
@@ -277,32 +281,32 @@ class Rake(object):
         return sorted_keywords
 
 
-if test:
-    text = "Compatibility of systems of linear constraints over the set of natural numbers. Criteria of compatibility of a system of linear Diophantine equations, strict inequations, and nonstrict inequations are considered. Upper bounds for components of a minimal set of solutions and algorithms of construction of minimal generating sets of solutions for all types of systems are given. These criteria and the corresponding algorithms for constructing a minimal supporting set of solutions can be used in solving all the considered types of systems and systems of mixed types."
-
-    # Split text into sentences
-    sentenceList = split_sentences(text)
-    # stoppath = "FoxStoplist.txt" #Fox stoplist contains "numbers", so it will not find "natural numbers" like in Table 1.1
-    stoppath = "SmartStoplist.txt"  # SMART stoplist misses some of the lower-scoring keywords in Figure 1.5, which means that the top 1/3 cuts off one of the 4.0 score words in Table 1.1
-    stopwordpattern = build_stop_word_regex(stoppath)
-
-    # generate candidate keywords
-    phraseList = generate_candidate_keywords(sentenceList, stopwordpattern, load_stop_words(stoppath))
-
-    # calculate individual word scores
-    wordscores = calculate_word_scores(phraseList)
-
-    # generate candidate keyword scores
-    keywordcandidates = generate_candidate_keyword_scores(phraseList, wordscores)
-    if debug: print(keywordcandidates)
-
-    sortedKeywords = sorted(six.iteritems(keywordcandidates), key=operator.itemgetter(1), reverse=True)
-    if debug: print(sortedKeywords)
-
-    totalKeywords = len(sortedKeywords)
-    if debug: print(totalKeywords)
-    print(sortedKeywords[0:(totalKeywords // 3)])
-
-    rake = Rake("SmartStoplist.txt")
-    keywords = rake.run(text)
-    print(keywords)
+# if test:
+#     text = "Compatibility of systems of linear constraints over the set of natural numbers. Criteria of compatibility of a system of linear Diophantine equations, strict inequations, and nonstrict inequations are considered. Upper bounds for components of a minimal set of solutions and algorithms of construction of minimal generating sets of solutions for all types of systems are given. These criteria and the corresponding algorithms for constructing a minimal supporting set of solutions can be used in solving all the considered types of systems and systems of mixed types."
+#
+#     # Split text into sentences
+#     sentenceList = split_sentences(text)
+#     # stoppath = "FoxStoplist.txt" #Fox stoplist contains "numbers", so it will not find "natural numbers" like in Table 1.1
+#     stoppath = "SmartStoplist.txt"  # SMART stoplist misses some of the lower-scoring keywords in Figure 1.5, which means that the top 1/3 cuts off one of the 4.0 score words in Table 1.1
+#     stopwordpattern = build_stop_word_regex(stoppath)
+#
+#     # generate candidate keywords
+#     phraseList = generate_candidate_keywords(sentenceList, stopwordpattern, load_stop_words(stoppath))
+#
+#     # calculate individual word scores
+#     wordscores = calculate_word_scores(phraseList)
+#
+#     # generate candidate keyword scores
+#     keywordcandidates = generate_candidate_keyword_scores(phraseList, wordscores)
+#     if debug: print(keywordcandidates)
+#
+#     sortedKeywords = sorted(six.iteritems(keywordcandidates), key=operator.itemgetter(1), reverse=True)
+#     if debug: print(sortedKeywords)
+#
+#     totalKeywords = len(sortedKeywords)
+#     if debug: print(totalKeywords)
+#     print(sortedKeywords[0:(totalKeywords // 3)])
+#
+#     rake = Rake("SmartStoplist.txt")
+#     keywords = rake.run(text)
+#     print(keywords)

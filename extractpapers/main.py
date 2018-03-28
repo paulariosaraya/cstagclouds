@@ -7,18 +7,19 @@ import sys
 
 def main(argv):
     name = str(argv)
-    print name
+    print (name)
     results = get_links.get_papers_links(name)
 
-    ua = UserAgent()
-    process = CrawlerProcess({
-            'USER_AGENT': ua.random
-    })
+    process = CrawlerProcess()
 
     for result in results:
-        process.crawl(PapersSpider(url=result,name=name),
+        answer = process.crawl(PapersSpider(url=result,name=name,wait=False),
                       url=result,
                       name=name)
+        if answer == False:
+            answer = process.crawl(PapersSpider(url=result, name=name, wait=True),
+                       url=result,
+                       name=name)
         print(result)
 
     process.start()

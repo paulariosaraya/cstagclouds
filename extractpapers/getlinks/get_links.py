@@ -52,11 +52,11 @@ def get_user_page(raw_name):
     name = last + ":" + first
     # Getting surname initial
     initial = name[0].lower()
-    return "http://dblp.org/pers/%s/%s.nt" % (initial, name)
+    return "https://dblp.org/pers/%s/%s.nt" % (initial, name)
 
 
 def get_paper_page(line):
-    paper_page = line.replace('> <http://dblp.org/rec/', '')
+    paper_page = line.split('dblp.org/rec/')[1]
     paper_page = re.sub(r'[>\s*.]', '', paper_page)
-    paper_page = "http://dblp.uni-trier.de/rec/nt/%s.nt" % paper_page
+    paper_page = "https://dblp.uni-trier.de/rec/nt/%s.nt" % paper_page
     return paper_page

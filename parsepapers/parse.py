@@ -1,3 +1,6 @@
+# coding=utf-8
+import glob
+import os
 import re
 from cStringIO import StringIO
 
@@ -40,25 +43,39 @@ def convert(fname, pages=None):
     infile.close()
     converter.close()
     text = output.getvalue()
-    output.close
+    output.close()
     return text
 
+
 def main():
-    text = convert("978-3-642-41338-4_18")  # get string of text content of pdf
-    text = clean(text)
+    keywords = []
+    path = '/home/paula/Descargas/Memoria/extractpapers/pdfs/Éric_Tanter/'
+    rake_object = rake.Rake("SmartStoplist.txt", 3, 3, 3)
+    for filename in glob.glob(os.path.join(path, '*.pdf')):
+        text = convert(filename)
+        text = clean(text)
+        k = rake_object.run(text)
+        keywords += k
+        print(filename , k)
 
-    #text_filename = "978-3-319-25010-6_15.txt"
-    #write_text(text, text_filename) # is this necessary???
+    keyword_file = open('keywords_eric.txt', 'w+r')
+    counter = Counter()
+    for keyword in keywords:
+        keyword_file.write(keyword[0]+'\n')
+        counter[keyword[0]] += keyword[1]
 
-    rake_object = rake.Rake("SmartStoplist.txt", 3, 3, 4, 1, 4)
-    keywords = rake_object.run(text)
-    print "Keywords:", keywords
+    # keywords_final = rake_object.run(text_final)
+    # print ("Keywords: ", keywords_final)
 
-    print "Sentences:", rake.split_sentences(text)
+    # text = convert("978-3-319-25010-6_15")
+    # text = convert("978-3-642-41338-4_18")
+    # text = convert("1202.0984.pdf")  # get text content of pdf
 
-    counter = Counter(text.strip().split())
+    # text_filename = "1202.0984.txt"
+    # write_text(text, text_filename)
 
     print "Common words:", counter.most_common()
+
 
 if __name__ == "__main__":
     main()

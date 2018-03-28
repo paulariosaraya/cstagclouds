@@ -12,36 +12,24 @@ from unidecode import unidecode
 
 from rake_nltk import Rake
 
-def convert(fname, pages=None):
-    if not pages:
-        pagenums = set()
-    else:
-        pagenums = set(pages)
+text = """
+Abstract. Hundreds of public SPARQL endpoints have been deployed
+on the Web, forming a novel decentralised infrastructure for querying billions 
+of structured facts from a variety of sources on a plethora of topics.
+But is this infrastructure mature enough to support applications? For 427
+public SPARQL endpoints registered on the DataHub, we conduct various 
+experiments to test their maturity. Regarding discoverability, we find
+that only one-third of endpoints make descriptive meta-data available,
+making it difficult to locate or learn about their content and capabilities.
+ Regarding interoperability, we find patchy support for established
+SPARQL features like ORDER BY as well as (understandably) for new
+SPARQL 1.1 features. Regarding efficiency, we show that the performance 
+of endpoints for generic queries can vary by up to 3-4 orders of
+magnitude. Regarding availability, based on a 27-month long monitoring 
+experiment, we show that only 32.2% of public endpoints can be
+expected to have (monthly) "two-nines" uptimes of 99-100%.
+"""  # get string of text content of pdf
+sentence_delimiters = re.compile(u'[\\[\\]\n\t\\-\\"\\(\\)\\\'\u2019\u2013]|[.!?,;:]\s')
+sentences = sentence_delimiters.split(text)
 
-    output = StringIO()
-    manager = PDFResourceManager()
-    converter = TextConverter(manager, output, laparams=LAParams())
-    interpreter = PDFPageInterpreter(manager, converter)
-
-    infile = file(fname, 'rb')
-    for page in PDFPage.get_pages(infile, pagenums):
-        interpreter.process_page(page)
-    infile.close()
-    converter.close()
-    text = output.getvalue()
-    output.close
-    return text
-
-
-text = convert("1202.0984.pdf")  # get string of text content of pdf
-text = re.sub(r'(\w+)(-\s+)(\w+\s)', r'\1\3\n', text, flags=re.MULTILINE)
-text = unidecode(unicode(text, encoding = "utf-8"))
-
-textFilename = "1202.0984.txt"
-textFile = open(textFilename, "w")  # make text file
-textFile.write(text)  # write text to text file
-textFile.close()
-
-r = Rake()
-r.extract_keywords_from_text(text)
-print "Keywords with scores: ", r.get_ranked_phrases_with_scores()
+print sentences;

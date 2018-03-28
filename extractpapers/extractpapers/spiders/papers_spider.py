@@ -1,4 +1,5 @@
 import scrapy
+import time
 from scrapy.http import Request
 import os
 import re
@@ -20,15 +21,21 @@ class PapersSpider(scrapy.Spider):
         self.url = url
 
         self.name = kwargs.get('name').replace(" ", "_") + "/"
+        if kwargs.get('wait'):
+            time.sleep(5)
 
     def start_requests(self):
         if self.url.endswith('.pdf'):
             return [Request(self.url, callback=self.save_pdf, dont_filter=True)]
-        return [Request(self.url, callback=self.parse, dont_filter=True)]
+        Request(self.url, callback=self.parse, dont_filter=True)
 
     def parse(self, response):
-        pdf_urls = response.xpath('//a[contains(text(), "PDF") or contains(text(), "Download") or contains(text(), '
-                                  '"Download PDF")]/@href').extract()
+        pdf_urls = response.xpath('//a[contains(text(), "PDF") or contains(text(), "Download") or '
+                                  'contains(@href, ".pdf") or contains(text(), "Download PDF")]/@href').extract()
+        if len(pdf_urls) == 0:
+            file = open("errors.txt", 'a')
+            file.write(self.url + "\n")
+            file.close()
         for url in pdf_urls:
             yield Request(
                 url=response.urljoin(url),
