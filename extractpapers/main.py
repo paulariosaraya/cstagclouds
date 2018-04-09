@@ -1,8 +1,9 @@
-from extractpapers.spiders.papers_spider import PapersSpider
-from scrapy.crawler import CrawlerProcess
-from fake_useragent import UserAgent
-from getlinks import get_links
 import sys
+
+from scrapy.crawler import CrawlerProcess
+
+from extractpapers.spiders.papers_spider import PapersSpider
+from getlinks import get_links
 
 
 def main(argv):
@@ -10,16 +11,16 @@ def main(argv):
     print (name)
     results = get_links.get_papers_links(name)
 
-    process = CrawlerProcess()
+    user_agent = 'Prios (prios@dcc.uchile.cl)'
+
+    process = CrawlerProcess({
+        'USER_AGENT': user_agent
+    })
 
     for result in results:
-        answer = process.crawl(PapersSpider(url=result,name=name,wait=False),
+        process.crawl(PapersSpider(url=result,name=name),
                       url=result,
                       name=name)
-        if answer == False:
-            answer = process.crawl(PapersSpider(url=result, name=name, wait=True),
-                       url=result,
-                       name=name)
         print(result)
 
     process.start()

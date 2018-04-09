@@ -1,23 +1,38 @@
 # coding=utf-8
+from __future__ import print_function
+
 import glob
 import os
 import re
 from cStringIO import StringIO
+from collections import Counter
 
 from pdfminer.converter import TextConverter
 from pdfminer.layout import LAParams
 from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
 from pdfminer.pdfpage import PDFPage
 from unidecode import unidecode
-from collections import Counter
 
 import rake
 
 
+def is_binary(filename):
+    f = os.popen('file -bi '+filename, 'r')
+    file_type = f.read()
+    if file_type.startswith('text'):
+        print(file_type)
+        return False
+    else:
+        return True
+
+
 def write_text(text, text_filename):
-    textFile = open(text_filename, "w")  # make text file
-    textFile.write(text)  # write text to text file
-    textFile.close()
+    new_path = os.path.split(text_filename)[0]
+    if not os.path.exists(new_path):
+        os.makedirs(new_path)
+    path = text_filename
+    with open(path, 'w') as f:
+        f.write(text)
 
 
 def clean(text):
@@ -37,7 +52,7 @@ def convert(fname, pages=None):
     converter = TextConverter(manager, output, laparams=LAParams())
     interpreter = PDFPageInterpreter(manager, converter)
 
-    infile = file(fname, 'rb')
+    infile = open(fname, 'rb')
     for page in PDFPage.get_pages(infile, pagenums):
         interpreter.process_page(page)
     infile.close()
@@ -47,34 +62,50 @@ def convert(fname, pages=None):
     return text
 
 
-def main():
-    keywords = []
-    path = '/home/paula/Descargas/Memoria/extractpapers/pdfs/Éric_Tanter/'
-    rake_object = rake.Rake("SmartStoplist.txt", 3, 3, 3)
-    for filename in glob.glob(os.path.join(path, '*.pdf')):
-        text = convert(filename)
-        text = clean(text)
-        k = rake_object.run(text)
-        keywords += k
-        print(filename , k)
+def convert_all(path):
+    path_base = "{}/txt/{}".format(os.path.dirname(os.path.realpath(__file__)), path.split("/")[-2])
+    for filename in glob.glob(os.path.join(path, '*')):
+        if is_binary(filename):
+            try:
+                text = convert(filename)
+                text = clean(text)
+                path_split = os.path.split(filename)
+                text_filename = "{}/{}.txt".format(path_base, path_split[1])
+                write_text(text, text_filename)
+            except Exception:
+                print(filename)
+                print(Exception)
 
-    keyword_file = open('keywords_eric.txt', 'w+r')
+    return path_base
+
+
+def get_ranked_keywords(keywords):
     counter = Counter()
     for keyword in keywords:
-        keyword_file.write(keyword[0]+'\n')
         counter[keyword[0]] += keyword[1]
+    return counter.most_common()
 
-    # keywords_final = rake_object.run(text_final)
-    # print ("Keywords: ", keywords_final)
 
-    # text = convert("978-3-319-25010-6_15")
-    # text = convert("978-3-642-41338-4_18")
-    # text = convert("1202.0984.pdf")  # get text content of pdf
+def get_all_keywords(txt_path, output_path):
+    keywords = []
+    rake_object = rake.Rake("SmartStoplist.txt", 3, 3, 3)
+    for filename in glob.glob(os.path.join(txt_path, '*.txt')):
+        with open(filename, 'r') as paper_file:
+            text = paper_file.read()
+            keywords += rake_object.run(text)
+    ranked_keywords = get_ranked_keywords(keywords)
+    output_file = open(output_path, "w")  # make text file
+    for k,v in ranked_keywords:
+        output_file.write("{} {}\n".format(k,v))
+    output_file.close()
 
-    # text_filename = "1202.0984.txt"
-    # write_text(text, text_filename)
 
-    print "Common words:", counter.most_common()
+def main():
+    #path = '/home/paula/Descargas/Memoria/extractpapers/pdfs/Pablo_Barceló/'
+    #txt_path = convert_all(path)
+    txt_path = '/home/paula/Descargas/Memoria/parsepapers/txt/Pablo_Barceló/'
+    output_path = '/home/paula/Descargas/Memoria/parsepapers/keywords/pablo_barcelo.txt'
+    get_all_keywords(txt_path, output_path)
 
 
 if __name__ == "__main__":

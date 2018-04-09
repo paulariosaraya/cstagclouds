@@ -23,10 +23,12 @@ import operator
 import six
 from six.moves import range
 from collections import Counter
-from nltk.stem import PorterStemmer
+#from nltk.stem import PorterStemmer
 
 debug = False
 test = True
+
+url_pattern = re.compile('(http(s)?:)?(//.)?(www\.)?[-a-zA-Z0-9@:%._+~#=]{2,256}\.[a-z]{2,6}([-a-zA-Z0-9@:%_+.~#?&/=]*)')
 
 
 def is_number(s):
@@ -72,7 +74,7 @@ def split_sentences(text):
     Utility function to return a list of sentences.
     @param text The text that must be split in to sentences.
     """
-    sentence_delimiters = re.compile(u'[\\[\\]\n!?,;:\t\\-\\"\\(\\)\\\'\u2019\u2013]|[.]\s')
+    sentence_delimiters = re.compile(u'[\\[\\]\n!?,;:\t\\\\"\\(\\)\\\'\u2019\u2013]|[.]\s|\s[-]')
     sentences = sentence_delimiters.split(text)
     return sentences
 
@@ -161,7 +163,7 @@ def filter_adjoined_candidates(candidates, min_freq):
 def generate_candidate_keywords(sentence_list, stopword_pattern, stop_word_list, min_char_length=1, max_words_length=5,
                                 min_words_length_adj=1, max_words_length_adj=1, min_phrase_freq_adj=2):
     phrase_list = []
-    ps = PorterStemmer()
+    #ps = PorterStemmer()
     for s in sentence_list:
         tmp = re.sub(stopword_pattern, '|', s.strip())
         phrases = tmp.split("|")
@@ -202,6 +204,9 @@ def is_acceptable(phrase, min_char_length, max_words_length):
 
     # a phrase must have more alpha than digits characters
     if digits > alpha:
+        return 0
+
+    if re.match(url_pattern, phrase):
         return 0
 
     # if len(words) == 1 and phrase in common_words_list:
