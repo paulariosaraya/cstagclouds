@@ -1,7 +1,9 @@
 import sys
 
+import scrapy
 from scrapy.crawler import CrawlerProcess
 
+from extractpapers.spiders.papers_dynamic_spider import PapersDynamicSpider
 from extractpapers.spiders.papers_spider import PapersSpider
 from getlinks import get_links
 
@@ -18,11 +20,16 @@ def main(argv):
     })
 
     for result in results:
-        process.crawl(PapersSpider(url=result,name=name),
-                      url=result,
-                      name=name)
-        print(result)
-
+        try:
+            process.crawl(PapersSpider(url=result,name=name),
+                          url=result,
+                          name=name)
+            print(result)
+        except Exception:
+            process.crawl(PapersDynamicSpider(url=result, name=name),
+                          url=result,
+                          name=name)
+            print(result)
     process.start()
 
 

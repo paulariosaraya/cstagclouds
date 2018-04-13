@@ -1,6 +1,7 @@
 # coding=utf-8
-from extractpapers.spiders.papers_spider import PapersSpider
+from extractpapers.spiders.papers_dynamic_spider import PapersDynamicSpider
 from scrapy.crawler import CrawlerProcess
+import os
 
 
 def main():
@@ -11,9 +12,9 @@ def main():
         'USER_AGENT': user_agent
     })
 
-    url = 'https://dl.acm.org/citation.cfm?doid=3077136.3096474'
+    url = 'https://doi.org/10.1109/ICSMC.2012.6377909'
 
-    process.crawl(PapersSpider(url=url, name=name),
+    process.crawl(PapersDynamicSpider(url=url, name=name),
                   url=url,
                   name=name)
     print(url)

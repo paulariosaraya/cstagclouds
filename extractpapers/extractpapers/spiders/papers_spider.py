@@ -1,6 +1,6 @@
 import os
 import re
-from urlparse import urlparse
+from logging import exception
 
 import scrapy
 from scrapy.http import Request
@@ -38,12 +38,8 @@ class PapersSpider(scrapy.Spider):
             path = new_path + "errors.txt"
             with open(path, 'a') as f:
                 f.write(self.url + "\n")
+            raise exception (scrapy.exceptions.NotSupported)
         for url in pdf_urls:
-            if url.startswith('/'):
-                base_url = urlparse(self.url)
-                with open("errors.txt", 'a') as f:
-                    f.write("aaaaa" + url + "\n")
-                url = '{}://{}{}'.format(base_url.scheme, base_url.netloc, url)
             yield Request(
                 url=response.urljoin(url),
                 callback=self.save_pdf

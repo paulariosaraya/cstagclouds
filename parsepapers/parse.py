@@ -7,6 +7,9 @@ import re
 from cStringIO import StringIO
 from collections import Counter
 
+import sys
+
+import datetime
 from pdfminer.converter import TextConverter
 from pdfminer.layout import LAParams
 from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
@@ -26,12 +29,15 @@ def is_binary(filename):
         return True
 
 
-def write_text(text, text_filename):
-    new_path = os.path.split(text_filename)[0]
+def make_dir(filename):
+    new_path = os.path.split(filename)[0]
     if not os.path.exists(new_path):
         os.makedirs(new_path)
-    path = text_filename
-    with open(path, 'w') as f:
+
+
+def write_text(text, text_filename):
+    make_dir(text_filename)
+    with open(text_filename, 'w') as f:
         f.write(text)
 
 
@@ -100,13 +106,20 @@ def get_all_keywords(txt_path, output_path):
     output_file.close()
 
 
-def main():
-    #path = '/home/paula/Descargas/Memoria/extractpapers/pdfs/Pablo_Barceló/'
-    #txt_path = convert_all(path)
-    txt_path = '/home/paula/Descargas/Memoria/parsepapers/txt/Pablo_Barceló/'
-    output_path = '/home/paula/Descargas/Memoria/parsepapers/keywords/pablo_barcelo.txt'
+def main(name, needs_convert):
+    name = str(name).replace(' ', '_')
+    needs_convert = int(needs_convert)
+    if needs_convert:
+        path = '/home/paula/Descargas/Memoria/extractpapers/pdfs/{}/'.format(name)
+        txt_path = convert_all(path)
+    else:
+        txt_path = '/home/paula/Descargas/Memoria/parsepapers/txt/{}/'.format(name)
+    output_path = '/home/paula/Descargas/Memoria/parsepapers/keywords/{}/{}.txt'.format(name, str(datetime.datetime.now()))
+    make_dir(output_path)
     get_all_keywords(txt_path, output_path)
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1], sys.argv[2])
+
+# plural normalization shuffle
