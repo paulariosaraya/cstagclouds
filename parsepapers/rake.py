@@ -21,9 +21,9 @@ from __future__ import print_function
 import re
 import operator
 import six
+from inflection import singularize
 from six.moves import range
 from collections import Counter
-#from nltk.stem import PorterStemmer
 
 debug = False
 test = True
@@ -163,15 +163,14 @@ def filter_adjoined_candidates(candidates, min_freq):
 def generate_candidate_keywords(sentence_list, stopword_pattern, stop_word_list, min_char_length=1, max_words_length=5,
                                 min_words_length_adj=1, max_words_length_adj=1, min_phrase_freq_adj=2):
     phrase_list = []
-    #ps = PorterStemmer()
     for s in sentence_list:
         tmp = re.sub(stopword_pattern, '|', s.strip())
         phrases = tmp.split("|")
         for phrase in phrases:
             # stemming
-            #words = phrase.split()
-            #stemmed = [ps.stem(word) for word in words]
-            #phrase = ' '.join(stemmed)
+            words = phrase.split()
+            stemmed = [singularize(word) for word in words]
+            phrase = ' '.join(stemmed)
             phrase = phrase.strip().lower()
             if phrase != "" and is_acceptable(phrase, min_char_length, max_words_length):
                 phrase_list.append(phrase)

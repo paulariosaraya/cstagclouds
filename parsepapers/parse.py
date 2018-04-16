@@ -15,6 +15,7 @@ from pdfminer.layout import LAParams
 from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
 from pdfminer.pdfpage import PDFPage
 from unidecode import unidecode
+from random import shuffle
 
 import rake
 
@@ -92,7 +93,7 @@ def get_ranked_keywords(keywords):
     return counter.most_common()
 
 
-def get_all_keywords(txt_path, output_path):
+def get_all_keywords(txt_path):
     keywords = []
     rake_object = rake.Rake("SmartStoplist.txt", 3, 3, 3)
     for filename in glob.glob(os.path.join(txt_path, '*.txt')):
@@ -100,10 +101,7 @@ def get_all_keywords(txt_path, output_path):
             text = paper_file.read()
             keywords += rake_object.run(text)
     ranked_keywords = get_ranked_keywords(keywords)
-    output_file = open(output_path, "w")  # make text file
-    for k,v in ranked_keywords:
-        output_file.write("{} {}\n".format(k,v))
-    output_file.close()
+    return ranked_keywords
 
 
 def main(name, needs_convert):
@@ -114,9 +112,22 @@ def main(name, needs_convert):
         txt_path = convert_all(path)
     else:
         txt_path = '/home/paula/Descargas/Memoria/parsepapers/txt/{}/'.format(name)
+    ranked_keywords = get_all_keywords(txt_path)
+
     output_path = '/home/paula/Descargas/Memoria/parsepapers/keywords/{}/{}.txt'.format(name, str(datetime.datetime.now()))
+    output_path_shuffle = '/home/paula/Descargas/Memoria/parsepapers/keywords/{}/{}_shuffled.txt'.format(name, str(datetime.datetime.now()))
     make_dir(output_path)
-    get_all_keywords(txt_path, output_path)
+    make_dir(output_path_shuffle)
+    output_file = open(output_path, "w")  # make text file
+    output_file_shuffle = open(output_path_shuffle, "w")  # make text file
+    for k, v in ranked_keywords:
+        output_file.write("{} {}\n".format(k, v))
+    top_100_keywords = list(ranked_keywords[0:100])
+    shuffle(top_100_keywords)
+    for element in top_100_keywords:
+        output_file_shuffle.write(element[0]+'\n')
+    output_file.close()
+    output_file_shuffle.close()
 
 
 if __name__ == "__main__":
