@@ -5,6 +5,7 @@ import os
 import requests
 from namedentities import *
 
+
 def get_papers_links(raw_name):
     user_page = get_user_page(raw_name)
 
@@ -45,12 +46,17 @@ def get_papers_links(raw_name):
 
 def get_user_page(raw_name):
     # Formatting name
-    name = raw_name.decode('utf-8')
-    name = ' '.join(word[0].upper() + word[1:] for word in name.split())
-    name = repr(named_entities(name)).replace(';', '=').replace('&', '=').replace("'", "")
-    first, last = name.split(' ')
-    name = last + ":" + first
+    #name = raw_name
+    #name = ' '.join(word[0].upper() + word[1:] for word in name.split())
+    #name = re.sub(r'[;.&]', "=",repr(named_entities(name)).replace("'", ""))
+    #print(name)
+    #names = name.split(' ')
+    #last =
+    #if len(names) > 2:
+    #    first = names[0:-1].join('_')
+    #name = last + ":" + first
     # Getting surname initial
+    name = raw_name
     initial = name[0].lower()
     return "https://dblp.org/pers/%s/%s.nt" % (initial, name)
 

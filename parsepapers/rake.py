@@ -21,7 +21,7 @@ from __future__ import print_function
 import re
 import operator
 import six
-from inflection import singularize
+from parsepapers.inflection import singularize, remove_ligatures
 from six.moves import range
 from collections import Counter
 
@@ -59,7 +59,7 @@ def separate_words(text, min_word_return_size):
     @param text The text that must be split in to words.
     @param min_word_return_size The minimum no of characters a word must have to be included.
     """
-    splitter = re.compile('[^a-zA-Z0-9_\\+\\-/]')
+    splitter = re.compile('[^a-zA-Z0-9_\\+/]')
     words = []
     for single_word in splitter.split(text):
         current_word = single_word.strip().lower()
@@ -74,7 +74,7 @@ def split_sentences(text):
     Utility function to return a list of sentences.
     @param text The text that must be split in to sentences.
     """
-    sentence_delimiters = re.compile(u'[\\[\\]\n!?,;:\t\\\\"\\(\\)\\\'\u2019\u2013]|[.]\s|\s[-]')
+    sentence_delimiters = re.compile(u'[\\[\\]\n!?,;:<>\t\\\\"\\(\\)\\\'\u2019\u2013]|[.]\s|\s[-]\s')
     sentences = sentence_delimiters.split(text)
     return sentences
 
@@ -84,7 +84,8 @@ def build_stop_word_regex(stop_word_list):
     for word in stop_word_list:
         word_regex = '\\b' + word + '\\b'
         stop_word_regex_list.append(word_regex)
-    stop_word_pattern = re.compile('|'.join(stop_word_regex_list), re.IGNORECASE)
+    stop_word_pattern = re.compile('(' + '|'.join(stop_word_regex_list) + ')(?!-)', re.IGNORECASE)
+    print('|'.join(stop_word_regex_list))
     return stop_word_pattern
 
 
@@ -169,7 +170,7 @@ def generate_candidate_keywords(sentence_list, stopword_pattern, stop_word_list,
         for phrase in phrases:
             # stemming
             words = phrase.split()
-            stemmed = [singularize(word) for word in words]
+            stemmed = [singularize(remove_ligatures(word)) for word in words]
             phrase = ' '.join(stemmed)
             phrase = phrase.strip().lower()
             if phrase != "" and is_acceptable(phrase, min_char_length, max_words_length):

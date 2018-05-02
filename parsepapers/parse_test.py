@@ -20,7 +20,6 @@ from pdfminer.pdfparser import PDFSyntaxError
 from parsepapers import rake
 
 from parsepapers.wiki_url import Searcher
-from parsepapers.tfidf import TfidfCalculator
 
 
 def is_binary(filename):
@@ -68,7 +67,7 @@ def convert(fname, pages=None):
     infile.close()
     converter.close()
     text = output.getvalue()
-    output.close()
+    output.close
     return text
 
 
@@ -99,25 +98,22 @@ def get_ranked_keywords(keywords):
 
 
 def get_all_keywords(txt_path):
-    keywords = []
-    rake_object = rake.Rake("SmartStoplist.txt", 3, 3, 3)
+    rake_object = rake.Rake("SmartStoplist.txt", 3, 5, 3)
+    text = []
     for filename in glob.glob(os.path.join(txt_path, '*.txt')):
         with open(filename, 'r') as paper_file:
-            text = paper_file.read()
-            keywords += rake_object.run(text)
+            paper_text = paper_file.read()
+            text.append(paper_text)
+    full_text = " ".join(text)
+    print(full_text)
+    keywords = rake_object.run(full_text)
     ranked_keywords = get_ranked_keywords(keywords)
     return ranked_keywords
 
 
-def main(name, needs_convert):
+def main(name):
     name = str(name).replace(' ', '_')
-    needs_convert = int(needs_convert)
-    # Convert pdf to txt if needed
-    if needs_convert:
-        path = '/home/paula/Descargas/Memoria/extractpapers/pdfs/{}/'.format(name)
-        txt_path = convert_all(path)
-    else:
-        txt_path = '/home/paula/Descargas/Memoria/parsepapers/txt/{}/'.format(name)
+    txt_path = '/home/paula/Descargas/Memoria/parsepapers/txt/{}/'.format(name)
 
     # Get ranked keywords from all the papers
     ranked_keywords = get_all_keywords(txt_path)
@@ -128,26 +124,13 @@ def main(name, needs_convert):
     make_dir(output_path)
     make_dir(output_path_shuffle)
     output_file = open(output_path, "w")  # make text file
-    output_file_shuffle = open(output_path_shuffle, "w")  # make text file
     for k, v in ranked_keywords:
         output_file.write("{} {}\n".format(k, v))
-
-    # Top 100
-    top_100_keywords = list(ranked_keywords[0:100])
-    #shuffle(top_100_keywords)
-    bin_searcher = Searcher('enwiki-latest-all-titles-in-ns0')
-    tfidf_calc = TfidfCalculator("/home/paula/Descargas/Memoria/parsepapers/txt/*/",
-                                 top_100_keywords)
-    tfidf = tfidf_calc.get_tfidf_feats('Aidan_Hogan')
-    for element in top_100_keywords:
-        is_in_wiki = 1 if bin_searcher.find(element[0].replace(' ', '_')) else 0
-        output_file_shuffle.write("{} {} {} {}\n".format(element[0], element[1], is_in_wiki, tfidf[element[0]]))
     output_file.close()
-    output_file_shuffle.close()
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[1])
 
 # classifier: define features
 # of tf idf? some

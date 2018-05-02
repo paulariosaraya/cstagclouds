@@ -1,15 +1,11 @@
 import os
 import re
-from urlparse import urlparse
 
 import scrapy
+from pydispatch import dispatcher
 from scrapy import signals
 from scrapy.http import Request
-from scrapy.xlib.pydispatch import dispatcher
-
 from selenium import webdriver
-from selenium.webdriver.support.wait import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 
 
 class PapersDynamicSpider(scrapy.Spider):
