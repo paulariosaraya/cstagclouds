@@ -91,21 +91,26 @@ def convert_all(path):
     return path_base
 
 
-def get_ranked_keywords(keywords):
-    counter = Counter()
+def get_ranked_keywords(keywords, n):
+    score_counter = Counter()
+    ratio_counter = Counter()
     for keyword in keywords:
-        counter[keyword[0]] += keyword[1]
-    return counter.most_common()
+        score_counter[keyword[0]] += keyword[1]
+        ratio_counter[keyword[0]] += 1 / n
+    dict = {key: [score_counter[key], ratio_counter[key]] for key in score_counter&ratio_counter}
+    return sorted(dict.items(), key=lambda x: x[1][0], reverse=True)
 
 
 def get_all_keywords(txt_path):
     keywords = []
     rake_object = rake.Rake("SmartStoplist.txt", 3, 3, 3)
+    papers_count = 0
     for filename in glob.glob(os.path.join(txt_path, '*.txt')):
         with open(filename, 'r') as paper_file:
             text = paper_file.read()
             keywords += rake_object.run(text)
-    ranked_keywords = get_ranked_keywords(keywords)
+            papers_count += 1
+    ranked_keywords = get_ranked_keywords(keywords, papers_count)
     return ranked_keywords
 
 
@@ -124,26 +129,26 @@ def main(name, needs_convert):
 
     # Write to file
     output_path = '/home/paula/Descargas/Memoria/parsepapers/keywords/{}/{}.txt'.format(name, str(datetime.datetime.now()))
-    output_path_shuffle = '/home/paula/Descargas/Memoria/parsepapers/keywords/{}/{}_shuffled.txt'.format(name, str(datetime.datetime.now()))
+    output_path_top100 = '/home/paula/Descargas/Memoria/parsepapers/keywords/{}/{}_100.txt'.format(name, str(datetime.datetime.now()))
     make_dir(output_path)
-    make_dir(output_path_shuffle)
+    make_dir(output_path_top100)
     output_file = open(output_path, "w")  # make text file
-    output_file_shuffle = open(output_path_shuffle, "w")  # make text file
+    output_file_top100 = open(output_path_top100, "w")  # make text file
     for k, v in ranked_keywords:
         output_file.write("{} {}\n".format(k, v))
 
-    # Top 100
+    # Top 500
     top_100_keywords = list(ranked_keywords[0:100])
-    #shuffle(top_100_keywords)
+    shuffle(top_100_keywords)
     bin_searcher = Searcher('enwiki-latest-all-titles-in-ns0')
     tfidf_calc = TfidfCalculator("/home/paula/Descargas/Memoria/parsepapers/txt/*/",
-                                 top_100_keywords)
-    tfidf = tfidf_calc.get_tfidf_feats('Aidan_Hogan')
+                                 [element[0] for element in top_100_keywords])
+    tfidf = tfidf_calc.get_tfidf_feats(name)
     for element in top_100_keywords:
         is_in_wiki = 1 if bin_searcher.find(element[0].replace(' ', '_')) else 0
-        output_file_shuffle.write("{} {} {} {}\n".format(element[0], element[1], is_in_wiki, tfidf[element[0]]))
+        output_file_top100.write("{},{},{},{},{}\n".format(element[0], element[1][0], tfidf[element[0]], is_in_wiki, element[1][1]))
     output_file.close()
-    output_file_shuffle.close()
+    output_file_top100.close()
 
 
 if __name__ == "__main__":
@@ -154,4 +159,25 @@ if __name__ == "__main__":
 # anyway we would need features
 # basis from tf idf, score from rake, does the keyword appear in wikipedia? (to see if it's too specific)
 # how to do this (api, or list of urls from wikipedia)
-# year it was published
+
+# year it was published first and latest
+
+# number/ratio of docs the keyword was included [done]
+
+# position in document 1/1 if it's in the begining 1/x if it's at the x position
+# (sum all the weights if it appears many times)
+# maybe  1/log(x)?
+# or another metric
+
+# model needs to be able to consider ordinal classes
+# w-p/w w=amount of words, p=position
+# w/p inverted probability of word being in the top p positions
+# 1/p to consider document length
+
+# Related work keywords extraction techniques, (topic modelling latent dirichlet allocarion), DM(ML)  the metrics, tag clouds
+# Proposed solution 4 things: architecture, accesing dblp, downloading pdfs, extraction,
+# keywords extraction, features (and why?), model, tag cloud creation final system
+# Evaluation: initial training set (what we just did), evaluation and training presition and measures of evaluation
+# Conclusion: summary, real conclusions why it worked, future work
+
+# finish a week before deadline!!!

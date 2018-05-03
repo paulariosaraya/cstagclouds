@@ -85,7 +85,6 @@ def build_stop_word_regex(stop_word_list):
         word_regex = '\\b' + word + '\\b'
         stop_word_regex_list.append(word_regex)
     stop_word_pattern = re.compile('(' + '|'.join(stop_word_regex_list) + ')(?!-)', re.IGNORECASE)
-    print('|'.join(stop_word_regex_list))
     return stop_word_pattern
 
 
