@@ -34,8 +34,10 @@ def get_papers_links(raw_name):
                 if "#primaryElectronicEdition" in line2:
                     paper_homepage = line2.split("#primaryElectronicEdition> <")[1]
                     paper_homepage = paper_homepage.split('>')[0]
-                    paper_links.append(paper_homepage)
-
+                if "#yearOfPublication" in line2:
+                    paper_year = line2.split("#yearOfPublication> \"")[1]
+                    paper_year = paper_year.split('"')[0]
+            paper_links.append([paper_homepage, paper_year])
             # Close file
             paper_file.close()
             os.remove(paper_page_path)

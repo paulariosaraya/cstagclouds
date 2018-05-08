@@ -10,6 +10,9 @@ from selenium import webdriver
 
 class PapersDynamicSpider(scrapy.Spider):
     name = "papers_dynamic"
+    custom_settings = {
+        'DOWNLOAD_MAXSIZE': 7340032,
+    }
 
     def __init__(self, *args, **kwargs):
         super(PapersDynamicSpider, self).__init__(*args, **kwargs)
@@ -24,6 +27,7 @@ class PapersDynamicSpider(scrapy.Spider):
         self.url = url
 
         self.name = kwargs.get('name').replace(" ", "_") + "/"
+        self.year = kwargs.get('year')
         self.driver = webdriver.Firefox()
         dispatcher.connect(self.spider_closed, signals.spider_closed)
 
@@ -61,9 +65,13 @@ class PapersDynamicSpider(scrapy.Spider):
         )
 
     def save_pdf(self, response):
-        new_path = os.getcwd()+"/pdfs/"+self.name
+        new_path = os.getcwd() + "/pdfs/" + self.name
         if not os.path.exists(new_path):
             os.makedirs(new_path)
-        path = new_path+response.url.split('/')[-1]
+        path = new_path + response.url.split('/')[-1]
+        if len(path.split('.pdf')) > 1:
+            path = "{}_{}.pdf".format(path.split('.pdf')[0], self.year)
+        else:
+            path = "{}_{}".format(path, self.year)
         with open(path, 'wb') as f:
             f.write(response.body)

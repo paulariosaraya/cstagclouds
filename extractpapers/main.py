@@ -22,17 +22,18 @@ def main(argv):
         'USER_AGENT': user_agent
     })
 
-    for result in results:
+    for result, year in results:
+        print(result, year)
         try:
-            process.crawl(PapersSpider(url=result,name=name),
+            process.crawl(PapersSpider(url=result,name=name,year=year),
                           url=result,
-                          name=name)
-            print(result)
+                          name=name,
+                          year=year)
         except scrapy.exceptions.NotSupported:
-            process.crawl(PapersDynamicSpider(url=result, name=name),
+            process.crawl(PapersDynamicSpider(url=result, name=name,year=year),
                           url=result,
-                          name=name)
-            print(result)
+                          name=name,
+                          year=year)
     process.start()
 
 

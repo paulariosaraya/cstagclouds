@@ -8,6 +8,9 @@ from scrapy.http import Request
 
 class PapersSpider(scrapy.Spider):
     name = "papers"
+    custom_settings = {
+        'DOWNLOAD_MAXSIZE': 7340032,
+    }
 
     def __init__(self, *args, **kwargs):
         super(PapersSpider, self).__init__(*args, **kwargs)
@@ -22,6 +25,7 @@ class PapersSpider(scrapy.Spider):
         self.url = url
 
         self.name = kwargs.get('name').replace(" ", "_") + "/"
+        self.year = kwargs.get('year')
 
     def start_requests(self):
         if self.url.endswith('.pdf'):
@@ -50,5 +54,9 @@ class PapersSpider(scrapy.Spider):
         if not os.path.exists(new_path):
             os.makedirs(new_path)
         path = new_path+response.url.split('/')[-1]
+        if len(path.split('.pdf')) > 1:
+            path = "{}_{}.pdf".format(path.split('.pdf')[0], self.year)
+        else:
+            path = "{}_{}".format(path, self.year)
         with open(path, 'wb') as f:
             f.write(response.body)

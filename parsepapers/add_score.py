@@ -1,5 +1,7 @@
 import sys
 
+from parsepapers.inflection import remove_ligatures
+
 
 def main(name, path):
     keywords_file = open(path, "r")  # make text file
@@ -8,13 +10,13 @@ def main(name, path):
     scores = {}
     for line in scores_file:
         (key, val) = line.split(',')
-        scores[key] = val.strip()
+        scores[remove_ligatures(key)] = val.strip()
     for line in keywords_file:
         try:
             score = scores[line.split(',')[0]]
+            final_file.write('{},{}\n'.format(line.strip(), score))
         except KeyError:
-            score = "None"
-        final_file.write('{},{}\n'.format(line.strip(), score))
+            pass
 
 
 if __name__ == "__main__":
