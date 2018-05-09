@@ -21,9 +21,11 @@ from __future__ import print_function
 import re
 import operator
 import six
-from parsepapers.inflection import singularize, remove_ligatures
+from extractkeywords.utils import singularize, remove_ligatures
 from six.moves import range
 from collections import Counter
+
+import numpy as np
 
 debug = False
 test = True
@@ -276,13 +278,16 @@ class Rake(object):
                                                   self.__min_char_length, self.__max_words_length,
                                                   self.__min_words_length_adj, self.__max_words_length_adj,
                                                   self.__min_phrase_freq_adj)
+        values = np.array(phrase_list)
+        w = len(phrase_list)
 
         word_scores = calculate_word_scores(phrase_list)
 
         keyword_candidates = generate_candidate_keyword_scores(phrase_list, word_scores, self.__min_keyword_frequency)
 
         sorted_keywords = sorted(six.iteritems(keyword_candidates), key=operator.itemgetter(1), reverse=True)
-        return sorted_keywords
+        sorted_keywords_phrase_depth = [[key, val, np.sum(w-np.where(values == key)[0])/w] for key, val in sorted_keywords]
+        return sorted_keywords_phrase_depth
 
 
 # if test:

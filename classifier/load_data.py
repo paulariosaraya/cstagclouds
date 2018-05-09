@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 
 def load_data(directory):
     data = {}
-    data['feature_names'] = ["tfidf","isinwiki","ratio","first_year","last_year"]
+    data['feature_names'] = ["rake score","tfidf","isinwiki","ratio","first_year","last_year"]
     data['target_names'] = ["<=1",">1"]
     data['data'] = []
     data['target'] = []
@@ -26,13 +26,13 @@ def load_data(directory):
             for line in paper_file:
                 line = line.split(',')
                 target = int(line[-1].strip())
-                data['data'].append(list(map(lambda x: float(x), [line[1]] + line[3:-1])))
+                data['data'].append(list(map(lambda x: float(x), line[1:-1])))
                 data['target'].append(1 if target > 2 else 0)
                 data['word'].append(line[0]+score_path)
     return data
 
 
-data = load_data('/home/paula/Descargas/Memoria/parsepapers/training/*')
+data = load_data('/home/paula/Descargas/Memoria/extractkeywords/training/*')
 label_names = data['target_names']
 labels = data['target']
 feature_names = data['feature_names']
