@@ -48,10 +48,10 @@ def clean_text(text):
     return text
 
 
-def write_text(self, text_filename):
+def write_text(text, text_filename):
     make_dir(text_filename)
     with open(text_filename, 'w') as f:
-        f.write(self.text)
+        f.write(text)
 
 
 def make_dir(filename):
@@ -65,7 +65,7 @@ def convert_all(path):
     for filename in glob.glob(os.path.join(path, '*')):
         path_split = os.path.split(filename)
         text_filename = "{}/{}.txt".format(path_base, path_split[1])
-        if os.path.exists(text_filename):
+        if not os.path.exists(text_filename):
             try:
                 text = convert(filename)
                 write_text(text, text_filename)

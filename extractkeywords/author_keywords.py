@@ -30,6 +30,8 @@ class AuthorKeywords:
             for keyword in keywords:
                 if keyword[0] in keywords_dict:
                     keyword_obj = keywords_dict[keyword[0]]
+                elif "-" in keyword[0] and keyword[0].replace('-','') in keywords_dict:
+                    keyword_obj = keywords_dict[keyword[0].replace('-','')]
                 else:
                     keyword_obj = Keyword(keyword[0])
                     keywords_dict[keyword_obj.keyword] = keyword_obj

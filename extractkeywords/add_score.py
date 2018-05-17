@@ -8,10 +8,3 @@ def extract_scores(path):
             (key, val) = line.split(',')
             scores[remove_ligatures(key)] = val.strip()
     return scores
-
-
-def get_score(keyword, scores):
-    if keyword in scores:
-        return scores[keyword]
-    else:
-        return 0

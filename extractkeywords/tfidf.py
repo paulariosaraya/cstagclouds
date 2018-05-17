@@ -9,7 +9,7 @@ class TfidfCalculator:
         self.corpus = []
         self.authors = {}
         self.set_corpus(directory)
-        self.tf = TfidfVectorizer(analyzer='word', ngram_range=(1, 3), stop_words='english', vocabulary=vocabulary)
+        self.tf = TfidfVectorizer(analyzer='word', ngram_range=(1, 3), stop_words='english', vocabulary=vocabulary, token_pattern=r"(?u)\b[\w-]+\b")
         self.tfidf_matrix = self.tf.fit_transform(self.corpus)
         self.feature_names = self.tf.get_feature_names()
 

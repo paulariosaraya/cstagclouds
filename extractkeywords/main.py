@@ -3,13 +3,12 @@ from __future__ import print_function
 
 import datetime
 import sys
-from random import shuffle
 
 from extractkeywords.author_keywords import AuthorKeywords
 from extractkeywords.tfidf import TfidfCalculator
 from extractkeywords.wiki_url import Searcher
 from extractkeywords.parser import convert_all, make_dir
-from extractkeywords.add_score import extract_scores, get_score
+from extractkeywords.add_score import extract_scores
 
 
 def main(name, needs_convert):
@@ -34,7 +33,7 @@ def main(name, needs_convert):
 
     # Top 500
     top_500_keywords = list(ranked_keywords[0:500])
-    shuffle(top_500_keywords)
+    # shuffle(top_500_keywords)
 
     # Wiki searcher
     bin_searcher = Searcher('enwiki-latest-all-titles-in-ns0')
@@ -49,7 +48,6 @@ def main(name, needs_convert):
         keyword.set_tfidf(tfidf[key])
         output_file_top500.write("{}\n".format(keyword.to_string()))
     output_file_top500.close()
-
 
     # Training
     training_output_path = '/home/paula/Descargas/Memoria/extractkeywords/training/{}.txt'.format(name)
@@ -98,3 +96,18 @@ if __name__ == "__main__":
 
 # try to remove hyphen and see if it exists in the set
 # if it is keep it, if not replace it with a space.
+
+# Define how many keywords should be in the tag clouds
+# try to find a reference or define a reasonable number
+# or just try
+
+
+# Filter by frequency until classes are balanced?
+# Using term frequency across all papers
+# Continue until 1 isn't the class with the most elements?
+# We don't want to lose 3s 4s and 5s..
+
+
+# Try 10 fold cross validation
+
+# See if any of the models produce a score or something to define the size of the text
