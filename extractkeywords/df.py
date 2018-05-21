@@ -12,7 +12,7 @@ def clean_text(text):
 
 
 def pre_process(s):
-    return singularize(remove_ligatures(s))
+    return singularize(remove_ligatures(s.lower()))
 
 
 class DfCalculator:
@@ -38,9 +38,7 @@ class DfCalculator:
             self.corpus.append("".join(author_text))
             i+=1
 
-    # https://buhrmann.github.io/tfidf-analysis.html
-    def get_df_feats(self, author):
-        ''' Get top n tfidf values in row and return them with their corresponding feature names.'''
+    def get_df_feats(self):
         array = self.cv_matrix.toarray()
         sum = np.sum(array, axis=0) #- array[self.authors[author]]
         return list(zip(self.vocabulary, sum))

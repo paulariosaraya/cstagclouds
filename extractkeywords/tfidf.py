@@ -2,6 +2,11 @@ import glob
 import os
 from sklearn.feature_extraction.text import TfidfVectorizer
 import numpy as np
+from extractkeywords.utils import singularize, remove_ligatures
+
+
+def pre_process(s):
+    return singularize(remove_ligatures(s.lower()))
 
 
 class TfidfCalculator:
@@ -9,7 +14,7 @@ class TfidfCalculator:
         self.corpus = []
         self.authors = {}
         self.set_corpus(directory)
-        self.tf = TfidfVectorizer(analyzer='word', ngram_range=(1, 3), stop_words='english', vocabulary=vocabulary, token_pattern=r"(?u)\b[\w-]+\b")
+        self.tf = TfidfVectorizer(analyzer='word', ngram_range=(1, 3), stop_words='english', vocabulary=vocabulary, token_pattern=r"(?u)\b[\w-]+\b", preprocessor=pre_process)
         self.tfidf_matrix = self.tf.fit_transform(self.corpus)
         self.feature_names = self.tf.get_feature_names()
 
