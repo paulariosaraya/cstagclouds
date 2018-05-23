@@ -6,6 +6,9 @@ from pydispatch import dispatcher
 from scrapy import signals
 from scrapy.http import Request
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.wait import WebDriverWait
 
 
 class PapersDynamicSpider(scrapy.Spider):
@@ -42,27 +45,24 @@ class PapersDynamicSpider(scrapy.Spider):
     def parse(self, response):
         # selenium part of the job
         self.driver.get(response.url)
-        link = self.driver.find_element_by_xpath('//a[contains(., "PDF") or contains(., "Download")]')
-        link.click()
-        #while True:
-        #    # response.xpath('//button[contains(., "Download")]/@href').extract()
-        #    link = self.driver.find_element_by_xpath('//a[contains(text(), "PDF") or contains(text(), "Download")/@href')
-
-        #    try:
-        #        next.click()
-
-                # get the data and write it to scrapy items
-        #    except:
-        #        break
-
-        #pdf_urls = response.xpath('//a[contains(text(), "PDF") or contains(text(), "Download") or '
-        #                          'contains(@href, ".pdf") or contains(text(), "Download PDF")]/@href').extract()
-
-        url = self.driver.find_element_by_xpath('//iframe')
-        yield Request(
-            url=response.urljoin(url.get_attribute("src")),
-            callback=self.save_pdf
-        )
+        try:
+            element = WebDriverWait(self.driver, 30).until(
+                self.driver.presence_of_element_located((By.XPATH, '//a[contains(., "PDF") or contains(., "Download")]'))
+            )
+            element.click()
+            url = self.driver.find_element_by_xpath('//iframe')
+            yield Request(
+                url=response.urljoin(url.get_attribute("src")),
+                callback=self.save_pdf
+            )
+        except TimeoutException:
+            new_path = os.getcwd() + "/pdfs/" + self.name
+            if not os.path.exists(new_path):
+                os.makedirs(new_path)
+            path = new_path + "errors.txt"
+            with open(path, 'a') as f:
+                f.write(self.url + "\n")
+            self.driver.close()
 
     def save_pdf(self, response):
         new_path = os.getcwd() + "/pdfs/" + self.name

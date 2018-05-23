@@ -1,8 +1,8 @@
 import os
 import re
-from logging import exception
 
 import scrapy
+from scrapy.exceptions import CloseSpider
 from scrapy.http import Request
 
 
@@ -36,13 +36,7 @@ class PapersSpider(scrapy.Spider):
         pdf_urls = response.xpath('//a[contains(text(), "PDF") or contains(text(), "Download") or '
                                   'contains(@href, ".pdf") or contains(text(), "Download PDF")]/@href').extract()
         if len(pdf_urls) == 0:
-            new_path = os.getcwd() + "/pdfs/" + self.name
-            if not os.path.exists(new_path):
-                os.makedirs(new_path)
-            path = new_path + "errors.txt"
-            with open(path, 'a') as f:
-                f.write(self.url + "\n")
-            raise exception (scrapy.exceptions.NotSupported)
+            raise CloseSpider()
         for url in pdf_urls:
             yield Request(
                 url=response.urljoin(url),

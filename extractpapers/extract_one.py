@@ -12,11 +12,12 @@ def main():
         'USER_AGENT': user_agent
     })
 
-    url = 'https://doi.org/10.1109/ISM.2016.0106'
+    url = 'https://doi.org/10.1109/LA-WEB.2012.11'
 
     process.crawl(PapersDynamicSpider(url=url, name=name),
                   url=url,
-                  name=name)
+                  name=name,
+                  year=2012)
     print(url)
 
     process.start()

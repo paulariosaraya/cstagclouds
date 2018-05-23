@@ -11,7 +11,7 @@ from extractkeywords.parser import convert_all, make_dir
 from extractkeywords.add_score import extract_scores
 
 
-def main(name, needs_convert):
+def main(name, needs_convert, is_for_training):
     name = str(name).replace(' ', '_')
     needs_convert = int(needs_convert)
     # Convert pdf to txt if needed
@@ -50,15 +50,16 @@ def main(name, needs_convert):
     output_file_top500.close()
 
     # Training
-    training_output_path = '/home/paula/Descargas/Memoria/extractkeywords/training/{}.txt'.format(name)
-    make_dir(training_output_path)
-    training_output = open(training_output_path, "w")
-    scores = extract_scores('/home/paula/Descargas/Memoria/extractkeywords/scores/{}.csv'.format(name))
-    for key, keyword in top_500_keywords:
-        keyword.set_score(scores)
-        if keyword.score != 0:
-            training_output.write("{},{}\n".format(keyword.to_string(),keyword.score))
-    training_output.close()
+    if int(is_for_training):
+        training_output_path = '/home/paula/Descargas/Memoria/extractkeywords/training/{}.txt'.format(name)
+        make_dir(training_output_path)
+        training_output = open(training_output_path, "w")
+        scores = extract_scores('/home/paula/Descargas/Memoria/extractkeywords/scores/{}.csv'.format(name))
+        for key, keyword in top_500_keywords:
+            keyword.set_score(scores)
+            if keyword.score != 0:
+                training_output.write("{},{}\n".format(keyword.to_string(),keyword.score))
+        training_output.close()
 
 
 if __name__ == "__main__":
