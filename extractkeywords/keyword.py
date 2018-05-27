@@ -5,7 +5,7 @@ class Keyword:
         self.tfidf = 0
         self.is_in_wiki = 0
         self.ratio = 0
-        self.first_year = 3000
+        self.first_year = 3000000
         self.last_year = 0
         self.phrase_depth = 0
         self.score = 0
@@ -14,7 +14,7 @@ class Keyword:
         self.rake_score += score
         self.ratio += 1/num_of_papers
         self.first_year = min(self.first_year, year)
-        self.last_year = max(self.first_year, year)
+        self.last_year = max(self.last_year, year)
         self.phrase_depth += phrase_depth
 
     def set_tfidf(self, tfidf):

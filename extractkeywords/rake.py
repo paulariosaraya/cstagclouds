@@ -31,6 +31,7 @@ debug = False
 test = True
 
 url_pattern = re.compile('(http(s)?:)?(//.)?(www\.)?[-a-zA-Z0-9@:%._+~#=]{2,256}\.[a-z]{2,6}([-a-zA-Z0-9@:%_+.~#?&/=]*)')
+symbols_pattern = re.compile('[+•]')
 
 
 def is_number(s):
@@ -156,7 +157,7 @@ def filter_adjoined_candidates(candidates, min_freq):
     # Uses the dictionary to filter the candidates
     for candidate in candidates:
         freq = candidates_freq[candidate]
-        if freq >= min_freq:
+        if freq >= min_freq and not bool(symbols_pattern.search(candidate)):
             filtered_candidates.append(candidate)
     return filtered_candidates
 
@@ -208,6 +209,9 @@ def is_acceptable(phrase, min_char_length, max_words_length):
         return 0
 
     if re.match(url_pattern, phrase):
+        return 0
+
+    if bool(symbols_pattern.search(phrase)):
         return 0
 
     # if len(words) == 1 and phrase in common_words_list:
