@@ -36,9 +36,8 @@ class ThreshClassifier:
                 for line in paper_file:
                     line = line.split(',')
                     target = int(line[-1].strip())
-                    line[3] = int(line[6])-int(line[5])
-                    line[5] = line[7]
-                    data.append(list(map(lambda x: float(x), line[1:6])))
+                    features = [line[1], line[2], line[4], line[6], int(line[6])-int(line[5]), line[7]]
+                    data.append(list(map(lambda x: float(x), features)))
                     targets.append(1 if target > self.threshold else 0)
                     words.append(line[0])
         return data, targets, words
@@ -61,7 +60,7 @@ class ThreshClassifier:
     def finalize(self):
         self.model = self.clf.fit(self.X, self.Y)
         filename = 'finalized_model.sav'
-        pickle.dump(self.model, open(filename, 'wb'))
+        # pickle.dump(self.model, open(filename, 'wb'))
 
 
 def main():
@@ -81,7 +80,7 @@ def main():
     final_predictions = thresh_clf.predict(thresh_clf.X)
     print(final_predictions)
     for i in range(0, len(final_predictions)):
-        if (final_predictions[i] == thresh_clf.X[i]) and (final_predictions[i] == 1):
+        if final_predictions[i] == 1:
             print(thresh_clf.words[i])
     print(thresh_clf.clf.score(thresh_clf.X, thresh_clf.Y))
     print(classification_report(thresh_clf.Y,final_predictions))
