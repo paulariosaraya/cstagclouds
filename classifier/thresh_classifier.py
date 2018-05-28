@@ -60,7 +60,7 @@ class ThreshClassifier:
     def finalize(self):
         self.model = self.clf.fit(self.X, self.Y)
         filename = 'finalized_model.sav'
-        # pickle.dump(self.model, open(filename, 'wb'))
+        pickle.dump(self.model, open(filename, 'wb'))
 
 
 def main():
