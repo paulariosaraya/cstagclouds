@@ -31,7 +31,7 @@ debug = False
 test = True
 
 url_pattern = re.compile('(http(s)?:)?(//.)?(www\.)?[-a-zA-Z0-9@:%._+~#=]{2,256}\.[a-z]{2,6}([-a-zA-Z0-9@:%_+.~#?&/=]*)')
-symbols_pattern = re.compile('[+•]')
+symbols_pattern = re.compile('[+•@]')
 
 
 def is_number(s):
