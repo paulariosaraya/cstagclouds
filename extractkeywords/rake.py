@@ -32,7 +32,7 @@ test = True
 
 url_pattern = re.compile('(http(s)?:)?(//.)?(www\.)?[-a-zA-Z0-9@:%._+~#=]{2,256}\.[a-z]{2,6}([-a-zA-Z0-9@:%_+.~#?&/=]*)')
 symbols_pattern = re.compile('[+•@]')
-
+diacritic_signs = re.compile('[´`ˆ¨]')
 
 def is_number(s):
     try:
@@ -158,7 +158,7 @@ def filter_adjoined_candidates(candidates, min_freq):
     for candidate in candidates:
         freq = candidates_freq[candidate]
         if freq >= min_freq and not bool(symbols_pattern.search(candidate)):
-            filtered_candidates.append(candidate)
+            filtered_candidates.append(diacritic_signs.sub('', candidate))
     return filtered_candidates
 
 
@@ -176,7 +176,7 @@ def generate_candidate_keywords(sentence_list, stopword_pattern, stop_word_list,
             phrase = ' '.join(stemmed)
             phrase = phrase.strip().lower()
             if phrase != "" and is_acceptable(phrase, min_char_length, max_words_length):
-                phrase_list.append(phrase)
+                phrase_list.append(diacritic_signs.sub('', phrase))
     phrase_list += extract_adjoined_candidates(sentence_list, stop_word_list, min_words_length_adj,
                                                max_words_length_adj, min_phrase_freq_adj)
     return phrase_list

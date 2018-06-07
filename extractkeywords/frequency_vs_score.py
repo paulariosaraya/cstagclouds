@@ -1,7 +1,7 @@
 from extractkeywords.df import DfCalculator
 import matplotlib.pyplot as plt
 
-keywords_dir = "/home/paula/Descargas/Memoria/extractkeywords/training/Barcel=oacute=:Pablo.txt"
+keywords_dir = "/home/paula/Descargas/Memoria/extractkeywords/training/Hogan:Aidan.txt"
 keywords = {}
 frequencies2 = []
 with open(keywords_dir, 'r') as file:
@@ -52,6 +52,6 @@ for i in range(1,len(frequencies2)+1):
     #     rank[current] = [str(keywords[frequencies[i-1][0]])+frequencies[i-1][0]]
     rank_tfidf[current] = score_sum / i
 
-plt.plot(rank_tfidf.keys(), rank_tfidf.values())
+# plt.plot(rank_tfidf.keys(), rank_tfidf.values())
 plt.plot(rank_df.keys(), rank_df.values())
 plt.show()

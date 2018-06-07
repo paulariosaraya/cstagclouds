@@ -1,20 +1,14 @@
 # coding=utf-8
 from __future__ import print_function
 
-import datetime
 import sys
 
 from extractkeywords.author_keywords import AuthorKeywords
-from extractkeywords.tfidf import TfidfCalculator
-from extractkeywords.wiki_url import Searcher
-from extractkeywords.parser import convert_all, make_dir
-from extractkeywords.add_score import extract_scores
-
-from classifier.select_keywords import select_keywords
+from extractkeywords.parser import convert_all
 from tagclouds.make_cloud import make_cloud
 
 
-def main(name, needs_convert, is_for_training):
+def main(name, needs_convert):
     name = str(name).replace(' ', '_')
     needs_convert = int(needs_convert)
     # Convert pdf to txt if needed
@@ -27,41 +21,24 @@ def main(name, needs_convert, is_for_training):
     # Get ranked keywords from all the papers
     author_keywords = AuthorKeywords(txt_path, name)
     author_keywords.extract_keywords()
-    ranked_keywords = author_keywords.get_keywords()
 
-    # Top 500
-    top_500_keywords = ranked_keywords[0:500]
+    print(author_keywords.keywords)
 
-    # Wiki searcher
-    bin_searcher = Searcher('enwiki-latest-all-titles-in-ns0')
+    # selected = author_keywords.get_selected_keywords()
+    # make_cloud(selected)
 
-    # Tfidf cal
-    tfidf_calc = TfidfCalculator("/home/paula/Descargas/Memoria/extractkeywords/txt/*/",
-                                 [element[0] for element in top_500_keywords])
-    tfidf = tfidf_calc.get_tfidf_feats(name)
-
-    # Data for classifier
-    x = []
-    for key, keyword in top_500_keywords:
-        keyword.set_is_in_wiki(1 if bin_searcher.find(key.replace(' ', '_')) else 0)
-        keyword.set_tfidf(tfidf[key])
-        x.append(keyword.get_features())
-
-    selected = select_keywords([element[0] for element in top_500_keywords], x)
-    make_cloud(selected)
-
-    # Training
-    if int(is_for_training):
-        training_output_path = '/home/paula/Descargas/Memoria/extractkeywords/training/{}.txt'.format(name)
-        make_dir(training_output_path)
-        training_output = open(training_output_path, "w")
-        scores = extract_scores('/home/paula/Descargas/Memoria/extractkeywords/scores/{}.csv'.format(name))
-        for key, keyword in top_500_keywords:
-            keyword.set_score(scores)
-            if keyword.score != 0:
-                training_output.write("{},{}\n".format(keyword.to_string(),keyword.score))
-        training_output.close()
+    # # Training
+    # if int(is_for_training):
+    #     training_output_path = '/home/paula/Descargas/Memoria/extractkeywords/training/{}.txt'.format(name)
+    #     make_dir(training_output_path)
+    #     training_output = open(training_output_path, "w")
+    #     scores = extract_scores('/home/paula/Descargas/Memoria/extractkeywords/scores/{}.csv'.format(name))
+    #     for key, keyword in top_500_keywords:
+    #         keyword.set_score(scores)
+    #         if keyword.score != 0:
+    #             training_output.write("{},{}\n".format(keyword.to_string(),keyword.score))
+    #     training_output.close()
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2], sys.argv[3])
+    main(sys.argv[1], sys.argv[2])
