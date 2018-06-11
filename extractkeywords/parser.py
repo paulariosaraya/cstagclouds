@@ -9,6 +9,8 @@ from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFSyntaxError
 
+from extractkeywords.utils import make_dir
+
 
 def convert(filename):
     if not is_pdf(filename):
@@ -52,12 +54,6 @@ def write_text(text, text_filename):
     make_dir(text_filename)
     with open(text_filename, 'w') as f:
         f.write(text)
-
-
-def make_dir(filename):
-    new_path = os.path.split(filename)[0]
-    if not os.path.exists(new_path):
-        os.makedirs(new_path)
 
 
 def convert_all(path):

@@ -19,7 +19,6 @@ class Searcher:
                 p -= 1
             if p < 0: self.f.seek(0)
             line = self.f.readline().decode('utf-8').strip().lower()
-            # print('--', mid, line)
             if line < string:
                 low = mid + 1
             elif line > string:
@@ -34,11 +33,8 @@ class Searcher:
             p -= 1
         if p < 0: self.f.seek(0)
 
-        #result = []
         while True:
             line = self.f.readline().decode('utf-8').strip().lower()
             if not line or not line == string: break
             if line == string: return True
-            #if line[-1:] == b'\n': line = line[:-1]
-            #result.append(line[len(string):])
         return False

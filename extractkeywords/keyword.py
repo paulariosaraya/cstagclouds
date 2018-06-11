@@ -33,4 +33,4 @@ class Keyword:
                                                 self.last_year, self.phrase_depth)
 
     def get_features(self):
-        return [self.rake_score, self.tfidf, self.ratio, self.last_year, self.last_year-self.first_year, self.phrase_depth]
+        return [self.rake_score, self.tfidf, self.is_in_wiki, self.ratio, self.last_year, self.last_year-self.first_year]

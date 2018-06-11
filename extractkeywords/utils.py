@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 """
+    inflection code taken from:
+
     inflection
     ~~~~~~~~~~~~
 
@@ -10,6 +12,8 @@
     :license: MIT, see LICENSE for more details.
 """
 import re
+
+import os
 
 __version__ = '0.3.1'
 
@@ -168,5 +172,20 @@ def remove_ligatures(word):
         if re.search(rule, word):
             return re.sub(rule, replacement, word)
     return word
+
+
+def extract_scores(path):
+    scores = {}
+    with open(path) as scores_file:
+        for line in scores_file:
+            (key, val) = line.split(',')
+            scores[remove_ligatures(key)] = val.strip()
+    return scores
+
+
+def make_dir(filename):
+    new_path = os.path.split(filename)[0]
+    if not os.path.exists(new_path):
+        os.makedirs(new_path)
 
 

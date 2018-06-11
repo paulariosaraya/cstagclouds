@@ -1,10 +1,11 @@
-from extractkeywords import rake
+from extractkeywords.features import rake
 from extractkeywords.keyword import Keyword
 import glob
 import os
 import re
-from extractkeywords.tfidf import TfidfCalculator
+from extractkeywords.features.tfidf import TfidfCalculator
 from classifier.select_keywords import select_keywords
+from extractkeywords.features.wiki_url import Searcher
 
 
 class AuthorKeywords:
@@ -45,7 +46,7 @@ class AuthorKeywords:
 
     def get_selected_keywords(self):
         # Wiki searcher
-        # bin_searcher = Searcher('enwiki-latest-all-titles-in-ns0')
+        bin_searcher = Searcher('/features/enwiki-latest-all-titles-in-ns0')
 
         # Tfidf cal
         tfidf_calc = TfidfCalculator("/home/paula/Descargas/Memoria/extractkeywords/txt/*/",
@@ -55,7 +56,7 @@ class AuthorKeywords:
         # Data for classifier
         x = []
         for key, keyword in self.keywords:
-            # keyword.set_is_in_wiki(1 if bin_searcher.find(key.replace(' ', '_')) else 0)
+            keyword.set_is_in_wiki(1 if bin_searcher.find(key.replace(' ', '_')) else 0)
             keyword.set_tfidf(tfidf[key])
             x.append(keyword.get_features())
         return select_keywords([element[0] for element in self.keywords], x)

@@ -1,4 +1,4 @@
-from extractkeywords.df import DfCalculator
+from experiments.keywords.df import DfCalculator
 import matplotlib.pyplot as plt
 
 keywords_dir = "/home/paula/Descargas/Memoria/extractkeywords/training/Hogan:Aidan.txt"
