@@ -4,7 +4,7 @@ import glob
 import os
 import re
 from extractkeywords.features.tfidf import TfidfCalculator
-from classifier.select_keywords import select_keywords
+from learningtorank.select_keywords import select_keywords
 from extractkeywords.features.wiki_url import Searcher
 
 
@@ -13,7 +13,7 @@ class AuthorKeywords:
         self.author = author
         self.dir = directory
         self.papers_count = 0
-        self.rake_object = rake.Rake("SmartStoplist.txt", 3, 3, 3)
+        self.rake_object = rake.Rake("/home/paula/Descargas/Memoria/extractkeywords/features/SmartStoplist.txt", 3, 4, 3)
         self.keywords = []
 
     def extract_keywords(self):
@@ -25,7 +25,7 @@ class AuthorKeywords:
                 year = int(re.search(r'(?<=_)\d+(?=\.)', filename).group(0))
                 result.append([keywords, year])
                 self.papers_count += 1
-        self.keywords = self.get_ranked_keywords(result)[0:500]
+        self.keywords = self.get_ranked_keywords(result)
 
     def get_ranked_keywords(self, result, n=500):
         keywords_dict = {}
@@ -44,9 +44,9 @@ class AuthorKeywords:
     def get_keywords(self):
         return self.keywords
 
-    def get_selected_keywords(self):
+    def get_selected_keywords(self, model_path):
         # Wiki searcher
-        bin_searcher = Searcher('/features/enwiki-latest-all-titles-in-ns0')
+        bin_searcher = Searcher('/home/paula/Descargas/Memoria/extractkeywords/features/enwiki-latest-all-titles-in-ns0')
 
         # Tfidf cal
         tfidf_calc = TfidfCalculator("/home/paula/Descargas/Memoria/extractkeywords/txt/*/",
@@ -59,4 +59,4 @@ class AuthorKeywords:
             keyword.set_is_in_wiki(1 if bin_searcher.find(key.replace(' ', '_')) else 0)
             keyword.set_tfidf(tfidf[key])
             x.append(keyword.get_features())
-        return select_keywords([element[0] for element in self.keywords], x)
+        return select_keywords([element[0] for element in self.keywords], x, model_path)

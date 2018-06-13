@@ -11,7 +11,7 @@ from extractkeywords.features.wiki_url import Searcher
 from tagclouds.make_cloud import make_cloud
 
 
-def main(name, needs_convert, is_for_training):
+def main(name, needs_convert):
     name = str(name).replace(' ', '_')
     needs_convert = int(needs_convert)
     # Convert pdf to txt if needed
@@ -25,29 +25,11 @@ def main(name, needs_convert, is_for_training):
     author_keywords = AuthorKeywords(txt_path, name)
     author_keywords.extract_keywords()
 
-    selected = author_keywords.get_selected_keywords()
-    make_cloud(selected)
+    [print(e[0]) for e in author_keywords.keywords]
 
-    # Training
-    if int(is_for_training):
-        training_output_path = '/home/paula/Descargas/Memoria/extractkeywords/training/{}.txt'.format(name)
-        make_dir(training_output_path)
-        training_output = open(training_output_path, "w")
-        scores = extract_scores('/home/paula/Descargas/Memoria/extractkeywords/scores/{}.csv'.format(name))
-        # Wiki searcher
-        bin_searcher = Searcher('/features/enwiki-latest-all-titles-in-ns0')
-        # Tfidf cal
-        tfidf_calc = TfidfCalculator("/home/paula/Descargas/Memoria/extractkeywords/txt/*/",
-                                     [element[0] for element in author_keywords.keywords])
-        tfidf = tfidf_calc.get_tfidf_feats(name)
-        for key, keyword in author_keywords.keywords:
-            keyword.set_score(scores)
-            keyword.set_is_in_wiki(1 if bin_searcher.find(key.replace(' ', '_')) else 0)
-            keyword.set_tfidf(tfidf[key])
-            if keyword.score != 0:
-                training_output.write("{},{}\n".format(keyword.to_string(),keyword.score))
-        training_output.close()
-
+    # selected = author_keywords.get_selected_keywords('/home/paula/Descargas/Memoria/learningtorank/rank_SVM_model.sav')
+    # make_cloud(selected)
+    #
 
 if __name__ == "__main__":
     main(sys.argv[1], sys.argv[2])

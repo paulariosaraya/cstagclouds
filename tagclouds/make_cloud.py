@@ -10,5 +10,5 @@ def make_cloud(selected_keys):
 
     plt.imshow(wc, interpolation="bilinear")
     plt.axis("off")
-    plt.title("40 words using rake")
+    plt.title("40")
     plt.show()

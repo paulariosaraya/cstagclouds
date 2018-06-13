@@ -8,6 +8,7 @@ class Keyword:
         self.first_year = 3000000
         self.last_year = 0
         self.phrase_depth = 0
+        self.length = len(self.keyword.split())
         self.score = 0
 
     def add_features(self, score, num_of_papers, year, phrase_depth):
@@ -30,7 +31,7 @@ class Keyword:
     def to_string(self):
         return "{},{},{},{},{},{},{},{}".format(self.keyword, self.rake_score, self.tfidf,
                                                 self.is_in_wiki, self.ratio, self.first_year,
-                                                self.last_year, self.phrase_depth)
+                                                self.last_year, self.length)
 
     def get_features(self):
         return [self.rake_score, self.tfidf, self.is_in_wiki, self.ratio, self.last_year, self.last_year-self.first_year]

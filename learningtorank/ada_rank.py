@@ -1,13 +1,17 @@
+from random import randint
+
 import numpy as np
 import pyltr
-from sklearn.linear_model import LinearRegression
-from sklearn.model_selection import LeaveOneGroupOut
+from sklearn.model_selection import GroupShuffleSplit, LeaveOneGroupOut
 
+from learningtorank.adarank.adarank import AdaRank
+from learningtorank.adarank.metrics import NDCGScorer
 from learningtorank.utils import load_data
 
-train_dir = '/home/paula/Descargas/Memoria/extractkeywords/training/*'
+train_dir = '/home/paula/Descargas/Memoria/extractkeywords/training2/*'
 x, y, words, qids, rake, groups = (np.array(l) for l in load_data(train_dir))
 
+scorer = NDCGScorer(k=10)
 metric = pyltr.metrics.NDCG(k=10)
 
 logo = LeaveOneGroupOut()
@@ -17,9 +21,9 @@ for train_index, test_index in logo.split(x, y, groups):
     y_train, y_test = y[train_index], y[test_index]
     q_train, q_test = qids[train_index], qids[test_index]
     rake_train, rake_test = rake[train_index], rake[test_index]
-    model = LinearRegression()
-    model.fit(x_train, y_train)
-    pred_test = model.predict(x_train)
+    model = AdaRank(max_iter=100, estop=10, scorer=scorer)
+    model.fit(x_train, y_train, q_train)
+    pred_test = model.predict(x_test, q_test)
     print('%s' % (metric.calc_mean(q_test, y_test, pred_test)))
 
 # gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=randint(0, 30))
