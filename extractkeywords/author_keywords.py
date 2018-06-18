@@ -25,7 +25,7 @@ class AuthorKeywords:
                 year = int(re.search(r'(?<=_)\d+(?=\.)', filename).group(0))
                 result.append([keywords, year])
                 self.papers_count += 1
-        self.keywords = self.get_ranked_keywords(result)
+        self.keywords = self.get_ranked_keywords(result)[0:500]
 
     def get_ranked_keywords(self, result, n=500):
         keywords_dict = {}

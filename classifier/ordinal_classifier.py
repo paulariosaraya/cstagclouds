@@ -1,6 +1,5 @@
 from random import randrange
 
-from classifier.load_data import load_data
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
@@ -8,9 +7,28 @@ from sklearn.metrics import accuracy_score
 import glob
 
 
+def load_data(directory, threshold):
+    data = []
+    targets = []
+    words = []
+    for score_path in glob.glob(directory):
+        with open(score_path, 'r') as paper_file:
+            print(score_path)
+            for line in paper_file:
+                line = line.split(',')
+                target = int(line[-1].strip())
+                features = [line[1], line[2], line[3], line[4], line[5], line[6], int(line[6]) - int(line[5])]
+                data.append(list(map(lambda x: float(x), features)))
+                targets.append(1 if target > threshold else 0)
+                words.append(line[0])
+    return data, targets, words
+
+
 class OrdinalClassifier:
     def __init__(self, n_of_classes, classifier):
         self.data = []
+        self.targets = []
+        self.words = []
         self.training_sets = []
         self.test_sets = []
         self.n_of_classes = n_of_classes
@@ -19,7 +37,6 @@ class OrdinalClassifier:
         self.all_data = {}
 
     def load_all_data(self, directory):
-        self.all_data['feature_names'] = ["rake score", "tfidf", "isinwiki", "ratio", "first_year", "last_year", "phrase_depth"]
         self.all_data['target_names'] = ["1","2","3","4","5"]
         self.all_data['data'] = []
         self.all_data['target'] = []
@@ -29,16 +46,20 @@ class OrdinalClassifier:
                 for line in paper_file:
                     line = line.split(',')
                     target = int(line[-1].strip())
+                    line[7] = int(line[6]) - int(line[5])
                     self.all_data['data'].append(list(map(lambda x: float(x), line[1:-1])))
                     self.all_data['target'].append(target)
                     self.all_data['word'].append(line[0])
 
     def get_sets(self, directory):
         for i in range(1, self.n_of_classes):
-            self.data.append(load_data(directory, i))
-            train, test, train_target, test_target, train_words, test_words = train_test_split(self.data[i-1]['data'],
-                                                                                               self.data[i-1]['target'],
-                                                                                               self.data[i-1]['word'],
+            data, targets, words = load_data(directory, i)
+            self.data.append(data)
+            self.targets.append(targets)
+            self.words.append(words)
+            train, test, train_target, test_target, train_words, test_words = train_test_split(self.data[i-1],
+                                                                                               self.targets[i-1],
+                                                                                               self.words[i-1],
                                                                                                test_size=0.33,
                                                                                                random_state=42)
             self.training_sets.append({"train": train, "target": train_target, "word": train_words})
@@ -60,7 +81,7 @@ class OrdinalClassifier:
         return [result.index(max(result)) + 1 for result in list(zip(results[0],results[1],results[2],results[3],results[4]))]
 
 
-directory = '/home/paula/Descargas/Memoria/classifier/training/*'
+directory = '/home/paula/Descargas/Memoria/extractkeywords/training/*'
 classifier = OrdinalClassifier(5, RandomForestClassifier())
 classifier.get_sets(directory)
 classifier.train()

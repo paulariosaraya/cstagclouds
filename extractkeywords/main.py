@@ -25,11 +25,11 @@ def main(name, needs_convert):
     author_keywords = AuthorKeywords(txt_path, name)
     author_keywords.extract_keywords()
 
-    [print(e[0]) for e in author_keywords.keywords]
+    # [print(e[0], e[1].rake_score) for e in author_keywords.keywords]
 
-    # selected = author_keywords.get_selected_keywords('/home/paula/Descargas/Memoria/learningtorank/rank_SVM_model.sav')
-    # make_cloud(selected)
-    #
+    selected = author_keywords.get_selected_keywords('/home/paula/Descargas/Memoria/learningtorank/rank_SVM_model.sav')
+    make_cloud(selected)
+
 
 if __name__ == "__main__":
     main(sys.argv[1], sys.argv[2])

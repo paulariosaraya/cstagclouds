@@ -2,7 +2,6 @@
 from __future__ import print_function
 
 import glob
-import sys
 
 from extractkeywords.utils import extract_scores, make_dir
 from extractkeywords.author_keywords import AuthorKeywords
@@ -20,7 +19,7 @@ def main():
         author_keywords = AuthorKeywords(txt_path, name)
         author_keywords.extract_keywords()
 
-        training_output_path = '/home/paula/Descargas/Memoria/extractkeywords/training2/{}.txt'.format(name)
+        training_output_path = '/home/paula/Descargas/Memoria/extractkeywords/training/{}.txt'.format(name)
         make_dir(training_output_path)
         training_output = open(training_output_path, "w")
         scores = extract_scores('/home/paula/Descargas/Memoria/extractkeywords/scores/{}.csv'.format(name))

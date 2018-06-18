@@ -46,8 +46,6 @@ def load_data(directory, threshold):
             for line in paper_file:
                 line = line.strip().split(',')
                 line[7] = int(line[6])-int(line[5])
-                line[5] = int(line[5]) - 1995
-                line[6] = int(line[6]) - 2004
                 all_data.append(line[1:-1])
                 data['class'].append(1 if int(line[-1]) > threshold else 0)
     min_max_scaler = preprocessing.StandardScaler()
@@ -63,17 +61,17 @@ def load_data(directory, threshold):
     return pd.DataFrame(data)
 
 
-dataset = load_data('/home/paula/Descargas/Memoria/extractkeywords/training/*', 2)
-print(dataset.shape)
-print(dataset.head(20))
-print(dataset.describe())
-print(dataset.groupby('class').size())
-
-# dataset.plot(kind='box', subplots=True, layout=(2,4), sharex=False, sharey=False)
+# dataset = load_data('/home/paula/Descargas/Memoria/extractkeywords/training/*', 2)
+# print(dataset.shape)
+# print(dataset.head(20))
+# print(dataset.describe())
+# print(dataset.groupby('class').size())
+#
+# # dataset.plot(kind='box', subplots=True, layout=(2,4), sharex=False, sharey=False)
+# # plt.show()
+#
+# dataset.hist()
 # plt.show()
-
-dataset.hist()
-plt.show()
-
-pd.scatter_matrix(dataset)
-plt.show()
+#
+# pd.scatter_matrix(dataset)
+# plt.show()

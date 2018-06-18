@@ -162,6 +162,14 @@ def filter_adjoined_candidates(candidates, min_freq):
     return filtered_candidates
 
 
+def filter_proper_nouns(candidates):
+    filtered_candidates = []
+    for candidate in candidates:
+        if len(candidate.split()) > 1 or (candidate.lower() in candidates):
+            filtered_candidates.append(diacritic_signs.sub('', candidate.lower()))
+    return filtered_candidates
+
+
 ###
 def generate_candidate_keywords(sentence_list, stopword_pattern, stop_word_list, min_char_length=1, max_words_length=5,
                                 min_words_length_adj=1, max_words_length_adj=1, min_phrase_freq_adj=2):
@@ -170,16 +178,16 @@ def generate_candidate_keywords(sentence_list, stopword_pattern, stop_word_list,
         tmp = re.sub(stopword_pattern, '|', s.strip())
         phrases = tmp.split("|")
         for phrase in phrases:
-            # stemming
             words = phrase.split()
+            # normalización de plurales y se sacan las ligaturas (ff, fe, etc)
             stemmed = [singularize(remove_ligatures(word)) for word in words]
             phrase = ' '.join(stemmed)
-            phrase = phrase.strip().lower()
+            phrase = phrase.strip() #.lower()
             if phrase != "" and is_acceptable(phrase, min_char_length, max_words_length):
                 phrase_list.append(diacritic_signs.sub('', phrase))
     phrase_list += extract_adjoined_candidates(sentence_list, stop_word_list, min_words_length_adj,
                                                max_words_length_adj, min_phrase_freq_adj)
-    return phrase_list
+    return filter_proper_nouns(phrase_list)
 
 
 def is_acceptable(phrase, min_char_length, max_words_length):
