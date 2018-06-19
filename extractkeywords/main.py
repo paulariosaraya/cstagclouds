@@ -3,6 +3,8 @@ from __future__ import print_function
 
 import sys
 
+import os
+
 from extractkeywords.utils import extract_scores, make_dir
 from extractkeywords.author_keywords import AuthorKeywords
 from extractkeywords.parser import convert_all
@@ -11,7 +13,7 @@ from extractkeywords.features.wiki_url import Searcher
 from tagclouds.make_cloud import make_cloud
 
 
-def main(name, needs_convert):
+def main(name, needs_convert, filtered, model_name):
     name = str(name).replace(' ', '_')
     needs_convert = int(needs_convert)
     # Convert pdf to txt if needed
@@ -22,14 +24,30 @@ def main(name, needs_convert):
         txt_path = '/home/paula/Descargas/Memoria/extractkeywords/txt/{}/'.format(name)
 
     # Get ranked keywords from all the papers
-    author_keywords = AuthorKeywords(txt_path, name)
+    author_keywords = AuthorKeywords(txt_path, name, filtered)
     author_keywords.extract_keywords()
 
     # [print(e[0], e[1].rake_score) for e in author_keywords.keywords]
+    models = ["LinearRegression", "RankSVM", "LambdaMART", "AdaRank"]
+    for model_name in models:
+        if filtered:
+            model_path_author = "/home/paula/Descargas/Memoria/learningtorank/models/Filtered/%s/%s_model_%s.sav" % (model_name, model_name[0].lower() + model_name[1:], name)
+            if os.path.exists(model_path_author):
+                model_path = model_path_author
+            else:
+                model_path = "/home/paula/Descargas/Memoria/learningtorank/models/Filtered/%s_model.sav" % (model_name[0].lower() + model_name[1:])
+        else:
+            model_path_author = "/home/paula/Descargas/Memoria/learningtorank/models/Unfiltered/%s/%s_model_%s.sav" % (
+            model_name, model_name[0].lower() + model_name[1:], name)
+            if os.path.exists(model_path_author):
+                model_path = model_path_author
+            else:
+                model_path = "/home/paula/Descargas/Memoria/learningtorank/models/Unfiltered/%s_model.sav" % (
+                        model_name[0].lower() + model_name[1:])
 
-    selected = author_keywords.get_selected_keywords('/home/paula/Descargas/Memoria/learningtorank/rank_SVM_model.sav')
-    make_cloud(selected)
+        selected = author_keywords.get_selected_keywords(model_path)
+        make_cloud(selected, model_name, name)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])

@@ -9,11 +9,14 @@ from extractkeywords.features.wiki_url import Searcher
 
 
 class AuthorKeywords:
-    def __init__(self, directory, author):
+    def __init__(self, directory, author, filtered):
         self.author = author
         self.dir = directory
         self.papers_count = 0
-        self.rake_object = rake.Rake("/home/paula/Descargas/Memoria/extractkeywords/features/SmartStoplist.txt", 3, 4, 3)
+        if filtered:
+            self.rake_object = rake.Rake("/home/paula/Descargas/Memoria/extractkeywords/features/SmartStoplist.txt", 3, 4, 3)
+        else:
+            self.rake_object = rake.Rake("/home/paula/Descargas/Memoria/extractkeywords/features/SmartStoplist_original.txt", 3, 4, 3)
         self.keywords = []
 
     def extract_keywords(self):
@@ -59,4 +62,4 @@ class AuthorKeywords:
             keyword.set_is_in_wiki(1 if bin_searcher.find(key.replace(' ', '_')) else 0)
             keyword.set_tfidf(tfidf[key])
             x.append(keyword.get_features())
-        return select_keywords([element[0] for element in self.keywords], x, model_path)
+        return select_keywords([element[0] for element in self.keywords], x, model_path, [self.author for l in self.keywords])
