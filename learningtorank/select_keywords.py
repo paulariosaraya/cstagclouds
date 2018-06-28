@@ -10,8 +10,7 @@ def select_keywords(words, x, model_path, qids):
         predictions = load_model.predict(np.array(scale(x)), np.array(qids))
     else:
         predictions = load_model.predict(np.array(scale(x)))
-    result = {}
+    result = []
     for i in range(0, len(predictions)):
-        result[words[i]] = predictions[i]
-    print(result)
-    return result
+        result.append([words[i],predictions[i]])
+    return sorted(result, key = lambda y: int(y[1]))

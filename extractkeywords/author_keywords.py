@@ -14,9 +14,9 @@ class AuthorKeywords:
         self.dir = directory
         self.papers_count = 0
         if filtered:
-            self.rake_object = rake.Rake("/home/paula/Descargas/Memoria/extractkeywords/features/SmartStoplist.txt", 3, 4, 3)
+            self.rake_object = rake.Rake("/home/paula/Descargas/Memoria/extractkeywords/features/SmartStoplist.txt", 3, 3, 3)
         else:
-            self.rake_object = rake.Rake("/home/paula/Descargas/Memoria/extractkeywords/features/SmartStoplist_original.txt", 3, 4, 3)
+            self.rake_object = rake.Rake("/home/paula/Descargas/Memoria/extractkeywords/features/SmartStoplist_original.txt", 3, 3, 3)
         self.keywords = []
 
     def extract_keywords(self):

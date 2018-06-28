@@ -1,15 +1,12 @@
-import random
-
 import matplotlib.pyplot as plt
 from wordcloud import WordCloud
 
-from heapq import nlargest
-from operator import itemgetter
+from extractkeywords.utils import make_dir
 
 
 def grey_color_func(word, font_size, position, orientation, random_state=None,
                     **kwargs):
-    return "hsl(0, 0%%, 15%%)"
+    return "hsl(0, 0%%, %d%%)" % 15
 
 
 # def reorder(keywords):
@@ -18,16 +15,28 @@ def grey_color_func(word, font_size, position, orientation, random_state=None,
 #     for name, score in nlargest(10, keywords.items(), key=itemgetter(1)):
 #         new_keywords[name] =
 
+def normalize(keywords):
+    final_keywords = {}
+    for i in range(0, len(keywords)):
+        key, value = keywords[i]
+        final_keywords[key] = i
+    return final_keywords
 
-def make_cloud(selected_keys, model_name, author):
-    print(len(selected_keys))
-    print(selected_keys)
-    wc = WordCloud(background_color="white", max_words=40)
-    wc.generate_from_frequencies(selected_keys)
 
-    plt.imshow(wc.recolor(color_func=grey_color_func, random_state=3), interpolation="bilinear")
-    plt.axis("off")
-    plt.title("40 with %s" % model_name)
-    plt.show()
+def make_cloud(selected_keys, model_name, author, filter):
+    dir = '/home/paula/Descargas/Memoria/Examples/%s/' % author
+    make_dir(dir)
 
-    wc.to_file('/home/paula/Descargas/Memoria/Examples/%s/%s_filtered_40tags_grey.png' % (author, model_name))
+    for n in range(50,90,10):
+        print(n)
+        selected_top_keys = normalize(selected_keys[-n:])
+        print(selected_top_keys)
+        wc = WordCloud(background_color="white", max_words=n, prefer_horizontal=1, width=1000, height=500, min_font_size=6)
+        wc.generate_from_frequencies(selected_top_keys)
+
+        plt.imshow(wc.recolor(color_func=grey_color_func, random_state=3), interpolation="bilinear")
+        plt.axis("off")
+        plt.title("%s with %s (%s)" % (n, model_name, filter))
+        plt.show()
+
+        wc.to_file('%s%s_%s_%dtags_grey.png' % (dir, model_name, filter, n))

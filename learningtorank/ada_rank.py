@@ -14,10 +14,10 @@ from learningtorank.utils import load_data
 def main(filtered, save_model):
     if filtered:
         data_dir = '/home/paula/Descargas/Memoria/extractkeywords/training/*'
-        model_dir = '/home/paula/Descargas/Memoria/learningtorank/models/Filtered/'
+        model_dir = '/home/paula/Descargas/Memoria/learningtorank/models/filtered/'
     else:
         data_dir = '/home/paula/Descargas/Memoria/extractkeywords/training_unfiltered/*'
-        model_dir = '/home/paula/Descargas/Memoria/learningtorank/models/Unfiltered/'
+        model_dir = '/home/paula/Descargas/Memoria/learningtorank/models/unfiltered/'
 
     x, y, words, qids, rake, groups = (np.array(l) for l in load_data(data_dir))
     scorer = NDCGScorer(k=5)
