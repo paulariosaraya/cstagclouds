@@ -9,7 +9,6 @@ def get_papers_links(raw_name):
     paper_links = []
 
     user_page = get_user_page(raw_name)
-    print(user_page)
     g = rdflib.Graph()
     g.load(user_page)
     author_of = URIRef("https://dblp.org/rdf/schema-2017-04-18#authorOf")
@@ -20,7 +19,6 @@ def get_papers_links(raw_name):
         g_paper.load(o + ".rdf")
         paper_homepage = list(g_paper.objects(predicate=electronic_edition))[0]
         paper_year = list(g_paper.objects(predicate=year_of_publication))[0]
-        print(paper_homepage, paper_year)
         paper_links.append([paper_homepage, paper_year])
     #
     # # Download rdf file
