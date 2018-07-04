@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# Scrapy settings for extractpapers project
+# Scrapy settings for paperspiders project
 #
 # For simplicity, this file contains only settings considered important or
 # commonly used. You can find more settings consulting the documentation:
@@ -9,14 +9,14 @@
 #     http://scrapy.readthedocs.org/en/latest/topics/downloader-middleware.html
 #     http://scrapy.readthedocs.org/en/latest/topics/spider-middleware.html
 
-BOT_NAME = 'extractpapers'
+BOT_NAME = 'paperspiders'
 
-SPIDER_MODULES = ['extractpapers.spiders']
-NEWSPIDER_MODULE = 'extractpapers.spiders'
+SPIDER_MODULES = ['paperspiders.spiders']
+NEWSPIDER_MODULE = 'paperspiders.spiders'
 
 
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
-#USER_AGENT = 'extractpapers (+http://www.yourdomain.com)'
+#USER_AGENT = 'paperspiders (+http://www.yourdomain.com)'
 
 # Obey robots.txt rules
 ROBOTSTXT_OBEY = True
@@ -47,13 +47,13 @@ CONCURRENT_REQUESTS_PER_DOMAIN = 5
 # Enable or disable spider middlewares
 # See http://scrapy.readthedocs.org/en/latest/topics/spider-middleware.html
 #SPIDER_MIDDLEWARES = {
-#    'extractpapers.middlewares.ExtractpapersSpiderMiddleware': 543,
+#    'paperspiders.middlewares.ExtractpapersSpiderMiddleware': 543,
 #}
 
 # Enable or disable downloader middlewares
 # See http://scrapy.readthedocs.org/en/latest/topics/downloader-middleware.html
 #DOWNLOADER_MIDDLEWARES = {
-#    'extractpapers.middlewares.MyCustomDownloaderMiddleware': 543,
+#    'paperspiders.middlewares.MyCustomDownloaderMiddleware': 543,
 #}
 
 # Enable or disable extensions
@@ -65,7 +65,7 @@ CONCURRENT_REQUESTS_PER_DOMAIN = 5
 # Configure item pipelines
 # See http://scrapy.readthedocs.org/en/latest/topics/item-pipeline.html
 #ITEM_PIPELINES = {
-#    'extractpapers.pipelines.ExtractpapersPipeline': 300,
+#    'paperspiders.pipelines.ExtractpapersPipeline': 300,
 #}
 
 #ITEM_PIPELINES = {'scrapy.pipelines.files.FilesPipeline': 1}

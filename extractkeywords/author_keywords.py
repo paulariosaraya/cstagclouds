@@ -1,3 +1,5 @@
+from random import shuffle
+
 from extractkeywords.features import rake
 from extractkeywords.keyword import Keyword
 import glob
@@ -42,24 +44,45 @@ class AuthorKeywords:
                     keyword_obj = Keyword(keyword[0])
                     keywords_dict[keyword_obj.keyword] = keyword_obj
                 keyword_obj.add_features(keyword[1], self.papers_count, year, keyword[2])
-        return sorted(keywords_dict.items(), key=lambda x: x[1].rake_score, reverse=True)
+        keywords_sorted = sorted(keywords_dict.items(), key=lambda x: x[1].rake_score, reverse=True)
+
+        # Set last 2 features
+        # Wiki searcher
+        bin_searcher = Searcher(
+            '/home/paula/Descargas/Memoria/extractkeywords/features/enwiki-latest-all-titles-in-ns0')
+
+        # Tfidf cal
+        tfidf_calc = TfidfCalculator("/home/paula/Descargas/Memoria/extractkeywords/txt/*/",
+                                     [element[0] for element in keywords_sorted])
+        tfidf = tfidf_calc.get_tfidf_feats(self.author)
+
+        # Data for classifier
+        for key, keyword in keywords_sorted:
+            keyword.set_is_in_wiki(1 if bin_searcher.find(key.replace(' ', '_')) else 0)
+            keyword.set_tfidf(tfidf[key])
+
+        return keywords_sorted
 
     def get_keywords(self):
         return self.keywords
 
     def get_selected_keywords(self, model_path):
-        # Wiki searcher
-        bin_searcher = Searcher('/home/paula/Descargas/Memoria/extractkeywords/features/enwiki-latest-all-titles-in-ns0')
-
-        # Tfidf cal
-        tfidf_calc = TfidfCalculator("/home/paula/Descargas/Memoria/extractkeywords/txt/*/",
-                                     [element[0] for element in self.keywords])
-        tfidf = tfidf_calc.get_tfidf_feats(self.author)
-
-        # Data for classifier
-        x = []
+        features = []
+        keys = []
         for key, keyword in self.keywords:
-            keyword.set_is_in_wiki(1 if bin_searcher.find(key.replace(' ', '_')) else 0)
-            keyword.set_tfidf(tfidf[key])
-            x.append(keyword.get_features())
-        return select_keywords([element[0] for element in self.keywords], x, model_path, [self.author for l in self.keywords])
+            features.append(keyword.get_features())
+            keys.append(key)
+        return select_keywords(keys, features, model_path, [self.author for l in self.keywords])
+
+    def select_100_keywords(self):
+        top_100 = self.keywords[0:100]
+        top_100 = shuffle(top_100)
+        result = []
+        for i in range(0, 100):
+            result.append([top_100.keyword[i], i])
+        return result
+
+    def select_rake_keywords(self):
+        return [[keyword.keyword, keyword.rake_score] for keyword in self.keywords]
+
+

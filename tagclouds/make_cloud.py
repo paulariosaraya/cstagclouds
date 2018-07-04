@@ -30,8 +30,13 @@ def make_cloud(selected_keys, model_name, author, filter):
     for n in range(50,90,10):
         print(n)
         selected_top_keys = normalize(selected_keys[-n:])
-        print(selected_top_keys)
-        wc = WordCloud(background_color="white", max_words=n, prefer_horizontal=1, width=1000, height=500, min_font_size=6)
+        wc = WordCloud(background_color="white",
+                       max_words=n,
+                       prefer_horizontal=1,
+                       width=1000,
+                       height=500,
+                       min_font_size=8,
+                       max_font_size=40)
         wc.generate_from_frequencies(selected_top_keys)
 
         plt.imshow(wc.recolor(color_func=grey_color_func, random_state=3), interpolation="bilinear")
@@ -40,3 +45,7 @@ def make_cloud(selected_keys, model_name, author, filter):
         plt.show()
 
         wc.to_file('%s%s_%s_%dtags_grey.png' % (dir, model_name, filter, n))
+
+        # fix
+        # make a rake one
+        # and a random from the top 100

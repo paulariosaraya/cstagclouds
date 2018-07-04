@@ -36,12 +36,18 @@ class PapersSpider(scrapy.Spider):
         pdf_urls = response.xpath('//a[contains(text(), "PDF") or contains(text(), "Download") or '
                                   'contains(@href, ".pdf") or contains(text(), "Download PDF")]/@href').extract()
         if len(pdf_urls) == 0:
-            raise CloseSpider()
-        for url in pdf_urls:
-            yield Request(
-                url=response.urljoin(url),
-                callback=self.save_pdf
-            )
+            new_path = os.getcwd() + "/pdfs/" + self.name
+            if not os.path.exists(new_path):
+                os.makedirs(new_path)
+            path = new_path + "errors_normal.txt"
+            with open(path, 'a') as f:
+                f.write("%s, %s\n" % (self.url, self.year))
+        else:
+            for url in pdf_urls:
+                yield Request(
+                    url=response.urljoin(url),
+                    callback=self.save_pdf
+                )
 
     def save_pdf(self, response):
         new_path = os.getcwd()+"/pdfs/"+self.name
