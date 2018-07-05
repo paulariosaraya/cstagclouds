@@ -1,7 +1,8 @@
 # coding=utf-8
-from extractpapers.spiders.papers_dynamic_spider import PapersDynamicSpider
 from scrapy.crawler import CrawlerProcess
-import os
+
+from extractpapers.paperspiders.spiders.papers_dynamic_spider import PapersDynamicSpider
+from extractpapers.paperspiders.spiders.papers_spider import PapersSpider
 
 
 def main():
@@ -14,7 +15,7 @@ def main():
 
     url = 'https://doi.org/10.1109/LA-WEB.2012.11'
 
-    process.crawl(PapersDynamicSpider(url=url, name=name),
+    process.crawl(PapersSpider(url=url, name=name),
                   url=url,
                   name=name,
                   year=2012)

@@ -24,14 +24,9 @@ class PapersDynamicSpider(scrapy.Spider):
         url = kwargs.get('url')
         if not url:
             raise ValueError('No url given')
-        if not url.startswith('http://') and not url.startswith('https://'):
-            url = 'http://%s/' % url
-        if url.startswith('http://dx.doi.org/doi.org%'):
-            url = re.sub(r'doi.org(?=%)', '', url)
         self.url = url
 
-        self.name = kwargs.get('name').replace(" ", "_") + "/"
-        self.year = kwargs.get('year')
+        self.name = kwargs.get('name')
         self.driver = webdriver.Firefox()
         dispatcher.connect(self.spider_closed, signals.spider_closed)
 
@@ -39,39 +34,59 @@ class PapersDynamicSpider(scrapy.Spider):
         self.driver.close()
 
     def start_requests(self):
-        if self.url.endswith('.pdf'):
-            return [Request(self.url, callback=self.save_pdf, dont_filter=True)]
-        return [Request(self.url, callback=self.parse, dont_filter=True)]
+        for url, year in self.url:
+            if not url.startswith('http://') and not url.startswith('https://'):
+                url = 'http://%s/' % url
+            if url.startswith('http://dx.doi.org/doi.org%'):
+                url = re.sub(r'doi.org(?=%)', '', url)
+            url.replace(" ", "_") + "/"
+            if url.endswith('.pdf'):
+                request = Request(url, callback=self.save_pdf)
+            else:
+                request = Request(url, callback=self.parse)
+            request.meta['year'] = year
+            yield request
 
     def parse(self, response):
+        year = response.meta['year']
         # selenium part of the job
         self.driver.get(response.url)
         try:
-            element = WebDriverWait(self.driver, 10).until(
-                element_to_be_clickable((By.XPATH, '//a[contains(., "PDF") or contains(., "Download")]')))
-            element.click()
-            url = self.driver.find_element_by_xpath('//iframe')
-            yield Request(
-                url=response.urljoin(url.get_attribute("src")),
-                callback=self.save_pdf
-            )
+            cookies = WebDriverWait(self.driver, 20).until(
+                element_to_be_clickable((By.XPATH, '//a[contains(., "Close")]')))
+            cookies.click()
         except TimeoutException:
-            new_path = os.getcwd() + "/pdfs/" + self.name
-            if not os.path.exists(new_path):
-                os.makedirs(new_path)
-            path = new_path + "errors_dynamic.txt"
-            with open(path, 'a') as f:
-                f.write(self.url + "\n")
-            self.driver.close()
+            try:
+                element = WebDriverWait(self.driver, 5).until(
+                    element_to_be_clickable((By.XPATH, '//a[contains(., "PDF") or contains(., "Download")]')))
+                element.click()
+                url = self.driver.find_element_by_xpath('//iframe')
+                request = Request(
+                    url=response.urljoin(url.get_attribute("src")),
+                    callback=self.save_pdf
+                )
+                request.meta['year'] = year
+                yield request
+            except TimeoutException:
+                print("os", os.getcwd() is None)
+                print("name", self.name is None)
+                new_path = os.getcwd() + "/pdfs/" + "test2"
+                if not os.path.exists(new_path):
+                    os.makedirs(new_path)
+                path = new_path + "errors_dynamic.txt"
+                with open(path, 'a') as f:
+                    f.write(self.url + "\n")
+                self.driver.close()
 
     def save_pdf(self, response):
-        new_path = os.getcwd() + "/pdfs/" + self.name
+        year = response.meta['year']
+        new_path = os.getcwd() + "/pdfs/" + "test2"
         if not os.path.exists(new_path):
             os.makedirs(new_path)
         path = new_path + response.url.split('/')[-1]
         if len(path.split('.pdf')) > 1:
-            path = "{}_{}.pdf".format(path.split('.pdf')[0], self.year)
+            path = "{}_{}.pdf".format(path.split('.pdf')[0], year)
         else:
-            path = "{}_{}".format(path, self.year)
+            path = "{}_{}".format(path, year)
         with open(path, 'wb') as f:
             f.write(response.body)
