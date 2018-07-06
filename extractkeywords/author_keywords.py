@@ -1,4 +1,4 @@
-from random import shuffle
+import random
 
 from extractkeywords.features import rake
 from extractkeywords.keyword import Keyword
@@ -75,14 +75,15 @@ class AuthorKeywords:
         return select_keywords(keys, features, model_path, [self.author for l in self.keywords])
 
     def select_100_keywords(self):
-        top_100 = self.keywords[0:100]
-        top_100 = shuffle(top_100)
+        top_100 = random.sample(self.keywords[0:100], 100)
         result = []
-        for i in range(0, 100):
-            result.append([top_100.keyword[i], i])
+        i = 0
+        for key, keyword in top_100:
+            result.append([key, i])
+            i += 1
         return result
 
     def select_rake_keywords(self):
-        return [[keyword.keyword, keyword.rake_score] for keyword in self.keywords]
+        return [[key, keyword.rake_score] for key, keyword in self.keywords]
 
 

@@ -26,7 +26,7 @@ class PapersDynamicSpider(scrapy.Spider):
             raise ValueError('No url given')
         self.url = url
 
-        self.name = kwargs.get('name')
+        self.name = kwargs.get('name').replace(" ", "_") + "/"
         self.driver = webdriver.Firefox()
         dispatcher.connect(self.spider_closed, signals.spider_closed)
 
@@ -70,7 +70,7 @@ class PapersDynamicSpider(scrapy.Spider):
             except TimeoutException:
                 print("os", os.getcwd() is None)
                 print("name", self.name is None)
-                new_path = os.getcwd() + "/pdfs/" + "test2"
+                new_path = os.getcwd() + "/pdfs/" + self.name
                 if not os.path.exists(new_path):
                     os.makedirs(new_path)
                 path = new_path + "errors_dynamic.txt"
@@ -80,7 +80,7 @@ class PapersDynamicSpider(scrapy.Spider):
 
     def save_pdf(self, response):
         year = response.meta['year']
-        new_path = os.getcwd() + "/pdfs/" + "test2"
+        new_path = os.getcwd() + "/pdfs/" + self.name
         if not os.path.exists(new_path):
             os.makedirs(new_path)
         path = new_path + response.url.split('/')[-1]

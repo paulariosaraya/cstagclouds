@@ -4,7 +4,7 @@ import time
 
 from extractkeywords.author_keywords import AuthorKeywords
 from extractkeywords.parser import convert_all
-from extractpapers.main import extract_papers
+from extractpapers.main import extract_papers, extract_dynamic
 from tagclouds.make_cloud import make_cloud
 
 
@@ -16,8 +16,14 @@ def main(url, needs_convert, is_filtered):
     if needs_convert:
         path = '%s/pdfs/%s/' % (os.getcwd(), name)
         if not os.path.exists(path):
-            extract_papers(name)
+            recall, failed_downloads = extract_papers(name)
             print("Finished downloading papers (%s)" % time.strftime("%H:%M:%S"))
+            print("recall = %d", recall)
+            # time.sleep(0.5)
+            # os.execl(sys.executable, sys.executable, *sys.argv)
+            # if recall < 0.6:
+            #     extract_dynamic(name, failed_downloads)
+            #     print("Finished selenium PDFs extraction (%s)" % time.strftime("%H:%M:%S"))
         txt_path = convert_all(path)
         print("Finished converting papers (%s)" % time.strftime("%H:%M:%S"))
     else:
@@ -53,7 +59,6 @@ def main(url, needs_convert, is_filtered):
 
     # make random cloud
     make_cloud(author_keywords.select_100_keywords(), "random", name, filter_type)
-
 
 
 if __name__ == "__main__":

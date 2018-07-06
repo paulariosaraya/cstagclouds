@@ -24,8 +24,8 @@ def normalize(keywords):
 
 
 def make_cloud(selected_keys, model_name, author, filter):
-    dir = '/home/paula/Descargas/Memoria/Examples/%s/' % author
-    make_dir(dir)
+    clouds_dir = '/home/paula/Descargas/Memoria/examples/%s/' % author
+    make_dir(clouds_dir)
 
     for n in range(50,90,10):
         print(n)
@@ -36,7 +36,7 @@ def make_cloud(selected_keys, model_name, author, filter):
                        width=1000,
                        height=500,
                        min_font_size=8,
-                       max_font_size=40)
+                       max_font_size=120)
         wc.generate_from_frequencies(selected_top_keys)
 
         plt.imshow(wc.recolor(color_func=grey_color_func, random_state=3), interpolation="bilinear")
@@ -44,7 +44,7 @@ def make_cloud(selected_keys, model_name, author, filter):
         plt.title("%s with %s (%s)" % (n, model_name, filter))
         plt.show()
 
-        wc.to_file('%s%s_%s_%dtags_grey.png' % (dir, model_name, filter, n))
+        wc.to_file('%s%s_%s_%dtags_grey.png' % (clouds_dir, model_name, filter, n))
 
         # fix
         # make a rake one

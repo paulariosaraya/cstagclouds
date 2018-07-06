@@ -8,34 +8,35 @@ from scrapy.crawler import CrawlerProcess
 from scrapy.exceptions import CloseSpider
 
 from extractpapers.getlinks import get_links
-from extractpapers.paperspiders.spiders.papers_dynamic_spider import PapersDynamicSpider
 from extractpapers.paperspiders.spiders.papers_spider import PapersSpider
+from extractpapers.paperspiders.spiders.papers_dynamic_spider import PapersDynamicSpider
 
 
-def extract_papers(url):
-    name = str(url).split('/')[-1]
-    print(name)
-    print("Start process (%s)" % time.strftime("%H:%M:%S"))
+def extract_papers(name):
     results = get_links.get_papers_links(name)
     print("Finished extracting links (%s)" % time.strftime("%H:%M:%S"))
     print("Total amount of papers: %d" % len(results))
 
     user_agent = 'PRios1.1 (prios@dcc.uchile.cl)'
 
-    # process = CrawlerProcess({
-    #     'USER_AGENT': user_agent
-    # })
-    #
-    # for result, year in results:
-    #     print(result, year)
-    #     process.crawl(PapersSpider(url=result, name=name, year=year),
-    #                   url=result,
-    #                   name=name,
-    #                   year=year)
-    # process.start()
+    process = CrawlerProcess({
+        'USER_AGENT': user_agent
+    })
 
-    print("Finished first PDF extraction (%s)" % time.strftime("%H:%M:%S"))
+    for result, year in results:
+        print(result, year)
+        process.crawl(PapersSpider(url=result, name=name, year=year),
+                      url=result,
+                      name=name,
+                      year=year)
+    process.start()
 
+    failed_downloads = get_failures(name)
+    recall = (len(results) - len(failed_downloads)) / len(results)
+    return recall, failed_downloads
+
+
+def get_failures(name):
     try:
         errors_path = os.getcwd() + "/pdfs/" + name + "/errors_normal.txt"
         print(errors_path)
@@ -45,17 +46,24 @@ def extract_papers(url):
     except Exception as e:
         print(e.args)
         failed_results = []
+    return failed_results
 
-    print("Failures after normal extraction: %d" % len(failed_results))
 
-    if len(failed_results) > 0:
+def extract_dynamic(name, failed_downloads=None):
+    user_agent = 'PRios1.1 (prios@dcc.uchile.cl)'
 
-        process_dynamic = CrawlerProcess({
-            'USER_AGENT': user_agent
-        })
-        process_dynamic.crawl(PapersDynamicSpider(url=failed_results, name=name),
-                              url=failed_results)
-        process_dynamic.start()
+    if failed_downloads is None:
+        failed_downloads = get_failures(name)
+
+    print("Failures after normal extraction: %d" % len(failed_downloads))
+
+    process_dynamic = CrawlerProcess({
+        'USER_AGENT': user_agent
+    })
+    process_dynamic.crawl(PapersDynamicSpider(url=failed_downloads, name=name),
+                          url=failed_downloads,
+                          name=name)
+    process_dynamic.start()
 
     print("Finished selenium PDFs extraction (%s)" % time.strftime("%H:%M:%S"))
 
