@@ -16,7 +16,7 @@ NEWSPIDER_MODULE = 'paperspiders.spiders'
 
 
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
-#USER_AGENT = 'paperspiders (+http://www.yourdomain.com)'
+USER_AGENT = 'PRios1.1 (prios@dcc.uchile.cl)'
 
 # Obey robots.txt rules
 ROBOTSTXT_OBEY = True
@@ -93,4 +93,4 @@ HTTPCACHE_ENABLED = True
 #HTTPCACHE_STORAGE = 'scrapy.extensions.httpcache.FilesystemCacheStorage'
 DOWNLOAD_MAXSIZE = 8388608
 
-LOG_LEVEL = 'INFO'
+LOG_ENABLED = False

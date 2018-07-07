@@ -1,15 +1,15 @@
 import csv
+import os
 import sys
-
 import time
 
-import os
-from scrapy.crawler import CrawlerProcess
-from scrapy.exceptions import CloseSpider
+from scrapy.crawler import CrawlerProcess, CrawlerRunner
+from scrapy.utils.log import configure_logging
+from twisted.internet import reactor, defer
 
 from extractpapers.getlinks import get_links
-from extractpapers.paperspiders.spiders.papers_spider import PapersSpider
 from extractpapers.paperspiders.spiders.papers_dynamic_spider import PapersDynamicSpider
+from extractpapers.paperspiders.spiders.papers_spider import PapersSpider
 
 
 def extract_papers(name):
@@ -17,23 +17,29 @@ def extract_papers(name):
     print("Finished extracting links (%s)" % time.strftime("%H:%M:%S"))
     print("Total amount of papers: %d" % len(results))
 
-    user_agent = 'PRios1.1 (prios@dcc.uchile.cl)'
+    configure_logging()
+    runner = CrawlerRunner()
 
-    process = CrawlerProcess({
-        'USER_AGENT': user_agent
-    })
+    @defer.inlineCallbacks
+    def crawl():
+        for result, year in results:
+            print(result, year)
+            yield runner.crawl(PapersSpider(url=result, name=name, year=year),
+                               url=result,
+                               name=name,
+                               year=year)
+        failed_downloads = get_failures(name)
+        recall = (len(results) - len(failed_downloads)) / len(results)
+        print("Finished downloading papers (%s)" % time.strftime("%H:%M:%S"))
+        print("recall = %f" % recall)
+        if recall < 0.6:
+            yield runner.crawl(PapersDynamicSpider(url=failed_downloads, name=name),
+                               url=failed_downloads,
+                               name=name)
+        reactor.stop()
 
-    for result, year in results:
-        print(result, year)
-        process.crawl(PapersSpider(url=result, name=name, year=year),
-                      url=result,
-                      name=name,
-                      year=year)
-    process.start()
-
-    failed_downloads = get_failures(name)
-    recall = (len(results) - len(failed_downloads)) / len(results)
-    return recall, failed_downloads
+    crawl()
+    reactor.run()
 
 
 def get_failures(name):
@@ -80,8 +86,10 @@ def extract_dynamic(name, failed_downloads=None):
     print("Failures after extraction with selenium: %d" % len(failed_results_selenium))
 
 
-def main(argv):
-    extract_papers(argv)
+def main(url):
+    print("Start process (%s)" % time.strftime("%H:%M:%S"))
+    name = str(url).split('/')[-1]
+    extract_papers(name)
 
 
 if __name__ == "__main__":

@@ -16,14 +16,7 @@ def main(url, needs_convert, is_filtered):
     if needs_convert:
         path = '%s/pdfs/%s/' % (os.getcwd(), name)
         if not os.path.exists(path):
-            recall, failed_downloads = extract_papers(name)
-            print("Finished downloading papers (%s)" % time.strftime("%H:%M:%S"))
-            print("recall = %d", recall)
-            # time.sleep(0.5)
-            # os.execl(sys.executable, sys.executable, *sys.argv)
-            # if recall < 0.6:
-            #     extract_dynamic(name, failed_downloads)
-            #     print("Finished selenium PDFs extraction (%s)" % time.strftime("%H:%M:%S"))
+            extract_papers(name)
         txt_path = convert_all(path)
         print("Finished converting papers (%s)" % time.strftime("%H:%M:%S"))
     else:

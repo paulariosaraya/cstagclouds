@@ -44,7 +44,7 @@ class PapersDynamicSpider(scrapy.Spider):
                 request = Request(url, callback=self.save_pdf)
             else:
                 request = Request(url, callback=self.parse)
-            request.meta['year'] = year
+            request.meta['year'] = year.replace(' ','')
             yield request
 
     def parse(self, response):
@@ -68,8 +68,6 @@ class PapersDynamicSpider(scrapy.Spider):
                 request.meta['year'] = year
                 yield request
             except TimeoutException:
-                print("os", os.getcwd() is None)
-                print("name", self.name is None)
                 new_path = os.getcwd() + "/pdfs/" + self.name
                 if not os.path.exists(new_path):
                     os.makedirs(new_path)

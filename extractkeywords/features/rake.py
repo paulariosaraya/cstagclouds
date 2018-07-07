@@ -34,6 +34,7 @@ url_pattern = re.compile('(http(s)?:)?(//.)?(www\.)?[-a-zA-Z0-9@:%._+~#=]{2,256}
 symbols_pattern = re.compile('[+•@]')
 diacritic_signs = re.compile('[´`ˆ¨]')
 
+
 def is_number(s):
     try:
         float(s) if '.' in s else int(s)

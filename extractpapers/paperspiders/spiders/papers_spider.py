@@ -55,8 +55,8 @@ class PapersSpider(scrapy.Spider):
             os.makedirs(new_path)
         path = new_path+response.url.split('/')[-1]
         if len(path.split('.pdf')) > 1:
-            path = "{}_{}.pdf".format(path.split('.pdf')[0], self.year)
+            path = "{}_{}.pdf".format(path.split('.pdf')[0], self.year).replace(" ", "")
         else:
-            path = "{}_{}".format(path, self.year)
+            path = "{}_{}".format(path, self.year).replace(" ", "")
         with open(path, 'wb') as f:
             f.write(response.body)
