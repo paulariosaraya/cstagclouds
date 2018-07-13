@@ -23,29 +23,24 @@ def normalize(keywords):
     return final_keywords
 
 
-def make_cloud(selected_keys, model_name, author, filter):
+def make_cloud(selected_keys, model_name, author, filter_type, label, n=50):
     clouds_dir = '/home/paula/Descargas/Memoria/examples/%s/' % author
     make_dir(clouds_dir)
 
-    for n in range(50,90,10):
-        print(n)
-        selected_top_keys = normalize(selected_keys[-n:])
-        wc = WordCloud(background_color="white",
-                       max_words=n,
-                       prefer_horizontal=1,
-                       width=1000,
-                       height=500,
-                       min_font_size=8,
-                       max_font_size=120)
-        wc.generate_from_frequencies(selected_top_keys)
+    print(n)
+    selected_top_keys = normalize(selected_keys[-n:])
+    wc = WordCloud(background_color="white",
+                   max_words=n,
+                   prefer_horizontal=1,
+                   width=1000,
+                   height=500,
+                   min_font_size=8,
+                   max_font_size=120)
+    wc.generate_from_frequencies(selected_top_keys)
 
-        plt.imshow(wc.recolor(color_func=grey_color_func, random_state=3), interpolation="bilinear")
-        plt.axis("off")
-        plt.title("%s with %s (%s)" % (n, model_name, filter))
-        plt.show()
+    plt.imshow(wc.recolor(color_func=grey_color_func, random_state=3), interpolation="bilinear")
+    plt.axis("off")
+    plt.title("%s with %s (%s)" % (n, model_name, filter_type))
+    plt.show()
 
-        wc.to_file('%s%s_%s_%dtags_grey.png' % (clouds_dir, model_name, filter, n))
-
-        # fix
-        # make a rake one
-        # and a random from the top 100
+    wc.to_file('%s%s_%s_%s_%dtags_grey.png' % (clouds_dir, label, model_name, filter_type, n))

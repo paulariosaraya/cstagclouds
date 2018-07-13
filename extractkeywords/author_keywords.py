@@ -75,15 +75,16 @@ class AuthorKeywords:
         return select_keywords(keys, features, model_path, [self.author for l in self.keywords])
 
     def select_100_keywords(self):
-        top_100 = random.sample(self.keywords[0:100], 100)
+        top_500 = random.sample(self.keywords[0:500], 500)
         result = []
         i = 0
-        for key, keyword in top_100:
+        for key, keyword in top_500:
             result.append([key, i])
             i += 1
         return result
 
     def select_rake_keywords(self):
-        return [[key, keyword.rake_score] for key, keyword in self.keywords]
+        result = [[key, keyword.rake_score] for key, keyword in self.keywords[::-1]]
+        return result
 
 

@@ -1,6 +1,8 @@
+import glob
 import os
 import sys
 import time
+from random import shuffle
 
 from extractkeywords.author_keywords import AuthorKeywords
 from extractkeywords.parser import convert_all
@@ -8,9 +10,17 @@ from extractpapers.main import extract_papers, extract_dynamic
 from tagclouds.make_cloud import make_cloud
 
 
+def get_all_samples():
+    examples_dir = '/home/paula/Descargas/Memoria/examples/*/'
+    for author_dir in glob.glob(examples_dir):
+        url = author_dir[:-1]
+        main(url, 0, 0)
+
+
 def main(url, needs_convert, is_filtered):
     print("Start process (%s)" % time.strftime("%H:%M:%S"))
     name = str(url).split('/')[-1]
+    print(name)
     needs_convert = int(needs_convert)
     # Convert pdf to txt if needed
     if needs_convert:
@@ -29,11 +39,16 @@ def main(url, needs_convert, is_filtered):
     print("Finished extracting keywords (%s)" % time.strftime("%H:%M:%S"))
 
     # [print(e[0], e[1].rake_score) for e in author_keywords.keywords]
+
+    labels = ["A", "B", "C", "D", "E", "F"]
+    shuffle(labels)
+
     if is_filtered:
         filter_type = "filtered"
     else:
         filter_type = "unfiltered"
     models = ["LinearRegression", "RankSVM", "LambdaMART", "AdaRank"]
+    i = 0
     for model_name in models:
         model_path_author = "/home/paula/Descargas/Memoria/learningtorank/models/%s/%s/%s_model_%s.sav" % (
             filter_type, model_name, model_name[0].lower() + model_name[1:], name)
@@ -44,14 +59,16 @@ def main(url, needs_convert, is_filtered):
                 filter_type, model_name[0].lower() + model_name[1:])
 
         selected = author_keywords.get_selected_keywords(model_path)
-        make_cloud(selected, model_name, name, filter_type)
+        label = labels[i]
+        make_cloud(selected, model_name, name, filter_type, label)
         print("Finished making clouds for %s (%s)" % (model_name, time.strftime("%H:%M:%S")))
+        i += 1
 
     # make rake cloud
-    make_cloud(author_keywords.select_rake_keywords(), "rake", name, filter_type)
+    make_cloud(author_keywords.select_rake_keywords(), "rake", name, filter_type, labels[4])
 
     # make random cloud
-    make_cloud(author_keywords.select_100_keywords(), "random", name, filter_type)
+    make_cloud(author_keywords.select_100_keywords(), "random", name, filter_type, labels[5])
 
 
 if __name__ == "__main__":
