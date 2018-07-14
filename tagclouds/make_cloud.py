@@ -1,7 +1,11 @@
 import matplotlib.pyplot as plt
+import os
 from wordcloud import WordCloud
 
 from extractkeywords.utils import make_dir
+
+__location__ = os.path.realpath(
+    os.path.join(os.getcwd(), os.path.dirname(__file__)))
 
 
 def grey_color_func(word, font_size, position, orientation, random_state=None,
@@ -24,7 +28,9 @@ def normalize(keywords):
 
 
 def make_cloud(selected_keys, model_name, author, filter_type, label, n=50):
-    clouds_dir = '/home/paula/Descargas/Memoria/examples/%s/' % author
+
+    clouds_dir = os.path.join(__location__, 'examples/%s/' % author)
+    print(clouds_dir)
     make_dir(clouds_dir)
 
     print(n)

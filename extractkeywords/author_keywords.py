@@ -9,6 +9,9 @@ from extractkeywords.features.tfidf import TfidfCalculator
 from learningtorank.select_keywords import select_keywords
 from extractkeywords.features.wiki_url import Searcher
 
+__location__ = os.path.realpath(
+    os.path.join(os.getcwd(), os.path.dirname(__file__)))
+
 
 class AuthorKeywords:
     def __init__(self, directory, author, filtered):
@@ -16,9 +19,9 @@ class AuthorKeywords:
         self.dir = directory
         self.papers_count = 0
         if filtered:
-            self.rake_object = rake.Rake("/home/paula/Descargas/Memoria/extractkeywords/features/SmartStoplist.txt", 3, 3, 3)
+            self.rake_object = rake.Rake(os.path.join(__location__, 'features/SmartStoplist.txt'), 3, 3, 3)
         else:
-            self.rake_object = rake.Rake("/home/paula/Descargas/Memoria/extractkeywords/features/SmartStoplist_original.txt", 3, 3, 3)
+            self.rake_object = rake.Rake(os.path.join(__location__, 'features/SmartStoplist_original.txt'), 3, 3, 3)
         self.keywords = []
 
     def extract_keywords(self):
@@ -49,10 +52,10 @@ class AuthorKeywords:
         # Set last 2 features
         # Wiki searcher
         bin_searcher = Searcher(
-            '/home/paula/Descargas/Memoria/extractkeywords/features/enwiki-latest-all-titles-in-ns0')
-
+            os.path.join(__location__, 'features/enwiki-latest-all-titles-in-ns0'))
+        print([element[0] for element in keywords_sorted])
         # Tfidf cal
-        tfidf_calc = TfidfCalculator("/home/paula/Descargas/Memoria/extractkeywords/txt/*/",
+        tfidf_calc = TfidfCalculator(os.path.join(__location__, "txt/*/"),
                                      [element[0] for element in keywords_sorted])
         tfidf = tfidf_calc.get_tfidf_feats(self.author)
 

@@ -9,15 +9,18 @@ from extractkeywords.parser import convert_all
 from extractpapers.main import extract_papers, extract_dynamic
 from tagclouds.make_cloud import make_cloud
 
+__location__ = os.path.realpath(
+    os.path.join(os.getcwd(), os.path.dirname(__file__)))
+
 
 def get_all_samples():
-    examples_dir = '/home/paula/Descargas/Memoria/examples/*/'
+    examples_dir = os.path.join(__location__, 'examples/*/')
     for author_dir in glob.glob(examples_dir):
         url = author_dir[:-1]
-        main(url, 0, 0)
+        make_tag_cloud(url, 0, 0)
 
 
-def main(url, needs_convert, is_filtered):
+def make_tag_cloud(url, needs_convert, is_filtered):
     print("Start process (%s)" % time.strftime("%H:%M:%S"))
     name = str(url).split('/')[-1]
     print(name)
@@ -30,7 +33,9 @@ def main(url, needs_convert, is_filtered):
         txt_path = convert_all(path)
         print("Finished converting papers (%s)" % time.strftime("%H:%M:%S"))
     else:
-        txt_path = '/home/paula/Descargas/Memoria/extractkeywords/txt/{}/'.format(name)
+        txt_path = os.path.join(__location__, 'extractkeywords/txt/{}/'.format(name))
+
+    print(txt_path)
 
     # Get ranked keywords from all the papers
     author_keywords = AuthorKeywords(txt_path, name, is_filtered)
@@ -50,13 +55,13 @@ def main(url, needs_convert, is_filtered):
     models = ["LinearRegression", "RankSVM", "LambdaMART", "AdaRank"]
     i = 0
     for model_name in models:
-        model_path_author = "/home/paula/Descargas/Memoria/learningtorank/models/%s/%s/%s_model_%s.sav" % (
-            filter_type, model_name, model_name[0].lower() + model_name[1:], name)
+        model_path_author = os.path.join(__location__, "learningtorank/models/%s/%s/%s_model_%s.sav" % (
+            filter_type, model_name, model_name[0].lower() + model_name[1:], name))
         if os.path.exists(model_path_author):
             model_path = model_path_author
         else:
-            model_path = "/home/paula/Descargas/Memoria/learningtorank/models/%s/%s_model.sav" % (
-                filter_type, model_name[0].lower() + model_name[1:])
+            model_path = os.path.join(__location__, "learningtorank/models/%s/%s_model.sav" % (
+                filter_type, model_name[0].lower() + model_name[1:]))
 
         selected = author_keywords.get_selected_keywords(model_path)
         label = labels[i]
@@ -71,5 +76,4 @@ def main(url, needs_convert, is_filtered):
     make_cloud(author_keywords.select_100_keywords(), "random", name, filter_type, labels[5])
 
 
-if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2], int(sys.argv[3]))
+make_tag_cloud("https://dblp.uni-trier.de/pers/hd/h/Hogan:Aidan", 0, 0)
