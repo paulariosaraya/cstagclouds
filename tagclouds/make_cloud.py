@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import os
 from wordcloud import WordCloud
 
-from extractkeywords.utils import make_dir
+from cstagclouds.extractkeywords.utils import make_dir
 
 __location__ = os.path.realpath(
     os.path.join(os.getcwd(), os.path.dirname(__file__)))

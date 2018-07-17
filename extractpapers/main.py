@@ -7,9 +7,9 @@ from scrapy.crawler import CrawlerProcess, CrawlerRunner
 from scrapy.utils.log import configure_logging
 from twisted.internet import reactor, defer
 
-from extractpapers.getlinks import get_links
-from extractpapers.paperspiders.spiders.papers_dynamic_spider import PapersDynamicSpider
-from extractpapers.paperspiders.spiders.papers_spider import PapersSpider
+from cstagclouds.extractpapers.getlinks import get_links
+from cstagclouds.extractpapers.paperspiders.spiders.papers_dynamic_spider import PapersDynamicSpider
+from cstagclouds.extractpapers.paperspiders.spiders.papers_spider import PapersSpider
 
 
 def extract_papers(name):

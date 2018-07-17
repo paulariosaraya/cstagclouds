@@ -6,9 +6,9 @@ import numpy as np
 import pyltr
 from sklearn.model_selection import LeaveOneGroupOut, GroupShuffleSplit
 
-from learningtorank.adarank.adarank import AdaRank
-from learningtorank.adarank.metrics import NDCGScorer
-from learningtorank.utils import load_data
+from cstagclouds.learningtorank.adarank.adarank import AdaRank
+from cstagclouds.learningtorank.adarank.metrics import NDCGScorer
+from cstagclouds.learningtorank.utils import load_data
 
 
 def main(filtered, save_model):

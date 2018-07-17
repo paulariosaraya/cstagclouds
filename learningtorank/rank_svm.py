@@ -6,8 +6,8 @@ import sys
 from pysofia.compat import RankSVM
 from sklearn.model_selection import GroupShuffleSplit, LeaveOneGroupOut
 
-from learningtorank.learning_to_rank import LearningToRank
-from learningtorank.utils import load_data, finalize
+from cstagclouds.learningtorank.learning_to_rank import LearningToRank
+from cstagclouds.learningtorank.utils import load_data, finalize
 import pickle
 
 

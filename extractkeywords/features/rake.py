@@ -21,7 +21,7 @@ from __future__ import print_function
 import re
 import operator
 import six
-from extractkeywords.utils import singularize, remove_ligatures
+from cstagclouds.extractkeywords.utils import singularize, remove_ligatures
 from six.moves import range
 from collections import Counter
 

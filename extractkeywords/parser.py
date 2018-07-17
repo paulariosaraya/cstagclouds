@@ -9,7 +9,7 @@ from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFSyntaxError
 
-from extractkeywords.utils import make_dir
+from cstagclouds.extractkeywords.utils import make_dir
 
 
 def convert(filename):

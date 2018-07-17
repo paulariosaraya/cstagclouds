@@ -12,5 +12,5 @@ def select_keywords(words, x, model_path, qids):
         predictions = load_model.predict(np.array(scale(x)))
     result = []
     for i in range(0, len(predictions)):
-        result.append([words[i],predictions[i]])
-    return sorted(result, key = lambda y: int(y[1]))
+        result.append([words[i], predictions[i]])
+    return sorted(result, key=lambda y: int(y[1]))

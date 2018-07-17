@@ -1,13 +1,13 @@
 import random
 
-from extractkeywords.features import rake
-from extractkeywords.keyword import Keyword
+from cstagclouds.extractkeywords.features import rake
+from cstagclouds.extractkeywords.keyword import Keyword
 import glob
 import os
 import re
-from extractkeywords.features.tfidf import TfidfCalculator
-from learningtorank.select_keywords import select_keywords
-from extractkeywords.features.wiki_url import Searcher
+from cstagclouds.extractkeywords.features.tfidf import TfidfCalculator
+from cstagclouds.learningtorank.select_keywords import select_keywords
+from cstagclouds.extractkeywords.features.wiki_url import Searcher
 
 __location__ = os.path.realpath(
     os.path.join(os.getcwd(), os.path.dirname(__file__)))
@@ -53,7 +53,6 @@ class AuthorKeywords:
         # Wiki searcher
         bin_searcher = Searcher(
             os.path.join(__location__, 'features/enwiki-latest-all-titles-in-ns0'))
-        print([element[0] for element in keywords_sorted])
         # Tfidf cal
         tfidf_calc = TfidfCalculator(os.path.join(__location__, "txt/*/"),
                                      [element[0] for element in keywords_sorted])

@@ -5,7 +5,7 @@ import pyltr
 import sys
 from sklearn.model_selection import LeaveOneGroupOut, GroupShuffleSplit
 
-from learningtorank.utils import finalize, load_data
+from cstagclouds.learningtorank.utils import finalize, load_data
 
 import pickle
 

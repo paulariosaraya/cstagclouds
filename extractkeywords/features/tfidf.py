@@ -2,7 +2,7 @@ import glob
 import os
 from sklearn.feature_extraction.text import TfidfVectorizer
 import numpy as np
-from extractkeywords.utils import singularize, remove_ligatures
+from cstagclouds.extractkeywords.utils import singularize, remove_ligatures
 
 
 def pre_process(s):

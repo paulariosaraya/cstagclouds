@@ -7,7 +7,7 @@ import pyltr
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import LeaveOneGroupOut, GroupShuffleSplit
 
-from learningtorank.utils import load_data, finalize
+from cstagclouds.learningtorank.utils import load_data, finalize
 
 
 def main(filtered, save_model):
