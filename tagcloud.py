@@ -92,7 +92,7 @@ def get_tc_keywords(url, is_filtered=0, n=100):
     # Convert pdf to txt if needed
     txt_path = os.path.join(__location__, 'extractkeywords/txt/{}/'.format(name))
     if not os.path.exists(txt_path):
-        path = '%s/pdfs/%s/' % (os.getcwd(), name)
+        path = os.path.join(__location__, 'extractpapers/pdfs/{}/'.format(name))
         if not os.path.exists(path):
             extract_papers(name)
         txt_path = convert_all(path)
@@ -111,7 +111,7 @@ def get_tc_keywords(url, is_filtered=0, n=100):
         filter_type = "filtered"
     else:
         filter_type = "unfiltered"
-    models = ["LinearRegression", "RankSVM", "LambdaMART", "AdaRank"]
+    models = ["LinearRegression", "RankSVM", "LambdaMART"]
     i = 0
     for model_name in models:
         model_path_author = os.path.join(__location__, "learningtorank/models/%s/%s/%s_model_%s.sav" % (

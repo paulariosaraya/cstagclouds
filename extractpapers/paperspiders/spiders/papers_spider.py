@@ -5,6 +5,8 @@ import scrapy
 from scrapy.exceptions import CloseSpider
 from scrapy.http import Request
 
+__location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
+
 
 class PapersSpider(scrapy.Spider):
     name = "papers"
@@ -14,7 +16,6 @@ class PapersSpider(scrapy.Spider):
 
     def __init__(self, *args, **kwargs):
         super(PapersSpider, self).__init__(*args, **kwargs)
-
         url = kwargs.get('url')
         if not url:
             raise ValueError('No url given')
@@ -36,7 +37,7 @@ class PapersSpider(scrapy.Spider):
         pdf_urls = response.xpath('//a[contains(text(), "PDF") or contains(text(), "Download") or '
                                   'contains(@href, ".pdf") or contains(text(), "Download PDF")]/@href').extract()
         if len(pdf_urls) == 0:
-            new_path = os.getcwd() + "/pdfs/" + self.name
+            new_path =  os.path.join(__location__.split("paperspiders")[0], "pdfs/" + self.name)
             if not os.path.exists(new_path):
                 os.makedirs(new_path)
             path = new_path + "errors_normal.txt"
@@ -50,7 +51,7 @@ class PapersSpider(scrapy.Spider):
                 )
 
     def save_pdf(self, response):
-        new_path = os.getcwd()+"/pdfs/"+self.name
+        new_path =  os.path.join(__location__.split("paperspiders")[0], "pdfs/"+self.name)
         if not os.path.exists(new_path):
             os.makedirs(new_path)
         path = new_path+response.url.split('/')[-1]

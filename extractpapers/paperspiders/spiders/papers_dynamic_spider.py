@@ -11,6 +11,9 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.expected_conditions import element_to_be_clickable
 from selenium.webdriver.support.wait import WebDriverWait
 
+__location__ = os.path.realpath(
+    os.path.join(os.getcwd(), os.path.dirname(__file__)))
+
 
 class PapersDynamicSpider(scrapy.Spider):
     name = "papers_dynamic"
@@ -25,7 +28,6 @@ class PapersDynamicSpider(scrapy.Spider):
         if not url:
             raise ValueError('No url given')
         self.url = url
-
         self.name = kwargs.get('name').replace(" ", "_") + "/"
         self.driver = webdriver.Firefox()
         dispatcher.connect(self.spider_closed, signals.spider_closed)
@@ -40,6 +42,8 @@ class PapersDynamicSpider(scrapy.Spider):
             if url.startswith('http://dx.doi.org/doi.org%'):
                 url = re.sub(r'doi.org(?=%)', '', url)
             url.replace(" ", "_") + "/"
+            if url.startswith("https://www.sciencedirect.com/"):
+                self.driver.close()
             if url.endswith('.pdf'):
                 request = Request(url, callback=self.save_pdf)
             else:
@@ -68,7 +72,7 @@ class PapersDynamicSpider(scrapy.Spider):
                 request.meta['year'] = year
                 yield request
             except TimeoutException:
-                new_path = os.getcwd() + "/pdfs/" + self.name
+                new_path =  os.path.join(__location__.split("paperspiders")[0], "pdfs/" + self.name)
                 if not os.path.exists(new_path):
                     os.makedirs(new_path)
                 path = new_path + "errors_dynamic.txt"
@@ -78,7 +82,7 @@ class PapersDynamicSpider(scrapy.Spider):
 
     def save_pdf(self, response):
         year = response.meta['year']
-        new_path = os.getcwd() + "/pdfs/" + self.name
+        new_path = os.path.join(__location__.split("paperspiders")[0], "pdfs/" + self.name)
         if not os.path.exists(new_path):
             os.makedirs(new_path)
         path = new_path + response.url.split('/')[-1]

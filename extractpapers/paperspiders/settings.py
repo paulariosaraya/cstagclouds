@@ -93,4 +93,5 @@ HTTPCACHE_ENABLED = True
 #HTTPCACHE_STORAGE = 'scrapy.extensions.httpcache.FilesystemCacheStorage'
 DOWNLOAD_MAXSIZE = 8388608
 
-LOG_ENABLED = False
+LOG_LEVEL = 'INFO'
+LOG_STDOUT = False

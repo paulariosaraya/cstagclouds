@@ -11,13 +11,16 @@ from cstagclouds.extractpapers.getlinks import get_links
 from cstagclouds.extractpapers.paperspiders.spiders.papers_dynamic_spider import PapersDynamicSpider
 from cstagclouds.extractpapers.paperspiders.spiders.papers_spider import PapersSpider
 
+__location__ = os.path.realpath(
+    os.path.join(os.getcwd(), os.path.dirname(__file__)))
+
 
 def extract_papers(name):
     results = get_links.get_papers_links(name)
     print("Finished extracting links (%s)" % time.strftime("%H:%M:%S"))
     print("Total amount of papers: %d" % len(results))
 
-    configure_logging()
+    USER_AGENT = 'PRios1.1 (prios@dcc.uchile.cl)'
     runner = CrawlerRunner()
 
     @defer.inlineCallbacks
@@ -32,7 +35,7 @@ def extract_papers(name):
         recall = (len(results) - len(failed_downloads)) / len(results)
         print("Finished downloading papers (%s)" % time.strftime("%H:%M:%S"))
         print("recall = %f" % recall)
-        if recall < 0.6:
+        if recall < 0.5:
             yield runner.crawl(PapersDynamicSpider(url=failed_downloads, name=name),
                                url=failed_downloads,
                                name=name)
@@ -44,7 +47,7 @@ def extract_papers(name):
 
 def get_failures(name):
     try:
-        errors_path = os.getcwd() + "/pdfs/" + name + "/errors_normal.txt"
+        errors_path = os.path.join(__location__,"pdfs/" + name + "/errors_normal.txt")
         print(errors_path)
         with open(errors_path, 'r') as f:
             reader = csv.reader(f)
