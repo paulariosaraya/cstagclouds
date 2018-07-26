@@ -2,7 +2,7 @@ from __future__ import division
 
 import numpy as np
 
-from learningtorank.adarank.utils import group_offsets
+from cstagclouds.learningtorank.adarank.utils import group_offsets
 
 
 class Scorer(object):

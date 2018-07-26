@@ -10,7 +10,7 @@ import sys
 
 from sklearn.utils import check_X_y
 
-from learningtorank.adarank.metrics import NDCGScorer
+from cstagclouds.learningtorank.adarank.metrics import NDCGScorer
 
 
 class AdaRank(sklearn.base.BaseEstimator):

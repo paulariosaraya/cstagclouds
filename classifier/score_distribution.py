@@ -15,11 +15,33 @@ def count_scores(path):
     return scores
 
 
-labels, values = zip(*Counter(count_scores('/home/paula/Descargas/cstagclouds/extractkeywords/training/*')).items())
+labels, values = zip(*Counter(count_scores('/home/paula/Descargas/tagclouds-api/cstagclouds/extractkeywords/training/*')).items())
+
+values = [value for _,value in sorted(zip(labels,values))]
+print(values)
+
+
+labels = sorted(labels)
+print(labels)
+
 
 indexes = np.arange(len(labels))
 width = 1
 
-plt.bar(indexes, values, width)
-plt.xticks(indexes + width * 0.5, labels)
+fig, ax = plt.subplots(1, 1)
+barlist = ax.bar(indexes, values, color='#539caf')
+colors = ["#DEC3BE", "#BB7A98", "#613969", "#BC7A98", "#D9A4AC"]
+
+for bar, color in zip(barlist, colors):
+    bar.set_facecolor(color)
+
+ax.yaxis.grid(True, linestyle='-', which='major', color='lightgrey', alpha=0.5)
+ax.set_axisbelow(True)
+plt.xticks(indexes, labels)
+# plt.xticks(indexes + width * 0.5, labels)
+plt.ylabel('Cantidad de keywords')
+plt.xlabel('Puntaje asignado')
+plt.title('Distribución de puntajes')
+
+
 plt.show()

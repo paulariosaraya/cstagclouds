@@ -35,7 +35,7 @@ def extract_papers(name):
         recall = (len(results) - len(failed_downloads)) / len(results)
         print("Finished downloading papers (%s)" % time.strftime("%H:%M:%S"))
         print("recall = %f" % recall)
-        if recall < 0.5:
+        if recall < 0.6:
             yield runner.crawl(PapersDynamicSpider(url=failed_downloads, name=name),
                                url=failed_downloads,
                                name=name)

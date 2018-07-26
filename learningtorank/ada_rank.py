@@ -12,16 +12,15 @@ from cstagclouds.learningtorank.utils import load_data
 
 
 def main(filtered, save_model):
-    if filtered:
-        data_dir = '/home/paula/Descargas/Memoria/extractkeywords/training/*'
-        model_dir = '/home/paula/Descargas/Memoria/learningtorank/models/filtered/'
-    else:
-        data_dir = '/home/paula/Descargas/Memoria/extractkeywords/training_unfiltered/*'
-        model_dir = '/home/paula/Descargas/Memoria/learningtorank/models/unfiltered/'
+    # if filtered:
+    data_dir = '/home/paula/Descargas/tagclouds-api/cstagclouds/extractkeywords/training/*'
+    model_dir = '/home/paula/Descargas/tagclouds-api/cstagclouds/learningtorank/models/unfiltered/'
+    # else:
+    #     data_dir = '/home/paula/Descargas/tagclouds-api/cstagclouds/extractkeywords/training_unfiltered/*'
+    #     model_dir = '/home/paula/Descargas/tagclouds-api/cstagclouds/learningtorank/models/unfiltered/'
 
     x, y, words, qids, rake, groups = (np.array(l) for l in load_data(data_dir))
-    scorer = NDCGScorer(k=5)
-    metric = pyltr.metrics.NDCG(k=90)
+    scorer = NDCGScorer(k=90)
     logo = LeaveOneGroupOut()
 
     print("---- Cross val ----")
@@ -37,7 +36,10 @@ def main(filtered, save_model):
         else:
             model = pickle.load(open('%sAdaRank/adaRank_model_%s.sav' % (model_dir, q_test[0].replace('.txt','')), 'rb'))
         pred_test = model.predict(x_test, q_test)
+        metric = pyltr.metrics.NDCG(len(x_test))
         print('%s' % metric.calc_mean(q_test, y_test, pred_test))
+        # print('%s' % metric.calc_mean(q_test, y_test, rake_test))
+        # print(metric.calc_mean_random(q_test, y_test))
 
     # print("---- Random train test ----")
     # model = AdaRank(max_iter=100, estop=10, scorer=scorer)

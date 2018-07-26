@@ -11,12 +11,8 @@ import pickle
 
 
 def main(filtered, save_model):
-    if filtered:
-        data_dir = '/home/paula/Descargas/Memoria/extractkeywords/training/*'
-        model_dir = '/home/paula/Descargas/Memoria/learningtorank/models/filtered/'
-    else:
-        data_dir = '/home/paula/Descargas/Memoria/extractkeywords/training_unfiltered/*'
-        model_dir = '/home/paula/Descargas/Memoria/learningtorank/models/unfiltered/'
+    data_dir = '/home/paula/Descargas/tagclouds-api/cstagclouds/extractkeywords/training/*'
+    model_dir = '/home/paula/Descargas/tagclouds-api/cstagclouds/learningtorank/models/unfiltered/'
 
     x, y, words, qids, rake, groups = (np.array(l) for l in load_data(data_dir))
     metric = pyltr.metrics.NDCG(k=90)
@@ -28,19 +24,16 @@ def main(filtered, save_model):
         y_train, y_test = y[train_index], y[test_index]
         q_train, q_test = qids[train_index], qids[test_index]
         rake_train, rake_test = rake[train_index], rake[test_index]
-        metric = pyltr.metrics.NDCG(k=len(x_test))
+        metric = pyltr.metrics.NDCG(len(x_test))
         if save_model:
             model = pyltr.models.LambdaMART(
                 metric=metric,
                 n_estimators=2000,
                 learning_rate=0.03,
-                max_features=1,
-                query_subsample=0.5,
-                max_leaf_nodes=10,
-                min_samples_leaf=64
+                query_subsample=0.5
             )
             model.fit(x_train, y_train, q_train)
-            pickle.dump(model, open('%sLambdaMART/lambdaMART_model_%s.sav' % (model_dir, q_test[0].replace('.txt','')), 'wb'))
+            pickle.dump(model, open('%sLambdaMART2/lambdaMART_model_%s.sav' % (model_dir, q_test[0].replace('.txt','')), 'wb'))
         else:
             model = pickle.load(
                 open('%sLambdaMART/lambdaMART_model_%s.sav' % (model_dir, q_test[0].replace('.txt','')), 'rb'))

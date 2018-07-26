@@ -183,6 +183,17 @@ def extract_scores(path):
     return scores
 
 
+def get_gs(path):
+    words = []
+    scores = []
+    with open(path) as scores_file:
+        for line in scores_file:
+            all_feats = line.split(',')
+            words.append(all_feats[0])
+            scores.append(int(all_feats[-1].strip()))
+    return scores
+
+
 def make_dir(filename):
     new_path = os.path.split(filename)[0]
     if not os.path.exists(new_path):

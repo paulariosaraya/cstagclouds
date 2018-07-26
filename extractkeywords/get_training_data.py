@@ -12,12 +12,9 @@ __location__ = os.path.realpath(
 
 
 def main():
-    print("hola")
 
-    scores_dir = os.path.join(__location__, 'scores/Hogan:Aidan.csv')
-    print(scores_dir)
+    scores_dir = os.path.join(__location__, 'scores/*.csv')
     for filename in glob.glob(scores_dir):
-        print(filename)
         name = filename.split('/')[-1].replace('.csv', '')
         txt_path = os.path.join(__location__, 'txt/{}/'.format(name))
 
