@@ -1,6 +1,7 @@
 import glob
 import os
 import time
+import urllib
 from random import shuffle
 import json
 
@@ -84,7 +85,7 @@ def make_tag_cloud(url, needs_convert, is_filtered):
     make_cloud(author_keywords.select_100_keywords(), "random", name, filter_type, labels[5])
 
 
-def get_tc_keywords(url, is_filtered=0, n=100):
+def get_tc_keywords(url, is_filtered=0, n=50):
     print("Start process (%s)" % time.strftime("%H:%M:%S"))
     name = str(url).split('/')[-1]
     print(name)
@@ -121,7 +122,7 @@ def get_tc_keywords(url, is_filtered=0, n=100):
         i += 1
 
     # make rake cloud
-    selected_top_keys["rake"] = normalize(author_keywords.select_rake_keywords()[-n:])
+    selected_top_keys["rake"] = to_json(author_keywords.select_rake_keywords()[-n:])
     return selected_top_keys
 
 

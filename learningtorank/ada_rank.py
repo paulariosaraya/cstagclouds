@@ -23,26 +23,26 @@ def main(filtered, save_model):
     scorer = NDCGScorer(k=90)
     logo = LeaveOneGroupOut()
 
-    print("---- Cross val ----")
-    for train_index, test_index in logo.split(x, y, groups):
-        x_train, x_test = x[train_index], x[test_index]
-        y_train, y_test = y[train_index], y[test_index]
-        q_train, q_test = qids[train_index], qids[test_index]
-        rake_train, rake_test = rake[train_index], rake[test_index]
-        if save_model:
-            model = AdaRank(max_iter=100, estop=10, scorer=scorer)
-            model.fit(x_train, y_train, q_train)
-            pickle.dump(model, open('%sAdaRank/adaRank_model_%s.sav' % (model_dir, q_test[0].replace('.txt','')), 'wb'))
-        else:
-            model = pickle.load(open('%sAdaRank/adaRank_model_%s.sav' % (model_dir, q_test[0].replace('.txt','')), 'rb'))
-        pred_test = model.predict(x_test, q_test)
-        metric = pyltr.metrics.NDCG(len(x_test))
-        print('%s' % metric.calc_mean(q_test, y_test, pred_test))
-        # print('%s' % metric.calc_mean(q_test, y_test, rake_test))
-        # print(metric.calc_mean_random(q_test, y_test))
+    # print("---- Cross val ----")
+    # for train_index, test_index in logo.split(x, y, groups):
+    #     x_train, x_test = x[train_index], x[test_index]
+    #     y_train, y_test = y[train_index], y[test_index]
+    #     q_train, q_test = qids[train_index], qids[test_index]
+    #     rake_train, rake_test = rake[train_index], rake[test_index]
+    #     if save_model:
+    #         model = AdaRank(max_iter=100, estop=10, scorer=scorer)
+    #         model.fit(x_train, y_train, q_train)
+    #         pickle.dump(model, open('%sAdaRank/adaRank_model_%s.sav' % (model_dir, q_test[0].replace('.txt','')), 'wb'))
+    #     else:
+    #         model = pickle.load(open('%sAdaRank/adaRank_model_%s.sav' % (model_dir, q_test[0].replace('.txt','')), 'rb'))
+    #     pred_test = model.predict(x_test, q_test)
+    #     metric = pyltr.metrics.NDCG(len(x_test))
+    #     print('%s' % metric.calc_mean(q_test, y_test, pred_test))
+    #     # print('%s' % metric.calc_mean(q_test, y_test, rake_test))
+    #     # print(metric.calc_mean_random(q_test, y_test))
 
-    # print("---- Random train test ----")
-    # model = AdaRank(max_iter=100, estop=10, scorer=scorer)
+    print("---- Random train test ----")
+    model = AdaRank(max_iter=100, estop=10, scorer=scorer)
     # gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=randint(0,30))
     # for train_index, test_index in gss.split(x, y, groups=groups):
     #     x_train, x_test = x[train_index], x[test_index]
@@ -60,10 +60,10 @@ def main(filtered, save_model):
     #     print('Random ranking:', metric.calc_mean_random(q_test, y_test))
     #     print('Our model:', metric.calc_mean(q_test, y_test, pred_test))
     #     print('Rake:', metric.calc_mean(q_test, y_test, rake_test))
-    #
-    # print("---- Finalize ----")
-    # model.fit(x, y, qids)
-    # pickle.dump(model, open("%sadarank_model.sav" % model_dir, 'wb'))
+
+    print("---- Finalize ----")
+    model.fit(x, y, qids)
+    pickle.dump(model, open("%sadaRank_model.sav" % model_dir, 'wb'))
 
 
 if __name__ == "__main__":
