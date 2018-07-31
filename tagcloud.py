@@ -5,6 +5,8 @@ import urllib
 from random import shuffle
 import json
 
+import re
+
 from cstagclouds.extractkeywords.author_keywords import AuthorKeywords
 from cstagclouds.extractkeywords.parser import convert_all
 from cstagclouds.extractpapers.main import extract_papers
@@ -12,6 +14,13 @@ from cstagclouds.tagclouds.make_cloud import make_cloud, normalize
 
 __location__ = os.path.realpath(
     os.path.join(os.getcwd(), os.path.dirname(__file__)))
+
+
+def clean_name(raw_name):
+    last, first = str(raw_name).split('/')[-1].split(':')
+    name = ("%s %s" % (first, last))
+    name = re.sub(r'=([a-zA-Z])(acute|uml|slash|grave|tilde)=', '\g<1>', name)
+    return name.replace('_', ' ').replace('=', ' ').strip()
 
 
 def to_json(keywords):
