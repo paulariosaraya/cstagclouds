@@ -134,15 +134,3 @@ def get_tc_keywords(url, is_filtered=0, n=50):
     selected_top_keys["rake"] = to_json(author_keywords.select_rake_keywords()[-n:])
     return selected_top_keys
 
-
-# authors = ["https://dblp.uni-trier.de/pers/hd/b/Baloian:Nelson", "https://dblp.uni-trier.de/pers/hd/b/Barbay:J=eacute=r=eacute=my",
-#            "https://dblp.uni-trier.de/pers/hd/b/Bastarrica:M=_Cecilia", "https://dblp.uni-trier.de/pers/hd/b/Barcel=oacute=:Pablo",
-#            "https://dblp.uni-trier.de/pers/hd/b/Bergel:Alexandre", "https://dblp.uni-trier.de/pers/hd/b/Bustos:Benjamin",
-#            "https://dblp.uni-trier.de/pers/hd/g/Gutierrez:Claudio", "https://dblp.uni-trier.de/pers/hd/h/Hevia:Alejandro",
-#            "https://dblp.uni-trier.de/pers/hd/h/Hitschfeld=Kahler:Nancy", "https://dblp.uni-trier.de/pers/hd/h/Hogan:Aidan",
-#            "https://dblp.uni-trier.de/pers/hd/n/Navarro:Gonzalo", "https://dblp.uni-trier.de/pers/hd/o/Ochoa:Sergio_F=",
-#            "https://dblp.uni-trier.de/pers/hd/o/Olmedo:Federico", "https://dblp.uni-trier.de/pers/hd/p/P=eacute=rez_0001:Jorge"
-#            "https://dblp.uni-trier.de/pers/hd/p/Pino:Jos=eacute=_A=", "https://dblp.uni-trier.de/pers/hd/p/Poblete:Barbara",
-#            "https://dblp.uni-trier.de/pers/hd/p/Poblete:Patricio_V=", "https://dblp.uni-trier.de/pers/hd/r/Rivara:Mar=iacute=a_Cecilia",
-#            "https://dblp.uni-trier.de/pers/hd/s/S=aacute=nchez:Jaime", "https://dblp.uni-trier.de/pers/hd/s/Simmonds:Jocelyn",
-#            "https://dblp.uni-trier.de/pers/hd/t/Tanter:=Eacute=ric"]

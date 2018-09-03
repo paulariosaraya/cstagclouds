@@ -30,7 +30,7 @@ width = 1
 
 fig, ax = plt.subplots(1, 1)
 barlist = ax.bar(indexes, values, color='#539caf')
-colors = ["#DEC3BE", "#BB7A98", "#613969", "#BC7A98", "#D9A4AC"]
+colors = ["#BB7A98", "#BB7A98", "#BB7A98", "#BB7A98", "#BB7A98"]
 
 for bar, color in zip(barlist, colors):
     bar.set_facecolor(color)
@@ -41,7 +41,6 @@ plt.xticks(indexes, labels)
 # plt.xticks(indexes + width * 0.5, labels)
 plt.ylabel('Cantidad de keywords')
 plt.xlabel('Puntaje asignado')
-plt.title('Distribución de puntajes')
 
 
 plt.show()

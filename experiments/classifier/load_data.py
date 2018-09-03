@@ -31,14 +31,15 @@ def divide_classes(directory, new_dir):
 def load_data(directory, threshold):
     data = {}
     # data['word'] = []
-    # data['RAKE'] = []
+    data['RAKE'] = []
     data['tf-idf'] = []
     data['¿Está en wikipedia?'] = []
     data['Proporción de apariciones'] = []
-    # data['Primera aparición'] = []
-    # data['Última aparición'] = []
-    # data['Diferencia años'] = []
+    data['Primera aparición'] = []
+    data['Última aparición'] = []
+    data['Diferencia años'] = []
     data['Longitud de la frase'] = []
+    data['Profundidad de frase'] = []
     # data['Puntaje'] = []
     all_data = []
     for score_path in glob.glob(directory):
@@ -46,33 +47,35 @@ def load_data(directory, threshold):
             for line in paper_file:
                 line = line.strip().split(',')
                 # data['Puntaje'].append(int(line[-1]))
+                line[9] = float(line[8])
                 line[8] = int(line[7])
                 line[7] = int(line[6])-int(line[5])
                 all_data.append(line[1:])
     # min_max_scaler = preprocessing.StandardScaler()
     # all_data = min_max_scaler.fit_transform(all_data)
     for line in all_data:
-        git # data['RAKE'].append(float(line[0]))
+        data['RAKE'].append(float(line[0]))
         data['tf-idf'].append(float(line[1]))
         data['¿Está en wikipedia?'].append(int(line[2]))
         data['Proporción de apariciones'].append(float(line[3]))
-        # data['Primera aparición'].append(int(line[4]))
-        # data['Última aparición'].append(int(line[5]))
-        # data['Diferencia años'].append(float(line[6]))
-        data['Longitud de la frase'].append(float(line[7]))
+        data['Primera aparición'].append(int(line[4]))
+        data['Última aparición'].append(int(line[5]))
+        data['Diferencia años'].append(int(line[6]))
+        data['Longitud de la frase'].append(int(line[7]))
+        data['Profundidad de frase'].append(float(line[8]))
     return pd.DataFrame(data)
 
 
-dataset = load_data('/home/paula/Descargas/tagclouds-api/cstagclouds/extractkeywords/training/*', 2)
+dataset = load_data('/home/paula/Descargas/tagclouds-api/cstagclouds/extractkeywords/training2/*', 2)
 print(dataset.shape)
 print(dataset.head(20))
 print(dataset.describe())
 # print(dataset.groupby('Puntaje').size())
 
-# plts = dataset.plot(kind='box', subplots=True, layout=(3,3), sharex=False, sharey=False, fontsize=7)
-# plt.show()
+plts = dataset.plot(kind='box', subplots=True, layout=(3,3), sharex=False, sharey=False, fontsize=7)
+plt.show()
 
-dataset.hist(figsize=(11,11), color="#613969")
+dataset.hist(figsize=(11,11), color="#613969", align='mid')
 plt.show()
 # #
 # pd.scatter_matrix(dataset, figsize=(11,11))
