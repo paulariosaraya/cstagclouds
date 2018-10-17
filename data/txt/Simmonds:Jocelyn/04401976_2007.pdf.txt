@@ -1,0 +1,3535 @@
+Seventh International Conference on Formal Methods in Computer-Aided Design
+
+Exploiting Resolution Proofs to Speed Up LTL
+
+Vacuity Detection for BMC
+
+Jocelyn Simmonds∗, Jessica Davies∗, Arie Gurﬁnkel† and Marsha Chechik∗
+
+∗University of Toronto, Toronto, ON M5S 3G4, Canada.
+
+Email: {jsimmond,jdavies,chechik}@cs.toronto.edu
+
+†SEI at Carnegie Mellon University, Pittsburgh, PA 15213-2612, USA.
+
+Email: arie@sei.cmu.edu
+
+Abstract—When model-checking reports that a property holds
+on a model, vacuity detection increases user conﬁdence in this
+result by checking that the property is satisﬁed in the intended
+way. While vacuity detection is effective, it is a relatively expensive
+technique requiring many additional model-checking runs. We
+address the problem of efﬁcient vacuity detection for Bounded
+Model Checking (BMC) of LTL properties, presenting three partial 
+vacuity detection methods based on the efﬁcient analysis of the
+resolution proof produced by a successful BMC run. In particular,
+we deﬁne a characteristic of resolution proofs – peripherality – and
+prove that if a variable is a source of vacuity, then there exists a
+resolution proof in which this variable is peripheral. Our vacuity
+detection tool, VaqTree, uses these methods to detect vacuous
+variables, decreasing the total number of model-checking runs
+required to detect all sources of vacuity.
+
+I. INTRODUCTION
+
+Model-checking [1] is a widely-used automated technique
+for veriﬁcation of both hardware and software artifacts that
+checks whether a temporal logic property is satisﬁed by a ﬁnitestate 
+model of the artifact. If the model does not satisfy the
+property, a counterexample, which can aid in debugging, is
+produced. If the model does satisfy the property, no information
+about why it does so is provided by the model-checker alone.
+A positive answer without any additional information can be
+misleading, since a property may be satisﬁed in a way that
+was not intended. For instance, a property “every request is
+eventually acknowledged” is satisﬁed in an environment that
+never generates requests.
+
+Vacuity detection [2]–[5] is an automatic sanity check that
+can be applied after a positive model-checking run in order to
+gain conﬁdence that the model and the property capture the
+desired behaviours. Informally, a property is said to be vacuous
+if it has a subformula which is not relevant to its satisfaction,
+or if the property itself is a tautology. Conversely, a property is
+satisﬁed non-vacuously if every part of the formula is important
+– even a slight change to the formula affects its satisfaction.
+
+In this paper, we focus on vacuity detection for SAT-based
+Bounded Model Checking (BMC). Given a BMC problem with
+a particular bound, we wish to determine if the property holds
+vacuously on the model up to this bound. In this context, a naive
+method for detecting vacuity is to replace subformulas of the
+temporal logic property with unconstrained boolean variables
+and run BMC for each such substitution. If the property with
+some substitution still holds on the model, the property is
+
+vacuous. This naive approach is expensive, since in the worst
+case it requires as many model-checking runs as there are
+subformulas in the property. Our goal is to reduce the number
+of model-checking runs required to detect vacuity. We do
+this by detecting some vacuity through novel and inexpensive
+techniques reported in this paper, and complete the method by
+running the naive algorithm on the remaining atomic subformulas.
+ The key to our technique is that SAT-based BMC can
+automatically provide useful information (a resolution proof)
+beyond a decision whether the property holds on the model; we
+exploit such proofs for partial vacuity detection.
+
+In SAT-based BMC, the property and the behavior of the
+model are encoded in a propositional theory, such that the
+theory is satisﬁable if and only if the formula does not hold.
+When the property does hold, a DPLL-based SAT solver can
+produce a resolution proof that derives false from a subset of
+the clauses in the theory called the UNSAT core. Intuitively,
+the resolution proof provides an explanation why the property
+is not falsiﬁed by the model, and the UNSAT core determines
+the relevant parts of the model and the property [6].
+
+In this paper, we develop three methods of increasing precision 
+(irrelevance, local irrelevance and peripherality) to analyze 
+the resolution proof to achieve partial vacuity detection.
+ These algorithms are used by our vacuity detection tool,
+VaqTree, in order to reduce the number of model-checking runs
+required to ﬁnd all sources of vacuity, thus reducing execution
+times. Irrelevance and local irrelevance detect vacuity based
+on which variables appear in the UNSAT core, and in which
+locations. However, as these methods only examine the UNSAT
+core, their precision is limited. The peripherality algorithm
+examines the structure of the resolution proof, identifying as
+vacuous those variables that are not necessary or central to the
+derivation of false. This method is as precise as can be achieved
+through analyzing a single resolution proof, and its running
+time is linear in the size of the resolution proof and the number
+of variables in the property. Our experience shows that local
+irrelevance is the ideal candidate for replacing naive vacuity.
+
+The remainder of the paper is organized as follows. Sec. II
+presents some required background, followed, in Sec. III by
+our deﬁnition of vacuity, the naive algorithm for LTL vacuity
+detection using BMC, and an overview of work in the vacuity
+detection ﬁeld. Sec. IV presents the three algorithms that detect
+vacuity by analyzing a resolution proof. Our experimental
+
+0-7695-3023-0/07 $25.00 © 2007 IEEE
+DOI 10.1109/.16
+
+3
+
+results are presented in Sec. V. We conclude with a summary,
+additional related work, and suggestions for future work in
+Sec. VI.
+
+II. BACKGROUND
+
+In this section, we review bounded model-checking and
+
+resolution proofs.
+
+A. Bounded Model-Checking
+
+Bounded model-checking (BMC) [7] is a method for determining 
+whether a linear temporal logic (LTL) formula ϕ holds
+on a ﬁnite state system represented by a Kripke structure K up
+to a ﬁnite number of steps. An instance of a BMC problem,
+denoted by BMCk(K, ϕ), is whether K |=k ϕ, where |=k is
+the k-depth satisfaction relation. An informal description of
+LTL formulas, Kripke structures and BMC is given in [8], and
+detailed deﬁnitions can be found in [1], [7].
+
+To determine whether K |=k ϕ, the problem is converted
+to a propositional formula Φ (see [7], [9], [10]) which is
+satisﬁable if and only if there exists a length-k counterexample
+to K |=k ϕ. Φ is then given to a SAT solver which decides its
+satisﬁability. The propositional encoding represents the behavior 
+of K up to k steps with a path constraint CLK , and encodes
+all counterexamples to ϕ of length k in an error constraint
+CLe. Therefore, if the theory CLK ∪ CLe is satisﬁable, there
+is a path through K which obeys the transition relation and
+falsiﬁes ϕ. The value of each variable v of K at each time step
+is represented using new boolean variables vi (0 ≤ i ≤ k),
+called timed variables.
+
+The transition relation can be represented symbolically by
+a propositional formula over the variables V and primed variables 
+V ′ (which represent the variables in the next state). For
+example, in the model in Fig. 1(a), the transition relation is
+represented by the formula R = (p ∧ ¬q ∧ ¬p′ ∧ q′) ∨ (¬p ∧
+q ∧ ¬p′ ∧ q′). The path constraint is obtained by substituting
+the timed variables Vi for V in R, and replacing V ′ by the
+timed variables for the next step, Vi+1. This is repeated for
+each 0 ≤ i < k, and the resulting propositional formulas are
+conjoined along with a formula representing the initial state [7].
+In Fig. 1(a), if k = 1,
+
+CLK = (p0 ∧ ¬q0) ∧ ((p0 ∧ ¬q0 ∧ ¬p1 ∧ q1)
+
+∨(¬p0 ∧ q0 ∧ ¬p1 ∧ q1))
+
+CLe is encoded according to a recursive procedure which removes 
+the temporal and logical operators from the property [7],
+e.g., the algorithm encodes ϕ = Gp, where p is a propositional
+variable, expanded up to k = 2, by the formula ¬p0 ∨¬p1 ∨¬p2.
+After the boolean formulas for the path and error constraints
+are calculated, they are converted to Conjunctive Normal Form
+(CNF) before being passed to a SAT solver. If the solver reports
+that CLK ∪ CLe is unsatisﬁable, it means that there is no
+length-k counterexample to ϕ; otherwise, a satisfying assignment 
+is returned. When a DPLL-based SAT solver processes
+an unsatisﬁable theory, a resolution derivation of false (or the
+empty clause) is implicitly constructed [11], [12]. This resolution 
+proof is used to verify that false can indeed be derived from
+CLK ∪ CLe [13].
+
+B. Resolution Proofs
+
+Resolution is an inference rule that is applied to propositional 
+clauses to produce logical consequences. A clause is
+a disjunction of boolean variables and their negations. For
+example, (v1 ∨ ¬v2 ∨ v5) is a clause stating that at least
+one of v1, ¬v2 or v5 must be true. The resolution rule takes
+two clauses, where one contains a variable v and the other –
+its negation ¬v, and produces a clause containing the union
+of the two clauses minus v and ¬v. For example, resolving
+(v1∨¬v2∨v5) and (v2∨v6) produces the resolvent (v1∨v5∨v6).
+A resolution proof Π is a directed acyclic graph whose nodes
+are labeled by propositional clauses. Π represents a tree of
+resolutions between the clauses labeling its nodes. Its roots are
+the nodes with no parents; otherwise, all nodes have exactly
+two parents. The nodes with no children are called the leaves.
+For example, the roots of resolution proof Π in Fig. 1(b) are
+Roots(Π) = {(¬r0), (r0 ∨ p0), (¬p0 ∨ q0), (¬p0 ∨ ¬q0), (p0)},
+and the leaf of Π is the empty clause,i.e., Leaf (Π) = false.
+Given a non-root node labeled by the clause c, and the labels 
+of its parents, c1 and c2, c is the resolvent since it has
+been produced by resolving c1 and c2 on some variable v.
+A resolution proof Π is a proof of unsatisﬁability of a set of
+clauses A if and only if all roots of Π belong to A, and one
+of the leaves of Π is the empty clause. For example, Fig. 1(b)
+shows a resolution proof of the unsatisﬁability of Roots(Π). If
+a propositional theory in CNF is unsatisﬁable, an UNSAT core
+is an unsatisﬁable subset of its clauses.
+
+Given two disjoint sets of clauses A and B, a variable v is
+said to be local to A if and only if v appears in A but does
+not appear in B, and v is said to be global if it appears in both
+A and B. In Fig. 1(b), if Roots(Π) = A ∪ B, where A =
+{(¬r0), (r0 ∨ p0), (¬p0 ∨ q0)} and B = {(¬p0 ∨ ¬q0), (p0)},
+then r0 is local to A, and the rest are global.
+
+III. DEFINING VACUITY
+
+This paper uses the following deﬁnition of vacuity.
+
+Deﬁnition 1 Let K be a Kripke structure, ϕ be a formula
+satisﬁed by K (i.e., K |= ϕ), and p be a variable. Then, ϕ
+is p-vacuous in K iff ϕ[p ← x] is satisﬁed by K, where x is a
+variable not occurring in K or in ϕ.
+
+We use ϕ[p ← x] to indicate that all occurrences of p in ϕ
+
+are replaced by x.
+Similarily, it is possible to deﬁne vacuity in the BMC setting.
+Deﬁnition 2 Let K be a Kripke structure, ϕ be a formula s.t.
+K |=k ϕ, and p be a variable. ϕ is k-step p-vacuous iff K |=k
+ϕ[p ← x], where x is a variable not occurring in K or in ϕ.
+
+If ϕ is k-step p-vacuous, we call p a k-step vacuous variable.
+A property ϕ is k-step vacuous if and only if ϕ contains a k-step
+vacuous variable. Therefore, our techniques aim to ﬁnd the kstep 
+vacuous variables of ϕ. The qualiﬁer “k-step” is omitted in
+the remainder of the paper but should be understood implicitly
+in the BMC context.
+
+In the remainder of the paper, we avoid referring to k-vacuity,
+focusing instead on those variables p that are used to prove that
+a property is k-vacuous. When we say that a property ϕ is pvacuous 
+in BMCk(K, ϕ), it means that ϕ is k-vacuous, and p is
+
+4
+
+(¬r0)
+
+(r0 ∨ p0)
+
+(¬p0 ∨ q0)
+
+(¬p0 ∨ ¬q0)
+
+(p0)
+
+(p0)
+
+(q0)
+
+(b)
+
+(p0)
+
+(¬p0, q1)
+
+(x1, ¬q1)
+
+(¬x1)
+
+(¬p0)
+
+()
+
+q1
+
+(c)
+
+¬q1
+
+()
+
+(a) A Kripke structure; (b) A resolution proof for EXAMPLE 2; (c) A resolution proof for EXAMPLE 1.
+
+s0
+
+{p}
+
+s1
+
+{q}
+
+(a)
+Fig. 1.
+
+such that K |=k ϕ[p ← x], where x is a new unconstrained
+variable of K.
+
+Def. 1 suggests a sound and complete algorithm for vacuity
+detection: for each propositional variable p in ϕ, run BMC on
+ϕ[p ← x], where x is a variable that does not appear in K and
+ϕ. If K |=k ϕ[p ← x] for some p, then ϕ is k-step vacuous.
+We refer to this algorithm as naive. Its drawback is that it may
+require as many model-checking runs as there are propositional
+variables in ϕ. Defs. 1 and 2 can be generalized to vacuity in
+arbitrary (not necessarily atomic) subformulas. This follows
+from the fact that a subformula is vacuous iff it is mutually
+vacuous in all of its atomic propositions [14, Th. 9], and that
+the deﬁnitions can be easily extended to mutual vacuity. For
+example, if ϕ contains subformula θ = p ∧ q, and p and q are
+mutually vacuous, then we can deduce that θ is vacuous as well.
+
+We now review some of the alternative deﬁnitions of vacuity
+and their algorithms. The ﬁrst attempt to formulate and automate 
+vacuity detection is due to Beer et al. [2]. They consider a
+property ϕ to be vacuous if ϕ contains a subformula ψ such that
+replacing ψ by any other formula does not affect the satisfaction
+of ϕ. Applying this deﬁnition directly would require an inﬁnite
+number of subformula replacements, precluding a practical implementation.
+ However, Beer et al. show that to detect vacuity
+w.r.t. a single occurrence of a subformula ψ in w-ACTL, it is
+sufﬁcient to replace ψ with only true and false. This was later
+extended to CTL* by Kupferman and Vardi [3]. Purandare and
+Somenzi [4] showed how to speed up subformula vacuity by
+analyzing the parse tree of a CTL property.
+
+Armoni et al. [5] generalized the above syntactic deﬁnition 
+of vacuity by introducing universal quantiﬁcation, i.e.,
+∀x · ϕ[ψ ← x]. Based on the domain of x, three notions of
+vacuity are obtained, the most robust of which being trace
+vacuity. Gurﬁnkel and Chechik [15] extended Armoni’s definition 
+of vacuity to CTL*, thus uniformly capturing CTL
+and LTL. Armoni et al. also analyzed the syntactic structure
+of the property in order to avoid checking the operands of
+subformulas that are known to be vacuous. Such optimizations
+complement our techniques, which focus on detecting vacuous
+atomic subformulas.
+
+Namjoshi [16] deﬁnes a somewhat different notion of vacuity,
+ also based on a proof derived from a successful model
+checking run. According to Namjoshi, a property should only
+be considered vacuous if every proof of why it holds on the
+model exhibits vacuity. This deﬁnition of vacuity coincides with
+the deﬁnition of [5], [15] for a subset of LTL. Our methods
+efﬁciently examine proofs derived from model-checking runs,
+but are able to detect vacuity as deﬁned by [2], [5], [15], [17].
+Finally, we cannot empirically compare our techniques, since
+
+no experimental results are provided in [16].
+
+Our deﬁnition of vacuity is syntactic, and in this respect, it
+is similar to the original deﬁnition of Beer et al. [2]. However,
+Def. 1 is stronger, and is equivalent to the semantic deﬁnition
+of Armoni et al. [5], as shown by Gurﬁnkel and Chechik [15].
+
+IV. EXPLOITING RESOLUTION PROOFS
+
+In Sec. III, we discussed the existence of a sound and complete 
+vacuity detection algorithm for BMC, which requires as
+many model-checking runs as there are propositional variables
+in the property being checked. We propose a new vacuity
+detection strategy: ﬁrst detect partial vacuity using inexpensive
+techniques and then complete the analysis using extra modelchecking 
+runs. Since we are interested in replacing expensive
+model-checking runs by inexpensive partial vacuity detection
+methods, we limit ourselves to considering the output of the
+original model-checking run on BMCk(K, ϕ), i.e.,CLK ∪ CLe.
+This run provides us with a single resolution proof to analyze,
+but in general, there may be many ways to derive the empty
+clause from different subsets of BMCk(K, ϕ). Any method that
+only examines one of these derivations is inherently incomplete,
+ in the sense that a property may be p-vacuous but there
+is no way of determining this based on a given resolution
+proof. For example, consider a model that is composed of
+two completely disjoint sub-models, running in parallel, i.e.,
+K = K1 k K2. Suppose that K1 satisﬁes Gp, K2 satisﬁes
+Gq, and that both do so non-vacuously. Then the property
+ϕ = Gp ∨ Gq holds on K p-vacuously and q-vacuously.
+However, one of the possible resolution proofs showing that ϕ
+holds proves that Gp holds non-vacuously on K1. Thus, it is
+impossible to determine that ϕ is vacuous in p from this proof.
+Any method based on examining only one resolution proof
+cannot prove the absence of vacuity, since another resolution
+proof, showing the property to be vacuous, might exist.
+
+In this section, we introduce three algorithms of increasing
+precision for partial vacuity detection, based on examining
+the UNSAT core (irrelevance and local irrelevance) and the
+resolution proof produced by BMC (peripherality).
+
+A. Examining UNSAT cores
+
+Given a resolution proof that BMCk(K, ϕ) is unsatisﬁable,
+we can sometimes cheaply determine that the similar theory
+BMCk(K, ϕ[p ← x]) is also unsatisﬁable, and therefore, that
+the property is p-vacuous. In this section, we consider how to
+determine that BMCk(K, ϕ[p ← x]) is unsatisﬁable given that
+BMCk(K, ϕ) is unsatisﬁable, using only an UNSAT core.
+
+1) Irrelevance: Intuitively, any variable that does not appear
+in the UNSAT core does not contribute to the reason why ϕ
+holds on K, so it can be considered irrelevant.
+
+5
+
+Deﬁnition 3 Let K be a model, and ϕ an LTL formula. Assume
+that Π is an UNSAT core of BMCk(K, ϕ) witnessing that K |=k
+ϕ. Then, p is irrelevant with respect to BMCk(K, ϕ) and Π iff pi
+does not appear in Π for any time instance i.
+
+If a variable is irrelevant, it is also vacuous, as shown by the
+following theorem. The proofs of this and other theorems are
+given in Appendix A.
+Theorem 1 If p is irrelevant with respect to BMCk(K, ϕ) and
+Π, then ϕ is k-step p-vacuous.
+
+Def. 3 provides an algorithm to detect some vacuous variables.
+ However, a variable can appear in the UNSAT core and
+still be vacuous, as demonstrated by the following example.
+
+EXAMPLE 1. Consider a Kripke structure K with variables p
+and q given by the constraints Init = p ∧ q, R = p ⇒ q′,
+which mean that the initial state is labeled by {p, q}, and the
+transition relation is expressed by the propositional formula
+p ⇒ q′ over unprimed and primed variables. Let ϕ = X(p ∨ q)
+be the property to check. ϕ is p-vacuous since it is satisﬁed 
+simply because q is true in any successor of the initial
+state. The CNF encoding of the one-step BMC problem is
+CLK = {(p0 ∧ q0), (p0 ⇒ q1)} = {(p0), (q0), (¬p0, q1)},
+CLe = {(¬p1), (p1, ¬q1)}. In this case, the unique minimal
+UNSAT core contains all of the clauses of the problem except
+for (q0). Thus, all pi appear in the UNSAT core, and p cannot
+be determined vacuous using irrelevance.
+(cid:3)
+
+This example shows that even if we are to look at every
+UNSAT core of a BMC problem, irrelevance is still unable to
+detect existing vacuity.
+
+2) Local Irrelevance: Variables which do not appear in the
+UNSAT core are vacuous. The converse is not true: vacuous
+variables may also appear in the UNSAT core. Intuitively, these
+variables are not the central reason why ϕ holds on K. For
+example, the clauses of CLK may resolve against each other,
+representing some simpliﬁcation and uniﬁcation of parts of the
+model, before resolutions with CLe clauses are performed. If a
+variable is resolved upon using only the CLK clauses or only
+the CLe clauses, it is potentially vacuous. By looking at the
+UNSAT core, it is possible to anticipate whether a variable will
+not be involved in resolutions between CLK and CLe using the
+following deﬁnition.
+Deﬁnition 4 Let K be a model, and ϕ an LTL formula. Assume
+that Π is an UNSAT core of BMCk(K, ϕ) witnessing K |=k ϕ.
+Then, p is locally irrelevant with respect to BMCk(K, ϕ) and Π
+iff for each time instance i, either pi does not appear in Π or pi
+is local to either CLe ∩ Π or CLK ∩ Π.
+
+In Example 1, p is locally irrelevant since p1 only occurs
+in the clauses of U taken from CLe, while p0 only appears
+in U within CLK clauses. Moreover,
+the UNSAT core
+of the original problem can be converted to an UNSAT
+thus proving that p is vacuous.
+core of the new theory,
+Speciﬁcally, U = {(p0), (¬p0, q1), (¬p1), (p1, ¬q1)} is
+the
+so substituting
+UNSAT core of
+x for p in the clauses of U that came from CLe gives
+U ′ = {(p0), (¬p0, q1), (¬x1), (x1, ¬q1)}. This is a subset of
+
+the original problem,
+
+BMC1(K, ϕ[p ← x]) = {(p0), (q0), (¬p0, q1), (¬x1), (x1, ¬q1)},
+so it is a candidate for the new UNSAT core. The substitution
+may have prevented the resolutions necessary to derive the
+empty clause. However, Fig. 1(c) shows a proof that U ′ is also
+unsatisﬁable. In this case, it was possible to substitute xi for
+pi in the clauses coming from CLe in the original UNSAT
+core and create an UNSAT core for BMCk(K, ϕ[p ← x]). In
+fact, this observation applies to all cases of local irrelevance by
+Theorem 2. Therefore, Def. 4 speciﬁes an algorithm to detect
+some vacuous variables.
+Theorem 2 If p is
+BMCk(K, ϕ) and Π, then ϕ is k-step p-vacuous.
+
+irrelevant with respect
+
+locally
+
+to
+
+Unfortunately, if a variable p is not locally irrelevant in an
+UNSAT core, the formula can still be p-vacuous, as shown by
+the following example.
+
+EXAMPLE 2. Consider a Kripke structure with atomic propositions 
+r, p and q whose initial state is given by the constraint:
+Init = ¬r ∧ p ∧ q. The formula ϕ = ¬p ∨ q is p-vacuous in
+the initial state. Let us assume that the zero-step BMC problem
+is encoded in CNF as follows:
+
+CLK = (¬r0)(r0 ∨ p0)(¬p0 ∨ q0)
+
+CLe = (p0)(¬p0 ∨ ¬q0)
+
+There are several resolution proofs that can establish unsatisﬁability 
+of CLK ∪ CLe; one such proof is shown in Fig. 1(b).
+In none of the proofs is p locally irrelevant with respect to CLe
+and CLK .
+(cid:3)
+
+The problem with local irrelevance is that it is impossible to
+tell if a variable is going to be used in a resolution joining CLK
+and CLe clauses based on the UNSAT core alone.
+B. Peripherality
+
+In Sec. IV-A, two vacuity detection methods based on examining 
+the variables in the UNSAT core were found to fall
+short of completeness. It was seen that even if every possible
+resolution proof could be analyzed, irrelevance and local irrelevance 
+still might fail to detect existing vacuity. Here, we extend
+the analysis to the resolution proof’s structure. The resulting
+peripherality algorithm is superior, since it guarantees vacuity
+will be found if all possible resolution proofs are considered.
+
+The limitations of detecting vacuity based only on the UNSAT 
+core were demonstrated in Example 2. By examining the
+resolution proof in Fig. 1(b), we see that although p0 appears
+both in CLK clauses and in CLe clauses, it is always resolved
+“locally”. That is, if we resolve two clauses c1 = (..., pi, ...)
+and c2 = (..., ¬pi, ...), pi and ¬pi must have been preserved
+from their original source in some set of root clauses. If all the
+originating root clauses belong to CLK or all belong to CLe,
+then pi is being resolved on locally. In this case, we can replace
+pi in either set of clauses without affecting their unsatisﬁability.
+For example, in Fig. 1(b), p0 can be replaced in CLe by a new
+unconstrained variable x0. This intuition is formalized below.
+
+Given a resolution proof Π, a variable l, and a clause c, we
+denote by S(l, c) the set of all root clauses that have contributed
+the variable l to c. S(l, c) is deﬁned recursively as shown in
+Fig. 3. A root clause cr is an element of S(l, c) if it contains
+
+6
+
+L(c) : clause c, variable p → {‘∅’, ‘A’, ‘B’, ‘AB’}
+
+• if c ∈ Roots(Π) then
+
+if p 6∈ c
+if p ∈ c ∧ c ∈ A
+if p ∈ c ∧ c ∈ B
+
+• else if c is a clause resulting from resolving c1 and c2 on variable v, i.e., c = ∃v · c1 ∧ c2, then
+
+L(c) = 
+
+
+‘∅’
+‘A’
+‘B’
+
+‘∅’
+‘A’
+‘B’
+‘AB’
+
+
+
+L(c) = (cid:26)‘∅’
+
+– if v 6= p, then
+
+L(c) =
+
+– else if v = p, then
+
+if L(c1) = L(c2) = ‘∅’
+if ∃i, j · L(ci) = ‘A’ ∧ L(cj) ⊆ {‘A’, ‘∅’}
+if ∃i, j · L(ci) = ‘B’ ∧ L(cj) ⊆ {‘B’, ‘∅’}
+otherwise
+
+if L(c1) = L(c2)
+otherwise
+
+‘AB’
+
+Fig. 2. Labeling function for the peripherality algorithm.
+
+S(l, c) =
+
+
+
+
+∅
+c
+S(l, c1) ∪ S(l, c2)
+
+if l 6∈ c
+if c ∈ Roots(Π) ∧ l ∈ c
+if c1 and c2 are parents
+
+of c ∧ l ∈ c
+
+Fig. 3. Deﬁnition of S(l, c).
+
+a variable l and there exists a path from cr to c that does not
+contain a resolution on l. We can now deﬁne peripherality of
+variables, which captures the conditions when a global variable
+may not be central to the reason why ϕ holds on K.
+Deﬁnition 5 Let A and B be disjoint sets of clauses such that
+C = A ∪ B is unsatisﬁable, and Π be a resolution proof establishing 
+unsatisﬁability of C. Then a variable l is peripheral with
+respect to A and B iff for every resolution on l between clauses
+c1 and c2, S(l, c1) ∪ S(l, c2) ⊆ A or S(l, c1) ∪ S(l, c2) ⊆ B.
+Within the BMC setting, we have the following deﬁnition:
+
+Deﬁnition 6 Let K be a model, ϕ be an LTL formula,
+BMCk(K, ϕ) be a CNF encoding of a BMC problem for K |=k
+ϕ, and Π be a proof of unsatisﬁability of BMCk(K, ϕ). p is
+peripheral in ϕ iff for each time instance i, pi is peripheral in Π
+with respect to CLe and CLK .
+
+If a variable is peripheral, it is vacuous by Theorem 3.
+
+Theorem 3 Let Π be a proof of unsatisﬁability of BMCk(K, ϕ).
+If a variable p of ϕ is peripheral in Π, then ϕ is k-step pvacuous.
+
+
+In Fig. 1(b), although p is not locally irrelevant in ϕ, it is
+peripheral, and therefore ϕ is p-vacuous. This also demonstrates 
+that peripherality is a strictly stronger notion than local
+irrelevance. Theorem 4 shows that under our constraints this is
+the strongest result that we can hope to establish.
+Theorem 4 Assume ϕ is k-step p-vacuous in K. Then, there
+exists a resolution proof Π of unsatisﬁability of BMCk(K, ϕ)
+such that p is peripheral in Π.
+
+This is one of the main contributions of this paper: if a
+variable appears in all proofs, but is detected as peripheral in at
+least one of these proofs, it is vacuous. Conversely, if a variable
+appears in all proofs but is not peripheral in any of them, it is
+deﬁnitively not vacuous.
+
+Peripherality of a variable can be detected by traversing the
+
+7
+
+resolution proof from the roots to the leaf, keeping track of the
+source of the variable in each clause. If Π is a resolution proof
+whose root clauses are divided into two disjoint sets, A ∪ B,
+then the labeling function L is deﬁned recursively as shown
+in Fig. 2, where c is used to represent a clause. This labeling
+function deﬁnes an algorithm for detecting peripherality.
+
+A CNF variable v is peripheral iff the label of the empty
+clause is not ‘AB’. Thus, to detect whether a formula ϕ is pvacuous,
+ we need to check that all CNF variables pi corresponding 
+to p (see Sec. II) are peripheral. This can be done
+by applying the labeling function described in Fig. 2 with
+A = CLK , and B = CLe for each pi (for details, see [8]).
+It is also possible to simultaneously keep track of the labels for
+all CNF variables so that only a single pass through Π is needed.
+The time complexity of the peripherality algorithm is linear in
+the size of the resolution proof.
+Theorem 5 For a resolution proof Π that BMCk(K, ϕ) is unsatisﬁable,
+ determining which variables of ϕ are peripheral can
+be done in time linear in the size of Π.
+
+In this section, we deﬁned three methods of detecting vacuity
+based on examining the UNSAT core and the resolution proof
+produced by BMC. Our evaluation of these algorithms w.r.t.
+precision and execution times can be found in Sec. V.
+
+V. PRACTICAL EXPERIENCE
+
+The techniques reported in this paper have been implemented
+in a tool called VaqTree (see [8] for a description of this tool).
+The inputs to VaqTree are a model (encoded using the language
+of NuSMV [10]) and an LTL property. The tool returns the
+vacuity status of each variable in the property. Vacuity detection 
+in VaqTree proceeds in two phases: a “partial pass” that
+applies one of our methods, and a “model-checking pass” that
+completes the analysis using additional model-checking runs.
+
+We have run VaqTree on two benchmark suites. To evaluate
+the overall performance of the tool and the effectiveness of our
+partial vacuity detection methods, we have created a benchmark
+suite SA using various models and properties from the NUSMV
+distribution. To evaluate the scalability of the tool to industrial
+models, we have created a benchmark suite SB from the models 
+in the IBM Formal Veriﬁcation Benchmarks Library [18].
+
+These models came with rather simple properties (one temporal
+operator), and (as expected from an industrial benchmark) did
+not exhibit a high degree of vacuity. Thus, we used this suite to
+measure the “worst-case” behavior of the tool, i.e., the amount
+of overhead incurred by our methods when no vacuity is found.
+In the benchmarks, each test case consists of a model M , a
+property ϕ, and a bound k such that M |=k ϕ. Note that ﬁnding
+an appropriate bound k is orthogonal to k-vacuity detection,
+which explains why our evaluation does not consider the time
+needed to ﬁnd k. The experiments were performed on a Linux
+machine with a 2.8GHz P4 CPU, and 1GB of RAM, with
+up to 700MB of RAM available to each process. Currently,
+VaqTree is limited to proofs with up to 2.5 million resolutions.
+In SA, this corresponds to a test case from the asynchronous
+abp4 model (roughly 30 boolean variables, with k = 19). A
+sample of our experimental data is available in Appendix B,
+and the full results – in [19]. Below, we discuss results obtained
+with each benchmark individually.
+A. Results obtained with SA
+
+This benchmark suite consists of 5 models: abp4,
+msi wtrans, pci, and prod-cell from the NUSMV distribution
+(107 properties) and toyFGS04 from [20] (14 properties). On
+average, the properties in the suite have 2 temporal operators
+(from the set G, F, U and X), with a maximum of 4 operators,
+and include both liveness and safety. 99 of the properties exhibit
+vacuity, and 22 do not.
+
+Scatter plots in Fig. 4 compare the execution times of
+VaqTree (parametrized with irrelevance, local irrelevance, and
+peripherality), with naive detection for this benchmark. Execution 
+times for naive detection include CNF theory generation
+and satisﬁability testing for each variable of the property. Execution 
+times for VaqTree include the time for the partial pass
+and the subsequent model-checking pass. Each point in the plot
+represents a single test case. The X-axis represents the time
+(in seconds) taken by naive detection. The Y-axis represents
+the time (in seconds) taken by VaqTree when parameterized
+by each of our methods. Points below the diagonal indicate
+where VaqTree was faster than naive detection; points near the
+diagonal indicate cases where the partial pass found a small
+percentage of the vacuous variables.
+
+Fig. 5 shows that on SA, VaqTree with irrelevance ﬁnds
+the fewest vacuous variables among our partial methods, as
+expected from the discussion in Section IV. Although Fig. 4(b)
+and (c) look similar, the numbers (see Appendix B and [19])
+show that local irrelevance is faster than peripherality in 96%
+of the cases. This is consistent with the additional work peripherality 
+must perform to analyze the proof tree. A detailed
+comparison of local irrelevance and naive detection shows that
+VaqTree with local irrelevance was faster or comparable to
+naive detection in 95% of the test cases. VaqTree with local
+irrelevance was faster than naive detection in 70 (58%) of the
+test cases, out of which 30 cases were twice as fast, and 20 cases
+were faster by an order of magnitude. In the remaining 51 cases,
+local irrelevance was at most 3% slower in 86% of these cases.
+There are 10 cases where VaqTree with peripherality took
+much longer than naive detection. All of these cases are from
+
+the abp4 model, and while they have the largest resolution
+proofs of the benchmark suite (between 300,000 and 2M
+clauses), other 300,000-clause test cases did not yield poor
+performance. We conjecture that the poor performance is due to
+a low clause/variable ratio [21] which favours naive detection
+in cases where vacuity is not present. Intuitively, a low ratio
+indicates that the SAT instance is underconstrained, and so a
+solution (if it exists) can be found quickly. On the other hand,
+ﬁnding a proof of unsatisﬁability in a model with few constraints 
+can be more difﬁcult. Naive detection on a non-vacuous
+property requires solving satisﬁable SAT instances, since replacing 
+variables falsiﬁes the property. However, peripherality
+on a non-vacuous property requires time linear in the size of
+the resolution proof obtained from the original model-checking
+run. If all of these SAT instances have a low clause/variable
+ratio, naive detection can be much faster than peripherality.
+This situation was only observed on the abp4 model, with
+clause/variable ratio of 1.5-1.8 – signiﬁcantly lower than any
+other test case with large proofs and without vacuity.
+
+We now turn to measuring the effectiveness of our methods,
+ using the number of vacuous variables found during the
+partial pass as a metric (see the scatter plots in Fig. 5). This
+number indicates how many additional model-checking runs
+are needed to complete vacuity detection. Since our partial
+methods can be ordered by increasing precision, Fig. 5(a)
+compares irrelevance and local irrelevance, Fig. 5(b) – local
+irrelevance and peripherality, and Fig. 5(c) – peripherality and
+naive detection. Each point in the plot represents a set of test
+cases – a larger point means a larger set. The axes show the
+number of vacuous variables detected by each method. Points
+below the diagonal indicate where the X-axis method detects
+more vacuous variables than the Y-axis method. The plots show
+that local irrelevance is clearly more effective than irrelevance.
+Contrary to our expectations, peripherality performed exactly
+as local irrelevance in all but 5 cases. Thus, local irrelevance
+appears to be more cost-effective. Fig. 5(c) shows that our
+techniques are effective when compared with naive detection:
+peripherality reduced the number of extra model-checking runs
+by 40% in 54 out of 99 cases that exhibited vacuity.
+
+B. Results obtained with SB
+
+This benchmark suite consists of 13 models from the IBM
+Formal Veriﬁcation Benchmarks Library [22] (18 properties).
+The properties have a single temporal operator (G or F), and
+include both safety and liveness. 12 of the properties exhibit
+vacuity, and 6 do not. evaluate the scalability of VaqTree to
+industrial models, we must ﬁrst bound such that M |=k ϕ. For
+this benchmark, we picked depth k = 20, which is in line with
+the bounds used for analyzing these models in [22, Sec. 2]. At
+this depth, only 13 models from the benchmark were suitable
+for our experiments. We report on the experiments below. At
+this k, some of the models where too large to analyze using
+VaqTree, and some of the properties did not hold. This is why
+we only report data for 13 models from this benchmark.
+
+Table I, which includes full results for SB, shows that proof
+sizes for this benchmark can be handled by VaqTree. Interest8
+
+
+ 1000
+ 1000
+
+)
+)
+s
+s
+(
+(
+ 
+ 
+e
+e
+c
+c
+n
+n
+a
+a
+v
+v
+e
+e
+l
+l
+e
+e
+r
+r
+r
+r
+I
+I
+
+ 100
+ 100
+
+ 10
+ 10
+
+ 1
+ 1
+
+ 0.1
+ 0.1
+
+ 1000
+ 1000
+
+)
+)
+s
+s
+(
+(
+ 
+ 
+e
+e
+c
+c
+n
+n
+a
+a
+v
+v
+e
+e
+l
+l
+e
+e
+r
+r
+r
+r
+I
+I
+ 
+ 
+l
+l
+a
+a
+c
+c
+o
+o
+L
+L
+
+ 100
+ 100
+
+ 10
+ 10
+
+ 1
+ 1
+
+ 0.1
+ 0.1
+
+ 1000
+ 1000
+
+)
+)
+s
+s
+(
+(
+ 
+ 
+y
+y
+t
+t
+i
+i
+l
+l
+a
+a
+r
+r
+e
+e
+h
+h
+p
+p
+i
+i
+r
+r
+e
+e
+P
+P
+
+ 100
+ 100
+
+ 10
+ 10
+
+ 1
+ 1
+
+ 0.1
+ 0.1
+
+ 0.1
+ 0.1
+
+ 1
+ 1
+
+ 10
+ 10
+
+ 100  1000
+ 100  1000
+
+Naive detection (s)
+Naive detection (s)
+
+ 0.1
+ 0.1
+
+ 1
+ 1
+
+ 10
+ 10
+
+ 100  1000
+ 100  1000
+
+Naive detection (s)
+Naive detection (s)
+
+ 0.1
+ 0.1
+
+ 1
+ 1
+
+ 10
+ 10
+
+ 100  1000
+ 100  1000
+
+Naive detection (s)
+Naive detection (s)
+
+Fig. 4. SA: Comparison of execution times. Where applicable, all times include times for both the partial and model-checking passes.
+
+e
+e
+e
+e
+e
+e
+e
+e
+c
+c
+c
+c
+c
+c
+c
+c
+n
+n
+n
+n
+n
+n
+n
+n
+a
+a
+a
+a
+a
+a
+a
+a
+v
+v
+v
+v
+v
+v
+v
+v
+e
+e
+e
+e
+e
+e
+e
+e
+l
+l
+l
+l
+l
+l
+l
+l
+e
+e
+e
+e
+e
+e
+e
+e
+r
+r
+r
+r
+r
+r
+r
+r
+r
+r
+r
+r
+r
+r
+r
+r
+I
+I
+I
+I
+I
+I
+I
+I
+
+ 10
+ 10
+ 10
+ 10
+ 10
+ 10
+ 10
+ 10
+
+ 8
+ 8
+ 8
+ 8
+ 8
+ 8
+ 8
+ 8
+
+ 6
+ 6
+ 6
+ 6
+ 6
+ 6
+ 6
+ 6
+
+ 4
+ 4
+ 4
+ 4
+ 4
+ 4
+ 4
+ 4
+
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+
+ 0
+ 0
+ 0
+ 0
+ 0
+ 0
+ 0
+ 0
+
+ 0
+ 0
+ 0
+ 0
+ 0
+ 0
+ 0
+ 0
+
+e
+e
+e
+e
+e
+e
+e
+e
+c
+c
+c
+c
+c
+c
+c
+c
+n
+n
+n
+n
+n
+n
+n
+n
+a
+a
+a
+a
+a
+a
+a
+a
+v
+v
+v
+v
+v
+v
+v
+v
+e
+e
+e
+e
+e
+e
+e
+e
+l
+l
+l
+l
+l
+l
+l
+l
+e
+e
+e
+e
+e
+e
+e
+e
+r
+r
+r
+r
+r
+r
+r
+r
+r
+r
+r
+r
+r
+r
+r
+r
+I
+I
+I
+I
+I
+I
+I
+I
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+l
+l
+l
+l
+l
+l
+l
+l
+a
+a
+a
+a
+a
+a
+a
+a
+c
+c
+c
+c
+c
+c
+c
+c
+o
+o
+o
+o
+o
+o
+o
+o
+L
+L
+L
+L
+L
+L
+L
+L
+
+ 10
+ 10
+ 10
+ 10
+ 10
+ 10
+ 10
+ 10
+
+ 8
+ 8
+ 8
+ 8
+ 8
+ 8
+ 8
+ 8
+
+ 6
+ 6
+ 6
+ 6
+ 6
+ 6
+ 6
+ 6
+
+ 4
+ 4
+ 4
+ 4
+ 4
+ 4
+ 4
+ 4
+
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+
+ 0
+ 0
+ 0
+ 0
+ 0
+ 0
+ 0
+ 0
+
+ 10
+ 10
+ 10
+ 10
+ 10
+ 10
+ 10
+ 10
+
+ 0
+ 0
+ 0
+ 0
+ 0
+ 0
+ 0
+ 0
+
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+
+ 4
+ 4
+ 4
+ 4
+ 4
+ 4
+ 4
+ 4
+
+ 6
+ 6
+ 6
+ 6
+ 6
+ 6
+ 6
+ 6
+
+ 8
+ 8
+ 8
+ 8
+ 8
+ 8
+ 8
+ 8
+
+ 10
+ 10
+ 10
+ 10
+ 10
+ 10
+ 10
+ 10
+
+Peripherality
+Peripherality
+Peripherality
+Peripherality
+Peripherality
+Peripherality
+Peripherality
+Peripherality
+
+y
+y
+y
+y
+y
+y
+y
+y
+y
+t
+t
+t
+t
+t
+t
+t
+t
+t
+i
+i
+i
+i
+i
+i
+i
+i
+i
+l
+l
+l
+l
+l
+l
+l
+l
+l
+a
+a
+a
+a
+a
+a
+a
+a
+a
+r
+r
+r
+r
+r
+r
+r
+r
+r
+e
+e
+e
+e
+e
+e
+e
+e
+e
+h
+h
+h
+h
+h
+h
+h
+h
+h
+p
+p
+p
+p
+p
+p
+p
+p
+p
+i
+i
+i
+i
+i
+i
+i
+i
+i
+r
+r
+r
+r
+r
+r
+r
+r
+r
+e
+e
+e
+e
+e
+e
+e
+e
+e
+P
+P
+P
+P
+P
+P
+P
+P
+P
+
+ 10
+ 10
+ 10
+ 10
+ 10
+ 10
+ 10
+ 10
+ 10
+
+ 8
+ 8
+ 8
+ 8
+ 8
+ 8
+ 8
+ 8
+ 8
+
+ 6
+ 6
+ 6
+ 6
+ 6
+ 6
+ 6
+ 6
+ 6
+
+ 4
+ 4
+ 4
+ 4
+ 4
+ 4
+ 4
+ 4
+ 4
+
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+
+ 0
+ 0
+ 0
+ 0
+ 0
+ 0
+ 0
+ 0
+ 0
+
+ 0
+ 0
+ 0
+ 0
+ 0
+ 0
+ 0
+ 0
+ 0
+
+ 4
+ 4
+ 4
+ 4
+ 4
+ 4
+ 4
+ 4
+
+ 2
+ 8
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 8
+ 8
+ 8
+ 8
+ 8
+ 8
+ 8
+Local Irrelevance
+Local Irrelevance
+Local Irrelevance
+Local Irrelevance
+Local Irrelevance
+Local Irrelevance
+Local Irrelevance
+Local Irrelevance
+
+ 6
+ 6
+ 6
+ 6
+ 6
+ 6
+ 6
+ 6
+
+≥ 40%
+≥ 40%
+≥ 40%
+≥ 40%
+≥ 40%
+≥ 40%
+≥ 40%
+≥ 40%
+≥ 40%
+
+ 6
+ 6
+ 6
+ 6
+ 6
+ 6
+ 6
+ 6
+ 6
+
+ 4
+ 4
+ 4
+ 4
+ 4
+ 4
+ 4
+ 4
+ 4
+
+ 2
+ 8
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 8
+ 8
+ 8
+ 8
+ 8
+ 8
+ 8
+ 8
+Naive detection
+Naive detection
+Naive detection
+Naive detection
+Naive detection
+Naive detection
+Naive detection
+Naive detection
+Naive detection
+
+ 10
+ 10
+ 10
+ 10
+ 10
+ 10
+ 10
+ 10
+ 10
+
+Fig. 5. SA: Comparison of the number of vacuous variables detected by partial pass. Larger points represent more test cases than the smaller points.
+
+ 1000
+ 1000
+
+)
+)
+s
+s
+(
+(
+ 
+ 
+e
+e
+c
+c
+n
+n
+a
+a
+v
+v
+e
+e
+l
+l
+e
+e
+r
+r
+r
+r
+I
+I
+
+ 100
+ 100
+
+ 10
+ 10
+
+ 100
+ 100
+
+ 10
+ 10
+Naive detection (s)
+Naive detection (s)
+
+ 1000
+ 1000
+
+ 1000
+ 1000
+
+)
+)
+s
+s
+(
+(
+ 
+ 
+e
+e
+c
+c
+n
+n
+a
+a
+v
+v
+e
+e
+l
+l
+e
+e
+r
+r
+r
+r
+I
+I
+ 
+ 
+l
+l
+a
+a
+c
+c
+o
+o
+L
+L
+
+ 100
+ 100
+
+ 10
+ 10
+
+ 100
+ 100
+
+ 10
+ 10
+Naive detection (s)
+Naive detection (s)
+
+ 1000
+ 1000
+
+ 1000
+ 1000
+
+)
+)
+s
+s
+(
+(
+ 
+ 
+
+y
+y
+t
+t
+i
+i
+l
+l
+a
+a
+r
+r
+e
+e
+h
+h
+p
+p
+i
+i
+r
+r
+e
+e
+P
+P
+
+ 100
+ 100
+
+ 10
+ 10
+
+ 100
+ 100
+
+ 10
+ 10
+Naive detection (s)
+Naive detection (s)
+
+ 1000
+ 1000
+
+Fig. 6. SB: Comparison of execution times. Where applicable, all times include times for both the partial and model-checking passes.
+
+ingly, these are in the same range as proof sizes for SA. This
+could be explained by the fact that even though these models
+are more complex, properties are simpler.
+
+Scatter plots in Fig. 6 compare the execution times of
+VaqTree parametrized with local irrelevance and peripherality,
+with naive detection for this benchmark. Execution times are
+measured as described in Section V-A, and the graphs are
+interpreted in the same way as those in Fig. 4. Since SB had
+low vacuity, we did not expect our techniques to ﬁnd it without
+the help of naive detection. However, graphs in Fig. 6 show
+that our techniques do in fact detect vacuity, as indicated by the
+points that appear below the diagonal. Both local irrelevance
+and peripherality detect the same amount of vacuity in SB, but
+local irrelevance is slightly faster than peripherality.
+
+Surprisingly, peripherality introduces a low overhead in this
+benchmark – points over the diagonal are near it, unlike what
+we see in Fig. 4. To explain this behavior, we hypothesized that
+in non-vacuous cases with low clause/variable ratios and large
+proofs, peripherality is much slower than naive detection. In
+SB, we found that 15 of the test cases have a clause/variable
+ratio between 2.62-3.66, much higher than the ratios encountered 
+in SA. The remaining three cases had ratios in the same
+range as the abp04 model. However, two of these produce
+trivial proofs, and the last one exhibits vacuity. These results
+empirically support our hypothesis.
+
+C. Conclusions
+
+In summary, we observed that local irrelevance performs best
+out of our proposed partial methods, ﬁnding most vacuity in
+
+the least amount of time. In 95% of both benchmark suites,
+we found VaqTree with local irrelevance to be at most 3%
+slower, and usually much faster, than the naive detection. In
+several tests of the SA benchmark, peripherality was noticeably 
+slower than naive detection. On the industrial benchmark
+SB, the overhead produced by peripherality was negligible.
+Interestingly, this suggests that peripherality may be a viable
+alternative to local irrelevance on industrial models. We plan
+to investigate this further in the future. Thus, we believe that
+both local irrelevance and peripherality can be used to replace
+naive detection. We plan to enhance our methods by developing
+a heuristic based on the clause/variable ratio and proof size
+that indicates when naive detection should be applied instead.
+Finally, VaqTree outputs the vacuity results for each timed
+variable pi as a byproduct of its partial pass. This information
+gives an explanation of non-vacuity, indicating which time
+steps have been important for deciding whether a given variable
+was vacuous, thus facilitating debugging.
+
+VI. SUMMARY AND RELATED WORK
+
+In this paper, we showed how to exploit the UNSAT core
+and resolution proof produced by a successful run of BMC for
+vacuity detection. We introduced three vacuity detection methods 
+that can be applied with little overhead after one modelchecking 
+run in order to quickly identify vacuous variables and
+reduce the number of additional model-checking runs required.
+Two of these methods, irrelevance and local irrelevance, exploit
+the UNSAT core, and the third, peripherality, is based on
+analyzing the resolution proof. We built a tool VaqTree, which
+
+9
+
+is based on these methods, and showed that it is effective for
+speeding up vacuity detection.
+
+Related work on vacuity detection has been described in
+Section III. Additionally, our work is related to research in
+declarative modeling. In particular, our use of the UNSAT core
+to detect vacuity was inspired by [23], which addresses the
+problem of identifying overconstraint in declarative models.
+While similar in spirit to vacuity detection in model checking,
+declarative models have no explicit transition relation; instead,
+transitions are expressed with constraints [24], [25]. An overconstraint 
+occurs when the model satisﬁes a safety property
+because all violations of the formula have been accidentally
+ruled out by the declared constraints. In order to detect such
+overconstraints, [23] introduces the idea of core extraction:
+declarative models are reduced to SAT instances, from which
+an UNSAT core can be extracted if the property holds. If a
+constraint’s clauses do not appear in the UNSAT core, the
+constraint is called irrelevant, and is a source of overconstraint
+(similar to Def. 3). The cone-of-inﬂuence technique [1] is also
+similar to Def. 3. However, as both of these techniques are
+model-based, neither can be used to detect vacuity.
+
+Our experiments show that local irrelevance and peripherality 
+can detect more vacuous variables than irrelevance. Therefore,
+ detecting overconstraint in declarative models may also
+beneﬁt from methods that analyze the structure of the resolution
+proof. In the future, we propose to investigate how a notion
+equivalent to peripherality can be deﬁned in the declarative
+setting. Another goal of future work is to increase the power of
+resolution proof-based vacuity detection methods. In this paper,
+we restricted ourselves to using results of only one BMC run,
+and to methods with linear time complexity in the size of the
+resolution proof or better. However, it is possible that the most
+optimal trade-off between speed and effectiveness of vacuity
+detection algorithms lies in the domain of multiple resolution
+proofs, where we can ﬁnd the minimal UNSAT core [26] or
+reduce the resolution proof using interpolation [27].
+
+McMillan [6] uses interpolation to prove that a particular
+bound is sufﬁcient to imply the unbounded satisfaction of a
+BMC problem. We intend to combine our techniques with
+this algorithm in order to prove that bounded vacuity for the
+correct k implies that the property also holds vacuously in the
+unbounded case.
+
+Interpolation can also be used to detect vacuity. Given two
+sets of clauses, A and B, such that A ∪ B is unsatisﬁable, an
+interpolant C is a set of clauses whose variables appear in both
+A and B, such that B ∪ C is unsatisﬁable and A ⇒ C [28].
+Intuitively, if C is minimal, then C is the reason why A ∪ B
+is unsatisﬁable. This intuition suggests that if an interpolant of
+CLK and CLe could be found, then all variables not appearing
+in it could be considered vacuous. However, we did not include
+this technique in our empirical evaluation, as our interpolant
+generator was comparatively slower.
+
+Another means of speeding vacuity detection for BMC is
+to iteratively check the k-step vacuity of each variable starting
+with k = 0. Since K 2k1 ϕ[p ← x] implies K 2k2 ϕ[p ← x]
+for all k2 > k1, if a variable is proven non-vacuous at some
+
+step k, then it can be omitted from subsequent checks of higher
+k. This method is orthogonal to our techniques, and the vacuity
+detection at each step could be carried out by VaqTree.
+
+REFERENCES
+
+[1] E. Clarke, O. Grumberg, and D. Peled, Model Checking.MIT Press, 1999.
+[2] I. Beer, S. Ben-David, C. Eisner, and Y. Rodeh, “Efﬁcient Detection of
+Vacuity in ACTL Formulas,” in Proc. of CAV’97, ser. LNCS, vol. 1254,
+1997, pp. 279–290.
+
+[3] O. Kupferman and M. Vardi, “Vacuity Detection in Temporal Model
+
+Checking,” in Proc. of CHARME’99, ser. LNCS, vol. 1703, 1999.
+
+[4] M. Purandare and F. Somenzi, “Vacuum Cleaning CTL Formulae,” in
+
+Proc. of CAV’02, ser. LNCS, vol. 2404, 2002, pp. 485–499.
+
+[5] R. Armoni, L. Fix, A. Flaisher, O. Grumberg, N. Piterman, A. Tiemeyer,
+and M. Vardi, “Enhanced Vacuity Detection in Linear Temporal Logic,”
+in Proc. of CAV’03, vol. 2725, July 2003, pp. 368–380.
+
+[6] K. McMillan, “Interpolation and SAT-Based Model Checking,” in Proc.
+
+of CAV’03, ser. LNCS, vol. 2725, July 2003, pp. 1–13.
+
+[7] A. Biere, A. Cimatti, E. M. Clarke, and Y. Zhu, “Symbolic Model
+Checking without BDDs,” in Proc. of TACAS’99, ser. LNCS, vol. 1579,
+1999.
+
+[8] J. Simmonds, J. Davies, A. Gurﬁnkel, and M. Chechik, “Exploiting
+Resolution Proofs for LTL Vacuity Detection,” ftp://ftp.cs.toronto.edu/
+pub/reports/csrg/547/TR-547.ps, DCS, University of Toronto, CSRG TR
+547, 2007.
+
+[9] A. Cimatti, M. Pistore, M. Roveri, and R. Sebastiani, “Improving the
+Encoding of LTL Model Checking into SAT,” in Proc. of VMCAI’02, ser.
+LNCS, vol. 2294, 2002, pp. 196–207.
+
+[10] A. Cimatti, E. M. Clarke, E. Giunchiglia, F. Giunchiglia, M. Pistore,
+M. Roveri, R. Sebastiani, and A. Tacchella, “NUSMV 2: An OpenSource
+Tool for Symbolic Model Checking.” in Proc. of CAV’02, ser. LNCS, vol.
+2404, 2002, pp. 359–364.
+
+[11] N. Een and N. S¨orensson, “The MiniSat Page,” http://www.cs.chalmers.
+
+se/Cs/Research/FormalMethods/MiniSat/Main.html, April 2006.
+
+[12] L. Zhang and Z. Fu, “Boolean Satisﬁability Research Group at Princeton,”
+
+http://www.princeton.edu/∼chaff/, September 2006.
+
+[13] L. Zhang and S. Malik, “Validating SAT Solvers Using an Independent
+Resolution-Based Checker: Practical Implementations and Other Applications,
+” in Proc. of DATE’03, 2003, pp. 10 880–10 885.
+
+[14] A. Gurﬁnkel and M. Chechik, “How Vacuous Is Vacuous?” in Proc. of
+
+TACAS’04, ser. LNCS, vol. 2988, March 2004, pp. 451–466.
+
+[15] ——, “Extending Extended Vacuity,” in Proc. of FMCAD’04, ser. LNCS,
+
+vol. 3312, 2004, pp. 306–321.
+
+[16] K. Namjoshi, “An Efﬁciently Checkable, Proof-Based Formulation of
+Vacuity in Model Checking,” in Proc. of CAV’04, ser. LNCS, vol. 3114,
+2004, pp. 57–69.
+
+[17] I. Beer, S. Ben-David, C. Eisner, and Y. Rodeh, “Efﬁcient Detection of
+
+Vacuity in Temporal Model Checking,” FMSD, vol. 18, no. 2, 2001.
+
+[18] I. Haifa, “CNF Benchmarks from IBM Formal Veriﬁcation Benchmarks
+http://www.haifa.il.ibm.com/
+
+Library,”
+projects/veriﬁcation/RB Homepage/benchmarks.html
+
+2007.
+
+[Online]. Available:
+
+[19] J. Simmonds and J. Davies, “VaqTree,” http://www.cs.toronto.edu/
+
+∼jsimmond/VaqTree, 2007.
+
+[20] M. Heimdahl, S. Rayadurgam, W. Visser, G. Devaraj, and J. Gao, “Autogenerating 
+Test Sequences Using Model Checkers: A Case Study,” in
+Proc. of FATES’03, ser. LNCS, vol. 2931, 2003, pp. 42–59.
+
+[21] B. Selman, D. Mitchell, and H. Levesque, “Generating Hard Satisﬁability
+
+Problems,” Artiﬁcial Intelligence, vol. 81, no. 1-2, pp. 17–29, 1996.
+
+[22] E. Zarpas, “Benchmarking SAT Solvers for Bounded Model Checking,”
+
+in SAT, 2005, pp. 340–354.
+
+[23] I. Shlyakhter, R. Seater, D. Jackson, M. Sridharan, and M. Taghdiri,
+“Debugging Overconstrained Declarative Models Using Unsatisﬁable
+Cores,” in Proc. of ASE’03, October 2003, pp. 94–105.
+
+[24] D. Jackson, “Alloy: a Lightweight Object Modelling Notation,” ACM
+
+TOSEM, vol. 11, no. 2, pp. 256–290, 2002.
+
+[25] J. M. Spivey, The Z Notation: a Reference Manual. Prentice Hall, 1992.
+[26] R. Gershman, M. Koifman, and O. Strichman, “Deriving Small Unsatisﬁable 
+Cores with Dominators,” in Proc. of CAV’06, ser. LNCS, vol. 4144,
+2006, pp. 109–122.
+
+[27] W. Craig, “Linear Reasoning. A New Form of the Herbrand-Gentzen
+
+Theorem,” JSL, vol. 22, pp. 250–268, 1957.
+
+[28] T. Henzinger, R. Jhala, R. Majumdar, and K. McMillan, “Abstractions
+from Proofs,” in Proc. of POPL’04. ACM, January 2004, pp. 232–244.
+
+10
+
+A. Proofs of Theorems
+
+APPENDIX
+
+Proofs of selected theorems are given. Additional proofs can
+
+be found in [8, Appendix A2].
+Theorem 2 If p is
+locally
+BMCk(K, ϕ) and Π, then ϕ is k-step p-vacuous.
+
+irrelevant with respect
+
+to
+
+Proof: Let BMCk(K, ϕ) = CLK ∪ CLe and U be the
+UNSAT core of Π. Assume that p is locally irrelevant in
+BMCk(K, ϕ). So for all pi, either pi does not appear in U , or
+pi is local to CLe ∩ U = Ue or to CLK ∩ U = UK by Def. 4.
+Let Ue′ be Ue with each occurence of pi replaced by xi. Since
+each pi that has been replaced is local to Ue, and UK ∪ Ue = U
+is unsatisﬁable, then UK ∪ Ue′
+is also unsatisﬁable. Since
+Ue′ ⊆ CLe[p ← x], the set of clauses CLK ∪ CLe[p ← x]
+is unsatisﬁable as well. Therefore, K |=k ϕ[p ← x] holds, so ϕ
+is p-vacuous.
+Theorem 3 Let Π be a proof of unsatisﬁability of BMCk(K, ϕ).
+If a variable p of ϕ is peripheral in Π, then ϕ is k-step pvacuous.
+
+
+Proof: Let BMCk(K, ϕ) = CLK ∪ CLe and U be the
+UNSAT core of Π. Assume that p is peripheral in BMCk(K, ϕ).
+Let Ue′ be the result of replacing each pi with xi in CLe ∩ U .
+Then (CLK ∩ U ) ∪ Ue′
+is still unsatisﬁable, since every
+resolution on xi must be local to CLe ∩ U , and every resolution
+on pi must be local to CLK ∩U by the peripherality of pi. Since
+Ue′ ⊆ CLe[p ← x], CLK ∪ CLe[p ← x] is unsatisﬁable as
+well. Therefore, K |=k ϕ[p ← x], and ϕ is p-vacuous.
+Theorem 4 Assume ϕ is k-step p-vacuous in K. Then, there
+exists a resolution proof Π of unsatisﬁability of BMCk(K, ϕ)
+such that p is peripheral in Π.
+
+Proof: Assume that ϕ is p-vacuous. Then,
+
+the BMC
+problem BMCk(K, ϕ[p ← x]) = CLK ∪ CLe[p ← x] is
+unsatisﬁable, and there exists a resolution proof Π establishing
+this. We must show that this proof can be transformed to a proof
+of unsatisﬁability of BMCk(K, ϕ) = CLK ∪CLe in which each
+pi is peripheral with respect to CLK and CLe.
+
+If Π does not contain a clause that has both pi and xi for some
+i, then for Π′ obtained from Π by replacing each occurrence
+of xi by pi, (a) Π′ is a well-formed resolution proof, and (b)
+Roots(Π′) ⊆ CLK ∪ CLe. That is, Π′ is a resolution proof
+establishing that BMCk(K, ϕ) is unsatisﬁable.
+
+We now show how such a proof can be constructed from an
+arbitrary proof Π of unsatisﬁability of BMCk(K, ϕ[p ← x]). Let
+UK = Roots(Π) ∩ CLK , and CLe′ = CLe[p ← x]. Then, if
+pi occurs in any clause of UK , it is local to UK . Let L be the
+set of all local variables of UK , C = ∃L · UK be a formula
+resulting from existentially eliminating these local variables,
+and CNF(C) be the CNF encoding of C. For any i, pi does not
+appear in C. Furthermore, the set of clauses CNF(C) ∪ CLe′ is
+unsatisﬁable. Thus, there exists a resolution proof Π′ establishing 
+this such that Roots(Π′) ⊆ CLe′ ∪ CNF(C). Finally, since
+UK ⇒ C, for each clause c ∈ C there exists
+
+such that Leaf (Πc) = c and
+a resolution proof Πc
+Roots(Πc) ⊆ UK . By combining the proofs {Πc
+| c ∈
+CNF(C)} and Π′, we obtain a proof of unsatisﬁability of
+UK ∪ CLe′ that does not contain a clause with variables xi
+and pi.
+
+B. Experiments
+
+Table I shows detailed results of our experiments. In this
+table, column “Benchmark” indicates the benchmark the test
+case belongs to; “Test case” is the case’s unique identiﬁer
+inside the benchmark, “Model” is the SMV model tested; “#
+var. in M ” is the number of variables in the model; “k” is
+the number of steps used to run BMC; “op. in ϕ” shows the
+property operators (e.g., 2G means that two G operators appear
+in the property); “# var. in ϕ” is the number of atomic variables
+present in the property; “# vac. vars.” is the number of vacuous
+variables; and “# resol. in Π” is the number of resolutions in the
+resolution proof. The next three columns report the time needed
+for model-checking: “Gen. CNF” is the time NuSMV took to
+generate the corresponding CNF theory; “Test SAT” and “Gen.
+Π” are the time MiniSat took to test satisﬁability and generate
+the corresponding resolution proof respectively; and “Total” is
+the sum of the previous three columns.
+
+For the naive method, we report the total times for the CNF
+theory generation (“Gen. CNF”) and for satisﬁability testing
+(“Test SAT”). One CNF theory is produced per each atomic
+variable. For irrelevance, local irrelevance and peripherality, we
+report how many vacuous variables were found by the partial
+pass (“# vac. vars. found”), how long VaqTree took to do
+the corresponding analysis (“Anal.”) and how much time was
+needed to do the completeing pass (“Extra runs”).
+
+For example, test case 8 analyzes a ﬁve-variable, two temporal 
+operator (G,U) property of the pci model (which has
+40 variables). Only three of these variables are vacuous. The
+resolution proof generated when k = 13 has 4,283 resolutions.
+This property was checked in 5.59 seconds. Naive vacuity detection 
+required ﬁve model-checking runs, taking 25.85 seconds
+to generate the corresponding CNF theories and 2.89 seconds
+to test their satisﬁability, requiring a total of 28.74 seconds.
+Irrelevance took 0.27 seconds to ﬁnd two of the vacuous
+variables during the partial pass. It then took 17.60 seconds
+to carry out the completing pass, so the total time required by
+irrelevance to ﬁnd all three vacuous variables is 17.87 seconds.
+Local irrelevance took 0.28 seconds to analyze the resolution
+proof, ﬁnding the same two vacuous variables as irrelevance.
+Thus, it also takes 17.60 seconds to run the completing pass,
+so the total time required by local irrelevance is 17.88 seconds.
+Finally, peripherality took 0.47 seconds to execute the partial
+pass and found the same two vacuous variables; it also required
+17.60 seconds to run the completing pass, taking a total of 18.07
+seconds to produce complete results for test case 8.
+
+VaqTree, the complete experimental results and some test
+
+cases are available at [19].
+
+11
+
+TABLE I: Statistics for vacuity detection experiments on NuSMV distribution and other examples.
+
+Bench-Test
+mark case
+
+Model (M )
+
+# var. k op. # var.# vac. # resol.
+in M in ϕ in ϕ vars.
+in Π
+
+Model Checking
+
+Naive
+
+Gen.
+
+Test Gen. Total
+
+Gen.
+
+Test Total
+
+CNF (s)SAT (s) Π (s)
+
+(s) CNF (s)SAT (s)
+
+(s)
+
+abp4
+abp4
+abp4
+abp4
+
+pci
+pci
+pci
+pci
+pci
+pci
+pci
+pci
+
+prod-cell
+prod-cell
+prod-cell
+prod-cell
+prod-cell
+prod-cell
+prod-cell
+prod-cell
+prod-cell
+prod-cell
+prod-cell
+prod-cell
+prod-cell
+prod-cell
+prod-cell
+prod-cell
+prod-cell
+
+SA 1
+40 13 G,U 4
+SA 2
+40 13 G,U 4
+SA 3
+40 13 G,U 4
+SA 4
+40 13 G,U 3
+SA 5
+40 13 G,U 3
+SA 6
+40 13 G,U 4
+SA 7
+40 13 G,U 4
+SA 8
+40 13 G,U 5
+SA 66
+6
+39 10 G,F
+SA 67
+5
+39 10 G,F
+SA 68
+4
+39 10 G,F
+SA 69
+39 10 G,F
+8
+SA 70
+5
+39 10 G,F
+SA 71
+4
+39 10 G,F
+SA 72
+4
+39 10 G,F
+SA 73
+6
+39 10 G,F
+SA 74
+5
+39 10 G,F
+SA 75
+5
+39 10 G,F
+SA 76
+39 10 G,F
+8
+SA 77
+9
+39 10 G,F
+SA 78
+5
+39 10 G,F
+SA 79
+5
+39 10 G,F
+SA 80
+39 10 G,F
+4
+SA 81
+39 102G,2F 10
+SA 82
+8
+39 10 G,F
+SA 83
+13 19 G,F
+1
+SA 84
+3
+13 19 G,F
+SA 85
+3
+13 19 G,F
+SA 86
+2
+13 19 G,2F
+SA 93
+6
+151 18 F
+SA 94
+12
+151 18 F
+SA 95
+151 18 F
+6
+SA 96
+4
+151 18 F
+SA 97
+4
+151 18 G
+SA 98
+6
+151 18 G
+SA 99
+6
+151 18 F
+SA 107
+5
+30 40 G
+SA 108
+5
+30 40 F
+SA 109
+30 40 F
+6
+SB
+8
+IBM FV 2002 03 111 20 G
+SB
+4
+IBM FV 2002 04 223 20 G
+SB
+2
+IBM FV 2002 05 310 20 G
+SB
+9
+IBM FV 2002 09 233 20 F
+SB
+3
+IBM FV 2002 10 224 20 G
+SB
+4
+IBM FV 2002 10 224 20 G
+SB
+IBM FV 2002 10 224 20 G
+4
+SB
+2
+IBM FV 2002 10 224 20 G
+SB
+2
+IBM FV 2002 10 224 20 G
+SB 10 IBM FV 2002 17 1 1584 20 G
+2
+SB 11 IBM FV 2002 17 2 1583 20 G
+1
+SB 12 IBM FV 2002 17 2 1583 20 G
+2
+SB 13
+IBM FV 2002 19 121 20 G
+1
+SB 14
+1
+IBM FV 2002 21
+79 20 G
+SB 15
+1
+IBM FV 2002 22 104 20 G
+SB 16
+8
+IBM FV 2002 23 103 20 G
+SB 17
+8
+IBM FV 2002 27
+43 20 G
+SB 18 IBM FV 2002 31 2 227 20 G
+17
+
+toyFGS04
+toyFGS04
+toyFGS04
+toyFGS04
+toyFGS04
+toyFGS04
+toyFGS04
+msi wtrans
+msi wtrans
+msi wtrans
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+
+1
+3
+3
+1
+1
+3
+3
+3
+6
+5
+4
+8
+5
+4
+4
+6
+5
+5
+8
+9
+5
+5
+4
+10
+8
+0
+2
+2
+0
+6
+12
+0
+0
+0
+0
+6
+3
+4
+4
+8
+3
+1
+9
+2
+3
+4
+0
+1
+0
+0
+1
+0
+0
+0
+8
+6
+17
+
+19792
+1649
+1649
+7725
+7555
+1705
+1705
+4283
+5275
+5320
+3798
+2764
+5232
+4068
+2756
+4425
+3802
+2802
+3732
+3010
+2585
+2556
+5317
+2497
+2348
+1289374
+1050234
+2246095
+795705
+297
+308
+318
+308
+8072
+7985
+293
+66
+66
+66
+7480
+45065
+32776
+2
+78523
+177536
+9119
+155775
+197053
+96085
+77553
+73790
+35769
+25508
+53300
+7618
+431223
+2
+
+0.23
+5.9 10.82
+4.69
+0.14 5.64 10.91
+5.13
+0.13 5.32 10.54
+5.09
+0.18 5.65 10.63
+4.80
+0.18 5.55 10.49
+4.76
+0.12 5.68 10.46
+4.66
+0.14 5.42 10.23
+4.67
+0.22 5.59 10.76
+4.95
+2.17
+0.04 1.25
+0.88
+2.47
+0.04 1.41
+1.02
+2.21
+0.03 1.27
+0.91
+0.03 1.26
+2.28
+0.99
+2.57
+0.04 1.33
+1.20
+2.65
+0.03 1.27
+1.35
+2.26
+0.03 1.27
+0.96
+2.18
+0.04 1.30
+0.84
+2.24
+0.04 1.28
+0.92
+2.38
+0.03 1.44
+0.91
+0.03 1.36
+2.55
+1.16
+2.81
+0.03 1.28
+1.50
+2.14
+0.03 1.25
+0.86
+2.39
+0.03 1.30
+1.06
+2.57
+0.04 1.27
+1.26
+4.5
+3.15
+0.06 1.29
+0.88 0.033 1.25
+2.16
+2.79 10.7334.14 47.66
+3.14
+6.4529.43 39.02
+2.99 19.0349.63 71.65
+5.0421.28 29.39
+3.07
+0.26 5.27 24.41
+18.88
+0.16 5.28 24.57
+19.13
+18.35
+0.15 5.17 23.67
+0.14 5.45 24.16
+18.57
+0.21
+14.14
+3.3 17.65
+0.21 3.63 18.31
+14.47
+0.15 5.61 25.56
+19.80
+0.20 8.39 30.44
+21.85
+0.20 9.15 32.88
+23.53
+21.56
+0.21 8.46 30.23
+0.09
+4.54
+8.43
+0.92 5.71 14.25
+7.62
+0.6210.02 22.46
+11.82
+0.17
+8.96
+9.13
+8.4546.09108.77
+54.23
+53.3 30.2156.61140.12
+0.9740.84 95.78
+53.97
+54.99
+9.2246.75110.96
+54.96 65.4379.32199.71
+1.1514.23 53.96
+38.58
+0.8613.68 53.04
+38.5
+0.823.98 63.25
+38.47
+9.56
+6.4913.31 29.36
+5.6111.98 26.39
+8.8
+7.7417.84 40.16
+14.58
+0.6911.29
+14.52
+26.5
+4.5415.98 23.61
+3.09
+9.81
+0.19
+10
+
+3.8
+
+0
+
+0
+
+12
+
+20.66
+2.77 23.43
+11.75
+1.30 13.05
+12.03
+2.14 14.17
+12.68
+1.73 14.41
+12.36
+1.56 13.92
+11.66
+1.19 12.85
+11.68
+1.40 13.08
+25.85
+2.89 28.74
+5.55
+5.73
+0.18
+4.81
+4.97
+0.16
+3.57
+3.69
+0.12
+7.52
+0.23
+7.75
+4.63
+4.78
+0.15
+3.87
+3.97
+0.10
+3.64
+3.77
+0.13
+5.47
+5.66
+0.19
+4.55
+4.72
+0.17
+4.53
+4.67
+0.14
+7.72
+0.21
+7.93
+8.93
+9.15
+0.22
+4.98
+5.12
+0.14
+4.70
+4.82
+0.12
+3.53
+3.65
+0.12
+9.68
+9.95
+0.27
+7.52
+7.74
+0.22
+2.93
+1.79
+4.72
+8.43 20.76 29.19
+8.81 26.43 35.24
+6.29 11.83
+5.54
+0.76115.54
+114.78
+224.79
+1.40226.19
+126.28 32.03158.31
+75.18 22.26 97.44
+57.91 10.60 68.51
+88.94 11.48100.42
+111.91
+0.66112.57
+120.15 65.70185.85
+120.16 73.28193.44
+156.61 93.23249.84
+0.67 36.88
+3.83 33.49
+1.31 24.28
+1.22 82.24
+165.88 93.22 259.1
+219.74 199.25418.99
+218.45 211.21429.66
+108.76 165.1273.86
+110.2 103.82214.02
+2.35 78.13
+75.78
+1.35 40.17
+38.82
+1.77 78.78
+77.01
+9.65
+5.52 15.17
+7.61 16.29
+8.68
+39.2
+2.36118.04
+24.43 25.01 49.44
+168.2
+2.57170.77
+
+36.21
+29.66
+22.97
+81.02
+
+14.78 24.42
+
+115.68
+
+#
+vac.
+vars.
+found
+0
+3
+3
+0
+0
+3
+3
+2
+6
+5
+2
+1
+1
+2
+1
+2
+4
+2
+5
+6
+2
+2
+4
+3
+3
+0
+0
+0
+0
+3
+6
+0
+0
+0
+0
+2
+3
+3
+4
+7
+0
+1
+9
+0
+0
+3
+0
+0
+0
+0
+0
+0
+0
+0
+1
+0
+17
+
+Irrelevance
+Anal. Extra Total
+
+(s)runs (s)
+
+(s)
+
+0
+0
+
+23.43 23.77
+0.34
+0.26
+0
+0.26
+0.26
+0
+0.26
+14.41
+14.7
+0.29
+13.92 14.20
+0.28
+0.25
+0.25
+0.25
+0.25
+17.60 17.87
+0.27
+0.28
+0
+0.28
+0.28
+0
+0.28
+2.13
+1.86
+0.27
+7.04
+6.78
+0.26
+4.10
+3.82
+0.28
+2.43
+2.16
+0.27
+3.08
+2.82
+0.26
+4.02
+3.74
+0.28
+1.28
+1.01
+0.27
+3.06
+2.80
+0.26
+3.24
+2.96
+0.28
+3.39
+3.12
+0.27
+3.19
+2.93
+0.26
+3.24
+2.98
+0.26
+0.29
+0
+0.29
+7.23
+6.97
+0.26
+4.84
+5.11
+0.27
+4.72 10.23
+5.51
+29.19 34.26
+5.07
+33.78 42.01
+8.23
+25.64 28.33
+2.69
+0.23
+57.39 57.62
+0.26 132.43132.69
+0.22 158.31158.53
+97.44 97.66
+0.22
+0.33
+68.51 68.84
+0.34 100.42100.76
+0.21
+75.08 75.29
+0.21 112.59112.80
+0.2 120.30120.50
+0.21
+5.02
+33.49 34.08
+12.21 12.65
+0.17
+259.1 259.8
+1.12 418.99420.11
+0.32 112.58 112.9
+0.99 273.86274.85
+1.09 214.02215.11
+78.13
+1.07
+79.2
+40.17 41.05
+0.88
+78.78 79.67
+0.89
+0.39
+15.17 15.56
+16.29 16.66
+0.37
+0.53
+39.2 39.73
+0.36 103.01103.37
+49.44 51.21
+1.77
+0.19
+0.19
+
+0.21
+0.35
+0.59
+0.44
+0.17
+0.7
+
+0
+4.67
+
+0
+
+0
+
+Local Irrelevance (LI)
+
+Peripherality (P)
+
+#
+vac.
+vars.
+found
+0
+3
+3
+0
+0
+3
+3
+2
+6
+5
+2
+1
+2
+3
+1
+2
+4
+2
+6
+7
+2
+2
+4
+4
+3
+0
+0
+0
+0
+3
+6
+0
+0
+0
+0
+2
+3
+3
+4
+7
+0
+1
+9
+0
+0
+3
+0
+0
+0
+0
+0
+0
+0
+0
+2
+0
+17
+
+Anal. Extra Total
+
+(s)runs (s)
+
+(s)
+
+0
+0
+
+0
+0
+
+23.43 23.77
+0.34
+0.26
+0.26
+0.25
+0.25
+14.41 14.70
+0.29
+13.92 14.20
+0.28
+0.26
+0.26
+0.26
+0.26
+17.60 17.88
+0.28
+0.28
+0
+0.28
+0.29
+0
+0.29
+2.13
+1.86
+0.27
+7.04
+6.78
+0.26
+3.14
+2.86
+0.28
+1.22
+0.95
+0.27
+3.08
+2.82
+0.26
+4.02
+3.74
+0.28
+1.29
+1.01
+0.28
+3.06
+2.80
+0.26
+2.25
+1.98
+0.27
+2.21
+1.94
+0.27
+3.19
+2.93
+0.26
+3.24
+2.98
+0.26
+0.29
+0
+0.29
+5.20
+4.94
+0.26
+4.84
+5.10
+0.26
+4.72 10.44
+5.72
+29.19 34.41
+5.22
+33.78
+42
+8.22
+25.64 28.35
+2.71
+0.22
+57.39 57.61
+0.26 132.43132.69
+0.22 158.31158.53
+97.44 97.66
+0.22
+0.33
+68.51 68.84
+0.34 100.42100.76
+0.22
+75.08 75.30
+0.20 112.59112.79
+0.21 120.30120.51
+0.21
+0.21
+5.02
+0.35
+33.49 34.08
+0.59
+12.21 12.65
+0.44
+0.17
+0.17
+0.7
+259.1 259.8
+1.12 418.99420.11
+0.32 112.58 112.9
+0.99 273.86274.85
+1.12 214.02215.14
+78.13 79.21
+1.08
+40.17 41.05
+0.88
+78.78 79.67
+0.89
+0.4
+15.17 15.57
+16.29 16.66
+0.37
+39.2 39.73
+0.53
+88.41 88.76
+0.35
+49.44 51.22
+1.78
+0.19
+0.19
+
+0
+4.67
+
+0
+
+0
+
+#
+vac.
+vars.
+found
+0
+3
+3
+0
+0
+3
+3
+2
+6
+5
+2
+1
+2
+3
+1
+2
+4
+2
+6
+7
+2
+2
+4
+4
+3
+0
+0
+0
+0
+3
+6
+0
+0
+0
+0
+2
+3
+3
+4
+7
+0
+1
+9
+0
+0
+3
+0
+0
+0
+0
+0
+0
+0
+0
+2
+0
+17
+
+Anal. Extra Total
+
+(s)runs (s)
+
+(s)
+
+0
+0
+
+0
+0
+
+23.43 24.24
+0.81
+0.37
+0.37
+0.37
+0.37
+14.41 14.91
+0.50
+13.92 14.42
+0.50
+0.39
+0.39
+0.37
+0.37
+17.60 18.07
+0.47
+0.49
+0
+0.49
+0.47
+0
+0.47
+2.29
+1.86
+0.43
+7.2
+6.78
+0.42
+3.34
+2.86
+0.48
+1.39
+0.95
+0.44
+3.22
+2.82
+0.40
+4.2
+3.74
+0.46
+1.44
+1.01
+0.43
+3.21
+2.80
+0.41
+2.44
+1.98
+0.46
+2.39
+1.94
+0.45
+3.33
+2.93
+0.40
+3.38
+2.98
+0.40
+0.46
+0
+0.46
+5.36
+4.94
+0.42
+4.84
+5.25
+0.41
+4.72103.34
+98.62
+29.19 96.73
+67.54
+33.78446.08
+412.30
+25.64 62.85
+37.21
+0.29
+57.39 57.68
+0.33 132.43132.76
+0.29 158.31158.60
+97.44 97.71
+0.27
+0.60
+68.51 69.11
+0.68 100.42101.10
+0.27
+75.08 75.35
+0.24 112.59112.83
+0.25 120.30120.55
+0.24
+0.24
+5.41
+0.74
+33.49 35.16
+1.67
+12.21 13.23
+1.02
+0.17
+0.17
+2.33
+259.1261.43
+5.8 418.99424.79
+0.61 112.58113.19
+3.7 273.86277.56
+4.5 214.02218.52
+78.13
+80.6
+40.17 41.91
+78.78 80.76
+15.17
+16
+17
+16.29
+40.4
+39.2
+88.41 89.15
+49.44 73.94
+0.19
+
+2.47
+1.74
+1.98
+0.83
+0.71
+1.2
+0.74
+24.5
+0.19
+
+0
+4.67
+
+0
+
+0
+
+

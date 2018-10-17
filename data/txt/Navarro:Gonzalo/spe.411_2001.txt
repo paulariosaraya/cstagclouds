@@ -1,0 +1,4096 @@
+SOFTWARE—PRACTICE AND EXPERIENCE
+Softw. Pract. Exper. 2001; 31:1265–1312 (DOI: 10.1002/spe.411)
+
+NR-grep: a fast and ﬂexible
+pattern-matching tool
+
+Gonzalo Navarro
+
+∗,†
+
+Department of Computer Science, University of Chile, Blanco Encalada 2120, Santiago, Chile
+
+SUMMARY
+
+We present nrgrep (‘non-deterministic reverse grep’), a new pattern-matching tool designed for efﬁcient
+search of complex patterns. Unlike previous tools of the grep family, such as agrep and Gnu grep, nrgrep is
+based on a single and uniform concept: the bit-parallel simulation of a non-deterministic sufﬁx automaton.
+As a result, nrgrep can ﬁnd from simple patterns to regular expressions, exactly or allowing errors in the
+matches, with an efﬁciency that degrades smoothly as the complexity of the searched pattern increases.
+Another concept that is fully integrated into nrgrep and that contributes to this smoothness is the selection
+of adequate subpatterns for fast scanning, which is also absent in many current tools. We show that the
+efﬁciency of nrgrep is similar to that of the fastest existing string-matching tools for the simplest patterns,
+and is by far unmatched for more complex patterns. Copyright  2001 John Wiley & Sons, Ltd.
+
+KEY WORDS:
+
+online string matching; regular expression searching; approximate string matching; grep; agrep;
+BNDM
+
+1.
+
+INTRODUCTION
+
+The purpose of this paper is to present a new pattern-matching tool which we have called nrgrep, for
+‘non-deterministic reverse grep’. Nrgrep is aimed at efﬁcient searching for complex patterns inside
+natural language texts, but it can be used in many other scenarios.
+
+The pattern-matching problem can be stated as follows: given a text T1...n of n characters and a
+pattern P , ﬁnd all the positions of T where P occurs. The problem is basic in almost every area of
+computer science and appears in many different forms. The pattern P can be no more than a simple
+string, but it can also be, for example, a regular expression. An ‘occurrence’ can be deﬁned as exactly
+or ‘approximately’ matching the pattern.
+
+In this paper we concentrate on online string matching, that is, the text cannot be indexed. Online
+string matching is useful for casual searching (i.e. users looking for strings in their ﬁles who are
+
+∗
+Correspondence to: G. Navarro, Department of Computer Science, University of Chile, Blanco Encalada 2120, Santiago, Chile.
+†E-mail: gnavarro@dcc.uchile.cl
+
+Contract/grant sponsor: Fundaci´on Andes and ECOS/Conicyt; contract/grant number: C99E04
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Received 11 September 2000
+Revised 2 July 2001
+Accepted 2 July 2001
+
+1266
+
+G. NAVARRO
+
+unwilling to maintain an index for that purpose), dynamic text collections (where the cost of keeping
+an up-to-date index is prohibitive, including the searchers inside text editors and Web interfaces‡), for
+not very large texts (up to a few hundred megabytes) and even as internal tools of indexed schemes
+(as agrep [1] is used inside glimpse [2] or cgrep [3] is used inside compressed indexes [4]).
+
+There is a large class of string matching algorithms in the literature (see, for example, [5–7]) but
+not all of them are practical. There is also a wide variety of fast online string matching tools in the
+public domain, most prominently the grep family. Among these, Gnu grep and Wu and Manber’s
+agrep [1] are widely known and currently considered to be the fastest string-matching tools in practice.
+Another distinguishing feature of these software systems is their ﬂexibility: they can search not only
+for simple strings, but they also permit classes of characters (that is, a pattern position matches a
+set of characters), wild cards (a pattern position that matches an arbitrary string), regular expression
+searching, multipattern searching, etc. Agrep also permits approximate searching: the pattern matches
+the text after performing a limited number of alterations on it.
+
+The algorithmic principles behind agrep are diverse [8]. Exact string matching is done with the
+Horspool algorithm [9], a variant of the Boyer–Moore family [10]. The speed of the Boyer–Moore
+string-matching algorithms comes from their ability to ‘skip’ (i.e. not inspect) some text characters.
+Agrep deals with more complex patterns using a variant of Shift-Or [11], an algorithm exploiting ‘bit
+parallelism’ (a concept that we explain later) to simulate non-deterministic automata (NFA) efﬁciently.
+Shift-Or, however, cannot skip text characters. Multipattern searching is treated with bit parallelism or
+with a different algorithm depending on the case. As a result, the search performance of agrep varies
+sharply depending on the type of search pattern, and even slight modiﬁcations to the pattern yield
+widely different search times. For example, the search for the string "algorithm" is seven times
+faster than for "[Aa]lgorithm" (where "[Aa]" is a class of characters that matches "A" and
+"a", which is useful to detect a word either starting a sentence or not). In the ﬁrst case agrep uses
+Horspool’s algorithm and in the second case it uses Shift-Or. Intuitively, there should exist a more
+uniform approach where both strings could be efﬁciently searched for without a signiﬁcant difference
+in the search time.
+
+An answer to this challenge is BNDM algorithm (for ‘backward non-deterministic DAWG
+matching’, where DAWG stands for ‘deterministic acyclic word graph’) [12,13]. BNDM is based on
+a previous algorithm, BDM (for ‘backward DAWG matching’) [6,14]. The BDM algorithm (to be
+explained later) uses a ‘sufﬁx automaton’ to detect substrings of the pattern inside a text window (the
+Boyer–Moore family detects only sufﬁxes of the pattern). As the Boyer–Moore algorithms, BDM can
+also skip text characters. In the original BDM algorithm the sufﬁx automaton is made deterministic.
+BNDM is a recent version of BDM that keeps the sufﬁx automaton in non-deterministic form by using
+bit parallelism. As a result, BNDM can search for complex patterns and still keep a search efﬁciency
+close to that for simple patterns. It has been shown experimentally [12,13] that the BNDM algorithm is
+by far the fastest one to search for complex patterns. BNDM has been later extended to handle regular
+expressions [15].
+
+Nrgrep is a pattern-matching tool built over the BNDM algorithm (hence the name ‘nondeterministic 
+reverse grep’, since BNDM scans windows of the text in reverse direction). However,
+
+‡We refer to the ‘search in page’ facility, not to be confused with searching the Web.
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1267
+
+there is a gap between a pattern-matching algorithm and a real software. The purpose of this work is to
+ﬁll that gap. We have classiﬁed the permitted search patterns at three levels.
+
+Simple patterns: a simple pattern is a sequence of m classes of characters (note that a single character
+is a particular case of a class). Its distinguishing feature is that an occurrence of a simple pattern
+has length m as well, as each pattern position matches one text position.
+
+Extended patterns: an extended pattern adds to simple patterns the ability to characterize individual
+classes as ‘optional’ (i.e. they can be skipped when matching the text) or ‘repeatable’ (i.e. they
+can appear consecutively a number of times in the text). The purpose of extended patterns is
+to capture the most commonly used extensions of the normal search patterns so as to develop
+specialized pattern-matching algorithms for them.
+
+Regular expressions: a regular expression is formed by simple classes, the empty string, or the
+‘concatenation’, ‘union’ or ‘repetition’ of other regular expressions. This is the most general
+type of pattern we can search for.
+
+We develop a different pattern-matching algorithm (with increasing complexity) for each type of
+pattern, so simpler patterns are searched for with simpler and faster algorithms. The classiﬁcation has
+been made bearing in mind the typical search needs of natural language; it would be different for,
+say, DNA searching. We also have this in mind when we design the error model for approximate
+searching. ‘Approximate searching’ or ‘searching permitting errors’ means that the user sets an error
+threshold k and the system is able to ﬁnd the pattern in the text even if it is necessary to perform k or
+less ‘operations’ in the pattern to match its occurrence in the text. The operations typically permitted
+are the insertion, deletion and substitution of single characters. However, transposition of adjacent
+characters is an important typing error [16] that is normally disregarded because it is difﬁcult to deal
+with. We allow the four operations in nrgrep, although the user can specify a subset of them.
+
+An important aspect that deserves attention in order to obtain the desired ‘smoothness’ in the search
+time is the selection of an optimal subpattern to scan the text. A typical case is an extended pattern
+with a large and repeatable class of characters close to one extreme. For technical reasons that will be
+made clear later, it may be very expensive to search for the pattern ‘as is’, while pruning the extreme
+of the pattern that contains the class (and verifying the potential occurrences found) leads to much
+faster searching. Some tools (such as Gnu grep for regular expressions) try to apply some heuristics
+of this type, but we provide a general and uniform subpattern optimization method that works well in
+all cases and, under a simpliﬁed probabilistic model, yields the optimal search performance for that
+pattern. Moreover, the selected subpattern may be of a simpler type than the whole pattern and a faster
+search algorithm may be possible. Detecting the exact type of pattern given by the user (despite the
+syntax used) is an important issue that is solved by the pattern parser.
+
+We have followed the philosophy of agrep in some aspects, such as the record-oriented way of
+presenting the results, and most of the pattern syntax features and search options. The main advantages
+of nrgrep over the grep family are uniformity in design, smoothness in search time, speed when
+searching for complex patterns, powerful extended patterns, improved error model for approximate
+searching, and subpattern optimization.
+
+In this paper we start by explaining the concepts of bit parallelism and searching with sufﬁx
+automata. Then we explain how these are combined to search for simple patterns, extended patterns
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1268
+
+G. NAVARRO
+
+and regular expressions. We later consider the approximate search of these patterns. Finally, we present
+the nrgrep software and show some experimental results. The algorithmic aspects of the paper borrow
+from our previous work in some cases [12,13,15,17], but the paper has some novel and non-trivial
+algorithmic contributions, such as:
+
+• searching for extended patterns, which implies the bit-parallel simulation of new types of
+restricted automata;
+• approximate searching allowing transpositions for the three types of patterns, which has never
+been considered under the bit-parallel approach; and
+• algorithms to select optimal search subpatterns in the three types of patterns.
+The nrgrep tool is freely available under a Gnu license from
+
+http://www.dcc.uchile.cl/˜gnavarro/pubcode/.
+
+2. BASIC CONCEPTS
+
+We deﬁne in this section the basic concepts and notation needed throughout the paper.
+
+2.1. Notation
+We consider that the text is a sequence of n characters, T = t1 . . . tn, where ti ∈ .  is the alphabet of
+the text and its size is denoted || = σ . In the simplest case the pattern is denoted as P = p1 . . . pm,
+a sequence of m characters pi ∈ , in which case it speciﬁes the single string p1 . . . pm. More general
+patterns specify a ﬁnite or inﬁnite set of strings.
+We say that P matches T at position i whenever there exists a j ≥ 0 such that ti . . . ti+j belongs to
+the set of strings speciﬁed by the pattern. The substring ti . . . ti+j is called an ‘occurrence’ of P in T .
+Our goal is to ﬁnd all the text positions that start a pattern occurrence.
+The following notation is used for strings. Si...j denotes the string si si+1 . . . sj . In particular,
+Si...j = ε (the empty string) if i > j . A string X is said to be a preﬁx, sufﬁx and factor (or substring),
+respectively, of XY , Y X and Y XZ, for any Y and Z.
+We use some notation to describe bit-parallel algorithms. We use exponentiation to denote bit
+repetition, e.g. 031 = 0001. We denote as b(cid:21) . . . b1 the bits of a mask of length (cid:21), which is stored
+on the bits of computer words, i.e. ‘|’ is the bitwise-or, ‘&’ is the bitwise-and, ‘(cid:1)’ is the bitwise-xor,
+somewhere inside the computer word of ﬁxed length w (in bits). We use C-like syntax for operations
+‘∼’ complements all the bits, and ‘<<’ moves the bits to the left and enters zeros from the right,
+e.g. b(cid:21)b(cid:21)−1 . . . b2b1 << 3 = b(cid:21)−3 . . . b2b1000. We can also perform arithmetical operations on the
+bits, such as addition and subtraction, which operate the bits as the binary representation of a number,
+for instance b(cid:21) . . . bx10000 − 1 = b(cid:21) . . . bx01111.
+In the following we show that the pattern can be a more complex entity, matching in fact a set of
+
+different text substrings.
+
+2.2. Simple patterns
+
+We call a ‘simple’ pattern a sequence of characters or classes of characters. Let m be the number of
+elements in the sequence; then a simple pattern P is written as P = p1 . . . pm, where pi ⊆ . We say
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1269
+
+that P matches at text position i + 1 whenever ti ∈ pi for i ∈ 1 . . . m. The most important feature of
+simple patterns is that they match a substring of the same length m in the text.
+
+We use the following notation to describe simple patterns: we concatenate the elements of the
+sequence together. Simple characters (i.e. classes of size 1) are written down directly, while other
+classes of characters are written in square brackets. The ﬁrst character inside the square brackets can
+be "ˆ", which means that the class is exactly the complement of what is speciﬁed. The rest is a simple
+enumeration of the characters of the class, except that we allow ranges: "x-y" means all the characters
+between x and y inclusive (we assume a total order in , which is in practice the ASCII code). Finally,
+the character "." represents a class equal to the whole alphabet and "#" represents the class of all
+separators (i.e. non-alphanumeric characters). Most of these conventions are the same used in Unix
+software. Some examples are:
+
+• "[Aa]merican", which matches "American" and "american";
+• "[ˆ\n]Begin", which ﬁnds "Begin" if it is not preceded by a line break;
+• "../../197[0-9]", which matches any date in the 70s;
+• ".e[ˆa-zA-Z_]t#", which permits any character in the ﬁrst position, then "e", then
+anything except a letter or underscore in the third position, then "t", and ﬁnishes with a
+separator.
+
+Note that we have used "\n" to denote the newline. We also use "\t" for the tab, "\xHH" for the
+character with hex ASCII code HH , and in general "\C" to interpret any character C literally (e.g. the
+backslash character itself, as well as the special characters that follow).
+
+It is possible to specify that the pattern has to appear at the beginning of a line by preceding it with
+"ˆ" or at the end of the line by following it with "$". Note that this is not the same as adding the
+newline at the extreme because the beginning/end of the ﬁle signals also the beginning/end of the line,
+and the same happens with records when the record delimiter is not the end of line.
+
+2.3. Extended patterns
+
+In general, an extended pattern adds some extra speciﬁcation capabilities to the simple pattern
+mechanism. In this work we have chosen some features which we believe are the most interesting
+for typical text searching. The reason to introduce this intermediate-level pattern (between simple
+patterns and regular expressions) is that it is possible to devise specialized search algorithms for them
+which can be faster than those for general regular expressions. The operations we permit for extended
+patterns are: specify optional classes (or characters), and permit the repetition of a class (or character).
+The notation we use is to add a symbol after the affected character or class: "?" means an optional
+class, "*" means that the class can appear zero or more times, and "+" means that it can appear one
+or more times. Some examples are:
+
+• "colou?r", which matches "color" and "colour";
+• "[a-zA-Z\_][a-zA-Z\_0-9]*", which matches valid variable names in most programming 
+languages (a letter followed by letters or digits);
+• "Latin#+America", which matches "Latin" and "America" separated by one or more
+separator characters (e.g. spaces, tabs etc.).
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1270
+
+G. NAVARRO
+
+2.4. Regular expressions
+
+A regular expression is the most sophisticated pattern for which we allow a search, and it is in general
+considered powerful enough for most applications. A regular expression is deﬁned as follows.
+• Basic elements: any character and the empty string (ε) are regular expressions matching
+themselves.
+• Parenthesis: if e is a regular expression then so is (e), which matches the same strings. This is
+used to change precedence.
+• Concatenation: if e1 and e2 are regular expressions, then e1 · e2 is a regular expression that
+matches a string x iff x can be written as x = yz, where e1 matches y and e2 matches z.
+• Union: if e1 and e2 are regular expressions, then e1|e2 is a regular expression that matches a
+string x iff e1 or e2 match x.
+• Kleene closure: if e is a regular expression then e∗ is a regular expression that matches a string
+x iff, for some n, x can be written as x = x1 . . . xn and e matches each string xi.
+We follow the same syntax (with the precedence order ∗, ·, |) except that we use square brackets
+to abbreviate (x1|x2| . . .|xn) = [x1x2 . . . xn] where the xi are characters, we omit the concatenation
+operator (·), we add the two operators e+ = ee∗ and e? = (e|ε) and we use the empty string to denote
+ε, e.g. "a(b|)c" denotes a(b|ε)c. These arrangements make the extended patterns to be a particular
+case of regular expressions. Some examples are:
+
+• "dog|cat", which matches "dog" and "cat";
+• "((Dr.|Prof.|Mr.)#)*Knuth", which matches "Knuth" preceded by a sequence of
+titles.
+
+3. PATTERN MATCHING ALGORITHMS
+
+We explain in this section the basic string and regular expression search algorithms our software builds
+on.
+
+3.1. Bit parallelism and the Shift-Or algorithm
+
+In [11], a new approach to text searching was proposed. It is based on bit parallelism [18].
+This technique consists of taking advantage of the intrinsic parallelism of the bit operations inside
+a computer word. By cleverly using this fact, the number of operations that an algorithm performs can
+be cut down by a factor of at most w, where w is the number of bits in the computer word. Since in
+current architectures w is 32 or 64, the speedup is very signiﬁcant in practice.
+
+Figure 1 shows a non-deterministic automaton that searches for a pattern in a text. Classical patternmatching 
+algorithms, such as KMP [19], convert this automaton to a deterministic form and achieve
+O(n) worst-case search time. The Shift-Or algorithm [11], on the other hand, uses bit parallelism to
+simulate the automaton in its non-deterministic form. It achieves O(mn/w) worst-case time, i.e. an
+optimal speedup over a classical O(mn) simulation. For m ≤ w, Shift-Or is twice as fast as KMP
+because of better use of the computer registers. Moreover, it is easily extended to handle classes of
+characters.
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1271
+
+Σ
+
+0
+
+a
+
+b
+
+1
+
+c
+
+d
+
+3
+
+e
+
+4
+
+2
+
+f
+
+5
+
+g
+
+6
+
+7
+
+Figure 1. A non-deterministic automaton (NFA) to search for the pattern P = "abcdefg" in a text.
+
+3.1.1. Text scanning
+
+We present now the Shift-And algorithm [8], which is an easier-to-explain (though a little less efﬁcient)
+variant of Shift-Or. Given a pattern P = p1p2 . . . pm, pi ∈  and a text T = t1t2 . . . tn, ti ∈ , the
+algorithm ﬁrst builds a table B which, for each character, stores a bit mask bm . . . b1. The mask in B[c]
+has the ith bit set if and only if pi = c. The state of the search is kept in a machine word D = dm . . . d1,
+where di is set whenever p1p2 . . . pi matches the end of the text read up to now (another way to see it
+is to consider that di tells whether the state numbered i in Figure 1 is active). Therefore, we report a
+match whenever dm is set.
+We set D = 0m initially, and for each new text character tj we update D using the formula
+
+D(cid:15) ←− ((D << 1) | 0m−11) & B[tj]
+
+The formula is correct because the ith bit is set if and only if the (i − 1)th bit was set for the
+previous text character and the new text character matches the pattern at position i. In other words,
+tj−i+1 . . . tj = p1 . . . pi if and only if tj−i+1 . . . tj−1 = p1 . . . pi−1 and tj = pi. Again, it is possible
+to relate this formula to the movement that occurs in the NFA for each new text character; each state gets
+the value of the previous state, but this happens only if the text character matches the corresponding
+arrow. Finally, the ‘|0m−11’ after the shift allows a match to begin at the current text position (this
+operation is saved in the Shift-Or, where all the bits are complemented). This corresponds to the self
+loop at the initial state of the automaton.
+The cost of this algorithm is O(n). For patterns longer than the computer word (i.e. m > w), the
+algorithm uses (cid:17)m/w(cid:18) computer words for the simulation (not all them are active all the time), with a
+worst-case cost of O(mn/w) and still an average-case cost of O(n).
+
+3.1.2. Classes of characters and extended patterns
+
+The Shift-Or algorithm is not only very simple, but it has some further advantages. The most immediate
+one is that it is very easy to extend to handle classes of characters where each pattern position may not
+only match a single character but also a set of characters. If pi is the set of characters that match the
+position i in the pattern, we set the ith bit of B[c] for all c ∈ pi. No other change is necessary to the
+algorithm. In [11] it is also shown how to allow a limited number k of mismatches in the occurrences,
+at O(nm log(k)/w) cost.
+
+This paradigm was later enhanced [8] to support wild cards, regular expressions, approximate search
+with nonuniform costs, and combinations of these. Further development of the bit-parallelism approach
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1272
+
+G. NAVARRO
+
+I
+
+ε
+
+0
+
+a
+
+ε
+
+1
+
+b
+
+ε
+
+2
+
+c
+
+ε
+
+3
+
+d
+
+ε
+
+4
+
+e
+
+ε
+
+5
+
+f
+
+ε
+
+6
+
+g
+
+ε
+
+7
+
+Figure 2. A non-deterministic sufﬁx automaton for the pattern P = "abcdefg". Dashed lines represent
+
+ε-transitions (i.e. they occur without consuming any input).
+
+for approximate string matching yielded some of the fastest algorithms for short patterns [20,21]. In
+most cases, the key idea was to simulate an NFA.
+
+Bit parallelism has become a general way to simulate simple NFAs instead of converting them to
+
+deterministic automata. This is how we use it in nrgrep.
+
+3.2. The BDM algorithm
+
+The main disadvantage of Shift-Or is its inability to skip characters, which makes it slower than the
+algorithms of the Boyer–Moore [10] or the BDM [6,14] families. We describe in this section the BDM
+pattern-matching algorithm, which is able to skip some text characters.
+BDM is based on a sufﬁx automaton. A sufﬁx automaton on a pattern P = p1p2 . . . pm is an
+automaton that recognizes all the sufﬁxes of P . A non-deterministic version of this automaton has a
+very regular structure and is shown in Figure 2. In the BDM algorithm [6,14], this automaton is made
+deterministic.
+
+A very important fact is that this automaton can be used not only to recognize the sufﬁxes of P , but
+also factors of P . Note that there is a path labeled by x from the initial state if and only if x is a factor
+of P . That is, the NFA will not run out of active states as long as it has read a factor of P .
+
+The sufﬁx automaton is used to design a simple pattern-matching algorithm. This algorithm runs in
+O(mn) time in the worst case, but it is optimal on average (O(n logσ m/m) time). Other more complex
+variations such as TurboBDM [14] and MultiBDM [6,22] achieve linear time in the worst case.
+To search for a pattern P = p1p2 . . . pm in a text T = t1t2 . . . tn, the sufﬁx automaton of
+P r = pmpm−1 . . . p1 (i.e. the pattern read backwards) is built. A window of length m is slid along
+the text, from left to right. The algorithm searches backward inside the window for a factor of the
+pattern P using the sufﬁx automaton, i.e. the sufﬁx automaton of the reverse pattern is fed with the
+characters in the text window read backward. This backward search ends in two possible forms.
+
+(1) We fail to recognize a factor, i.e. we reach a window character σ that makes the automaton run
+out of active states. This means that the sufﬁx of the window we have read is no longer a factor
+of P . Figure 3 illustrates this case. We then shift the window to the right, its starting position
+corresponding to the position following the character σ (we cannot miss an occurrence because
+in that case the sufﬁx automaton would have found a factor of it in the window).
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1273
+
+Window
+
+(cid:27)
+
+(cid:27)
+
+Search for a factor with the su(cid:14)x automaton
+
+u
+
+Fail to recognize a factor at (cid:27).
+
+New search
+
+Safe shift
+
+New window
+
+Figure 3. Sufﬁx automaton search.
+
+(2) We reach the beginning of the window, therefore recognizing the pattern P since the length-m
+window is a factor of P (indeed, it is equal to P ). We report the occurrence, and shift the window
+by one position.
+
+3.3. Combining Shift-Or and BDM: the BNDM algorithm
+
+We describe in this section the BNDM pattern-matching algorithm [12]. This algorithm, a combination
+of Shift-Or and BDM, has all the advantages of the bit-parallel forward scan algorithm, and in addition
+it is able to skip some text characters like BDM.
+
+Instead of making the automaton of Figure 2 deterministic, BNDM simulates it using bit parallelism.
+The bit-parallel simulation works as follows. Just as for Shift-And, we keep the state of the search using
+m bits of a computer word D = dm . . . d1. Each time we position the window in the text we initialize
+D = 1m (this corresponds to the ε-transitions) and scan the window backward. For each new text
+character read in the window we update D. If we run out of 1s in D then there cannot be a match and
+we suspend the scanning and shift the window. If, on the other hand, we can perform m iterations, then
+we report the match.
+
+We use a table B which for each character c stores a bit mask. This mask sets the bits corresponding
+to the positions where the reversed pattern has the character c (just as in the Shift-And algorithm).
+The formula to update D is
+
+D(cid:15) ←− (D & B[tj]) << 1
+
+BNDM is not only faster than Shift-Or and BDM (for about 5 ≤ m ≤ 100), but it can accommodate
+all the extensions mentioned in Section 2. In particular, it can easily deal with classes of characters by
+just altering the preprocessing, and it is by far the fastest algorithm to search for this type of patterns
+[12,13].
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1274
+
+G. NAVARRO
+
+a
+
+0
+
+b
+
+1
+
+c
+
+d
+
+3
+
+2
+
+4
+
+ε
+
+ε
+
+5
+
+6
+
+ε
+
+d
+
+7
+
+8
+
+ε
+
+ε
+
+9
+
+ε
+
+ε
+
+10
+
+11
+
+f
+
+e
+
+12
+
+13
+
+ε
+
+ε
+
+d
+
+14
+
+15
+
+e
+
+16
+
+a
+
+0
+
+b
+
+1
+
+c
+
+d
+
+3
+
+d
+
+4
+
+2
+
+d
+
+7
+
+d
+
+e
+
+8
+
+9
+
+e
+
+5
+
+e
+
+f
+
+6
+
+f
+
+Figure 4. Thompson’s (top) and Glushkov’s (bottom) resulting NFAs for the
+
+regular expression "abcd(d|ε)(e|f)de".
+
+Note that this type of search is called ‘backward’ scanning because the text characters inside the
+window are read backwards. However, the search progresses from left to right in the text as the window
+is shifted. There have been other (few) attempts to skip characters under a Shift-Or approach, for
+example [23].
+
+3.4. Regular expression searching
+
+Bit parallelism has been successfully used to deal with regular expressions. Shift-Or was extended in
+two ways [8,15,17] to deal with this case, ﬁrst using the Thompson [24] and later Glushkov’s [25]
+constructions of NFAs from the regular expression. Figure 4 shows both constructions for the pattern
+"abcd(d|ε)(e|f)de".
+
+Given a regular expression with m positions (each character/class deﬁnes a new position),
+Thompson’s construction produces an automaton of up to 2m states. Its advantage is that the states
+of the resulting automaton can be arranged in a bit mask so that all the transitions move forward except
+the ε-transitions. This is used [8] for a bit-parallel simulation which moves the bits forward (as for the
+simple Shift-Or) and then applies all the moves corresponding to ε-transitions. For this sake, a table E
+mapping from bit masks to bit masks is precomputed, so that E[x] yields a bit mask where x has been
+expanded with all the ε-moves. The code for a transition is therefore
+D ←− ((D << 1) | 0s−11) & B[tj]
+D ←− E[D]
+
+We have used s as the number of states in the Thompson automaton, where m < s ≤ 2m. The main
+problem is that the E table has 2s entries. This is handled by splitting the argument horizontally, so
+for example if s = 32 then two tables E1 and E2 can be created which receive half masks and deliver
+full masks with the ε-expansion of only the bits of their half (of course the ε-transitions can go to the
+other half; this is why they deliver full masks). In this way the amount of memory required is largely
+reduced at the cost of two operations to build the real E value. This takes advantage of the fact that, if
+a bit mask x is split in two halves x = yz, then E[yz] = E[y0
+
+|z|] | E[0
+
+|y|z].
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1275
+
+Glushkov’s construction has the advantage of producing an automaton with exactly m + 1 states,
+which can as low as half the states generated by Thompson’s construction. On the other hand, the
+structure of arrows is not regular and the trick of forward shift plus ε-moves cannot be used. Instead, it
+has another property: all the arrows leading to a given state are labeled by the same character or class.
+This property has been used recently [17] to provide a space-economical bit parallel simulation where
+the code for a transition is
+
+D ←− T [D] & B[tj]
+
+where T is a table that receives a bit map D of states and delivers another bit map of states reachable
+from states in D, no matter by which characters. The ε-transitions do not have to be dealt with because
+Glushkov’s construction does not produce them. The T table can be horizontally partitioned as well.
+
+It has been shown [17] that a bit-parallel implementation of Glushkov’s construction is faster than
+one of Thompson’s, which should be clear since in general the tables obtained are much smaller.
+An interesting improvement, possible thanks to bit parallelism, is that classes of characters can be
+dealt with with the normal mechanism used for simple patterns, without generating one state for each
+alternative.
+
+On the other hand, a deterministic automaton (DFA) can be built from the non-deterministic one.
+It is not hard to see that indeed the previous constructions simulate a DFA, since each state of
+the DFA can be seen as a set of states of the NFA, and each possible set of states of the NFA is
+represented by a bit mask. Normally the DFA takes less space because only the reachable combinations
+are generated and stored, while for direct access to the tables we need to store in the bit-parallel
+simulations all the possible combinations of active and inactive states. On the other hand, bit parallelism
+permits extending regular expressions with classes of characters and other features (e.g. approximate
+searching), which is difﬁcult otherwise. Furthermore, Glushkov’s construction permits not storing a
+table of states × characters, of worst-case size O(2mσ ) in the case of a DFA, but just the table T
+of size O(2m). Finally, in the case of space problems the technique of splitting the bit masks can be
+applied.
+
+Therefore, we use the bit-parallel simulation of Glushkov’s automaton for nrgrep. After the update
+operation we check whether a ﬁnal state of D is reached (this means just an and operation with the
+mask of ﬁnal states). Describing Glushkov’s NFA construction algorithm [25] is outside the scope of
+this paper, but it takes O(m2) time. The result of the construction can be represented as a table B[c],
+which yields the states reached by character c (no matter from where), and a table Follow[i], which
+yields the bit mask of states activated from state i, no matter by which character. From Follow, the
+deterministic version T can be built in O(2m) worst case time with the following procedure:
+T [0] ←− 0
+for i ∈ 0 . . . m
+
+for j ∈ 0 . . . 2i − 1
+
+T[2i + j] ←− Follow[i] | T [j]
+
+A backward search algorithm for regular expressions is also possible [15,17] and in some cases
+the search is much faster than a forward search. The idea is as follows. First, we compute the length
+of the shortest path from the initial to a ﬁnal state (using a simple graph algorithm). This will be
+the length of the window in order not to lose any occurrence. Second, we reverse all the arrows of
+the automaton, make all the states initial, and take as the only ﬁnal state the original initial state.
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1276
+
+G. NAVARRO
+
+a
+
+b
+
+c
+
+d
+
+d
+
+ε
+
+d
+
+e
+
+e
+
+d
+
+e
+
+f
+
+f
+
+Figure 5. An automaton recognizing reverse preﬁxes of "abcd(d|ε)(e|f)de", based on the
+
+Glushkov construction of Figure 4.
+
+The resulting automaton will have active states as long as we have read a reverse factor of a string
+matching the regular expression, and will reach its ﬁnal state when we read in particular a reverse
+preﬁx. Figure 5 illustrates the result.
+
+We apply the same BNDM technique of reading the text window backwards. If the automaton runs
+out of active states, then no factor of an occurrence of the pattern is present in the window and we can
+shift the window, aligning its beginning to one position after the one that caused the mismatch. If, on
+the other hand, we reach the beginning of the window in the backward scan, we cannot guarantee that
+an occurrence has been found. When searching for a simple string, the only way to reach the beginning
+of the window is to have read the whole pattern. Regular expressions, on the other hand, can have
+occurrences of different length, and all we know is that we have matched a factor. There are in fact two
+choices.
+
+• The ﬁnal state of the automaton is not active; which means that we have not read a preﬁx of an
+occurrence. In this case we shift the window by one position and resume the scanning.
+• The ﬁnal state of the automaton is active. Since we have found a pattern preﬁx, we have to
+perform a forward veriﬁcation starting at the initial position of the window until either we ﬁnd
+an occurrence or the automaton runs out of active states.
+
+So we also need, apart from the reversed automaton, also the normal automaton (without the initial
+
+self-loop, as in Figure 4) for the veriﬁcation of potential occurrences.
+
+An extra complication comes from the fact that the NFA with reverse arrows does not have the
+property that all arrows leading to a state are labeled by the same character. Rather, all the arrows
+leaving a state are labeled by the same character. Hence the simulation can be done as follows:
+
+D ←− T R[D & B[tj]]
+
+where T R corresponds to the reverse arrows but B is that of the forward automaton [17].
+
+3.5. Approximate string matching
+
+Approximate searching means ﬁnding the text substrings that can be converted into the pattern
+by performing at most k ‘operations’ on them. Permitting a limited number k of such differences
+(also called errors) is an essential tool to recover from typing, spelling and OCR (optical character
+recognition) errors. Despite approximate pattern matching being reducible to a problem of regular
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1277
+
+expression searching, the regular expression grows exponentially with the number of allowed errors
+(or differences).
+
+A ﬁrst design decision regards what should be taken as an error. Based on existing surveys [16,26],
+we have chosen the following four types of errors: insertion of characters, deletion of characters,
+replacement of a character by another character, and exchange of adjacent characters (transposition).
+These errors are symmetric in the sense that one can consider that they occur in the pattern or in the
+text and the result is the same. Traditionally, only the ﬁrst three errors have been permitted because
+transposition, despite being recognized as a very important source of errors, is harder to handle.
+However, the problem is known to grow very fast in complexity as k increases, and since a transposition
+can only be simulated with two errors of the other kind (i.e. an insertion and a deletion), we would need
+to double k in order to obtain a similar result. One of the algorithmic contributions of nrgrep is a bitparallel 
+algorithm for permitting the transpositions together with the other types of errors. This permits
+us to search with smaller k values and hence obtain a faster search with similar (or better) retrieval
+results.
+
+Approximate searching is characterized by the fact that no known search algorithm is the best in all
+cases [26]. From the wealth of existing solutions, we have selected those that adapt best to our goal of
+ﬂexibility and uniformity. Three main ideas can be used: forward searching, backward searching and
+splitting into k + 1 subpatterns.
+
+3.5.1. Forward searching
+The most basic idea that is well suited to bit parallelism [8] is to have k + 1 similar automata,
+representing the state of the search when zero to k errors have occurred. Apart from the normal arrows
+inside each automaton, there are arrows going from automaton i to i + 1 corresponding to the different
+errors. The original approach [8] did not consider transpositions, which were dealt with subsequently
+[27].
+Figure 6 shows an example with k = 2. Let us ﬁrst focus on the big nodes and solid/dashed lines.
+Apart from the normal forward arrows we have three types of arrows that lead from each row to the next
+one (i.e. increment the number of errors): vertical arrows, which represent the insertion of characters
+in the pattern (since they advance in the text but not in the pattern); diagonal arrows, which represent
+replacement of the current text character by a pattern character (since they advance in the text and in
+the pattern); and dashed diagonal arrows (ε-transitions), which represent deletion of characters in the
+pattern (since they advance in the pattern without consuming any text input). The remaining arrows
+(the dotted ones) represent transpositions, which permit reading the next two pattern characters in the
+wrong order and move to the next row. This is achieved by means of ‘temporary’ states, which we have
+drawn as smaller circles.
+
+If we disregard the transpositions, there are different ways to simulate this automaton in O(1)
+time when it ﬁts in a computer word [20,21], but no bit parallel solution has been presented to
+account for the transpositions. This is one of our contributions and is explained later in the paper.
+We extend a simpler bit parallel simulation [8], which takes O(k) time per text character as long as
+m = O(w). The technique stores each row in a machine word, R0 . . . Rk, just as we did for Shift-And
+in Section 3.1. The bit masks Ri are initialized to 0m−i1i to account for i possible initial deletions in
+the pattern. The update procedure to produce R(cid:15)
+
+upon reading text character tj is
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1278
+
+G. NAVARRO
+
+a
+b
+
+a
+b
+
+a
+
+b
+c
+
+b
+c
+
+b
+
+a
+
+a
+
+c
+
+d
+
+c
+d
+
+c
+
+b
+
+b
+
+d
+
+d
+
+d
+
+c
+
+c
+
+0 errors
+
+1 error
+
+2 errors
+
+Figure 6. A non-deterministic automaton accepting the pattern "abcd" with at most two errors. Unlabeled solid
+
+arrows match any character, while the dashed (not dotted) lines are ε-transitions.
+
+0
+
+| 0m−11) & B[tj]
+
+R(cid:15)
+for i ∈ 1 . . . k do
+
+←− ((R0 << 1)
+i ←− ((Ri << 1) & B[tj])
+R(cid:15)
+
+| Ri−1
+
+|
+
+(Ri−1 << 1)
+
+|
+
+(R(cid:15)
+
+i−1
+
+<< 1)
+
+where of course many coding optimizations are possible (and are done in nrgrep) but make the code
+less clear. In particular, using the complemented version of the representation (as in Shift-Or) is a bit
+faster.
+
+The rationale of the procedure is as follows. R0 has the same update formula as for the Shift-And
+algorithm. For the others, the update formula is the or of four possible facts. The ﬁrst one corresponds
+to the normal forward arrows (note that there is no initial self-loop for them, only for R0). The second
+one brings 1s (state activations) from the upper row at the same position, which corresponds to a
+vertical arrow, i.e. an insertion. The third one brings 1s from the upper row at the previous positions
+(this is obtained with the left shift), corresponding to a diagonal arrow, i.e. a replacement. The fourth
+one is similar but it works on the newer value of the previous row (R(cid:15)
+i−1 instead of Ri−1), and hence it
+corresponds to an ε-transition, i.e. a deletion.
+A match is detected when Rk & 10m−1 is not zero. It is not hard to show that whenever the ﬁnal state
+
+of Ri is active, the ﬁnal state of Rk is active too, so it sufﬁces to consider Rk as the only ﬁnal state.
+
+3.5.2. Backward searching
+
+Backward searching can be easily adapted from the forward searching automaton following the same
+techniques used for exact searching [12,13]. That is, we build the automaton of Figure 6 on the reverse
+pattern, consider all the states as initial ones, and consider as the only ﬁnal state the ﬁrst node of the
+last row. This will recognize all the reverse preﬁxes of P allowing at most k errors, and will have active
+states as long as some factor of P has been seen (with at most k errors).
+Some observations are of interest. First, note that we will never shift the window before examining at
+least k+1 characters (since we cannot make k errors before that). Second, the length of the window has
+to be that of the shortest possible match, which, because of deletions in the pattern, is of length m − k.
+Third, just as happens with regular expressions, the fact that we arrive at the beginning of the window
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1279
+
+a
+
+b
+
+r
+
+a
+
+c
+
+a
+
+d
+
+a
+
+b
+
+r
+
+a
+
+ε
+
+Figure 7. An automaton recognizing reverse preﬁxes of selected pieces of "abracadabra".
+
+with some active states in the automaton does not immediately mean that we have an occurrence, so
+we have to check the text for a complete occurrence starting at the beginning of the window.
+It has been shown [26] that this algorithm takes time O(k(k + logσ m)/(m − k)) for m ≤ w.
+3.5.3. Splitting into k + 1 subpatterns
+
+A well known property [8,26] establishes that, under the model of insertions, deletions and
+replacements, if the pattern is cut in k + 1 contiguous pieces, then at least one of the pieces occurs
+unchanged inside any occurrences with k errors or less. This is easily veriﬁed because each operation
+can alter at most one piece. So the technique consists of performing a multipattern searching for the
+pieces without errors, and checking the text surrounding the occurrences of each piece for a complete
+approximate occurrence of the whole pattern. This leads to the fastest algorithms for low error levels
+[28,26].
+The property is not true if we add the transposition, because this operation can alter two contiguous
+pieces at the same time. Much better than splitting the pattern in 2k+1 pieces is to split it in k+1 pieces
+and leave one unused character between each pair of pieces [26]. Under this partition a transposition
+can alter at most one piece.
+
+We are now confronted with a multipattern search problem. This can be solved with a very
+simple modiﬁcation of the single-pattern backward-search algorithm [12,13]. Consider the pattern
+"abracadabra" searched with two errors. We split it in "abr", "cad" and "bra". Figure 7
+depicts the automaton used for backward searching of the three pieces. This is implemented with the
+same bit-parallel mechanism as for a single pattern, except that (1) there are more ﬁnal states; and (2)
+an extra bit mask is necessary to avoid propagating 1s by the missing arrows. This extra bit mask is
+implemented at no cost by removing the corresponding 1s from the B mask during the preprocessing.
+Note that for this to work we need all the pieces to have the same length.
+
+4. SEARCHING FOR SIMPLE PATTERNS
+
+Nrgrep directly uses the BNDM algorithm when it searches for simple patterns. However, some
+modiﬁcations are necessary to convert the pattern-matching algorithm into a search software.
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1280
+
+G. NAVARRO
+
+4.1. Record oriented output
+The ﬁrst issue to consider is what will we report from the results of the search. Printing the text
+positions i where a match occurs is normally of little help for the user. Printing the text portion that
+matched (i.e. the occurrence) does not help much either, because this is equal to the pattern (at least
+if no classes of characters are used). We have followed agrep’s philosophy: the most useful way to
+present the result is to print a context of the text portion that matched the pattern.
+
+This context is deﬁned as follows. The text is considered to be a sequence of records. A user-deﬁned
+record delimiter determines the text positions where a new record starts. The text areas before the ﬁrst
+record separator and after the last record separators are considered records as well. When a pattern is
+found in the text, the whole record where the occurrence lies is printed. If the occurrence overlaps with
+or contains a record delimiter then it is not considered a pattern occurrence.
+
+The record delimiter is by default the newline character, but the user can specify any other simple
+pattern as a record delimiter. For example, the string "ˆFrom" can be used to delimit e-mail messages
+in a mail archive, being therefore able to retrieve complete e-mails that contain a given string.
+The system permits the speciﬁcation of whether the record delimiter should be contained in the next
+or in the previous record. Moreover, nrgrep permits the speciﬁcation of an extra record separator when
+the records are printed (e.g. add another newline).
+
+It should be clear by now that searching for longer strings is faster than for shorter ones. Since record
+delimiters tend to be short strings, it is not a good idea to delimit the text records ﬁrst and then search
+for the pattern inside each record. Rather, we prefer to search for the pattern in the text without any
+consideration for record separators and, when the pattern is found, search for the next and previous
+record delimiters. At this time we may determine that the occurrence overlaps a record delimiter and
+discard it. Note that we have to be able to search for record delimiters forward and backward. We use
+the same BNDM algorithm to search for record delimiters.
+
+There are some nrgrep options, however, that make it necessary a record-wise traversal: printing
+record numbers or printing records that do not contain the pattern. In this case we advance in the ﬁle
+by delimiting the records ﬁrst and then searching for the pattern inside each record.
+
+4.2. Text buffering
+Text buffering is necessary to cope with large ﬁles and to achieve optimum performance. For example,
+in nrgrep the buffer size is set to 64 kB because it ﬁts well the cache size of many machines, but this
+default can be overriden by the user. To avoid complex interactions between record limits and buffer
+limits, we discard the last incomplete record each time we read a new buffer from disk. The ‘discarded’
+partial record is moved to the beginning of the buffer before reading more text at the next buffer
+loading. If a record is larger than the buffer size then an artiﬁcial record delimiter is inserted to correct
+the situation (and a warning message is printed). Note that this also requires the ability to search for
+the record delimiter in a backward direction. This technique works well unless the record size is large
+compared to the buffer size, in which case the user should enlarge the buffer size using the appropriate
+option.
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1281
+
+4.3. Contexts
+
+Another capability of nrgrep is context speciﬁcation. This means that the pattern occurrence has to
+be surrounded by certain characters in order to be considered as such. For example, one may specify
+that the pattern should match as a whole word (i.e. be surrounded by separators), or a whole record
+(i.e. be surrounded by record delimiters). However, it is not just a matter of adding the context strings
+at the ends of the pattern because, for example, a word may be in the beginning of a record and hence
+the separator may be absent. We solve this by checking each occurrence found to determine that the
+required string is present before/after the occurrence or that we reached the beginning/end of the record.
+This seems trivial for a simple pattern because its length is ﬁxed, but for more complex patterns (such
+as regular expressions) where there may be many different occurrences in the same text area, we need
+a way to discard possible occurrences and still check for other ones that are basically in the same place.
+For example, the search for "a*ba*" as a whole word should match in the text "aaa aabaa aaa".
+Despite "b" alone being an occurrence of the pattern that does not ﬁt the whole word criterion, the
+occurrence can be extended to another one that does. We return to this issue later.
+
+4.4. Subpattern ﬁlter
+The BNDM algorithm is designed for the case m ≤ w. Otherwise, we have in principle to simulate
+the algorithm using many computer words. However, as shown in [12,13], it is much faster to prune
+the pattern to its ﬁrst w characters, search for that subpattern, and try to extend its occurrences to an
+occurrence of the complete pattern. This is because, for reasonably large w, the probability of ﬁnding
+a pattern of length w is low enough to make the cost of unnecessary veriﬁcations negligible. On the
+other hand, the beneﬁt of a possible shift of length m > w would be cancelled by the need to update
+(cid:17)m/w(cid:18) computer words per text character read.
+Hence we select a contiguous subpattern of w characters (or classes, remember that a class needs
+also one bit, the same as a character) and search for it. Its occurrences are veriﬁed with the complete
+pattern prior to checking records and contexts.
+
+The main point is which part of the pattern to search for. In the abstract algorithms of [12,13], any
+part is equally good or bad because a uniformly distributed model is assumed. In practice, different
+characters have different probabilities, and some pattern positions may have classes of characters,
+whose probability is the sum of those of the individual characters. This in fact is farther reaching than
+the problem of the limit w in the length of the pattern: even in a short pattern we may prefer not to
+include a part of the pattern in the fast scanning part. This is discussed in detail in the next subsection.
+
+4.5. Selecting the optimal scanning subpattern
+
+Let us consider the pattern "hello...a". Pattern positions 6 to 8 match all the alphabet, which
+means that the search with the non-deterministic automaton inside the window will examine at least
+four window positions (even in a text window like "xxxxxxxxx") and will shift at most by 6, so
+the average number of comparisons per character is at the very best 2/3. If we take the subpattern
+"hello" then we can have an average much closer to 1/5 operations per text character.
+
+We have designed a general algorithm that, under the assumption that the text characters are
+independent, ﬁnds the best search subpattern in O(m3) worst case time (although in practice it is closer
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1282
+
+G. NAVARRO
+
+to O(m2 log m)). This is a modest overhead in most practical text search scenarios. The algorithm is
+tailored to the BDM/BNDM search technique and works as follows.
+First, we build an array prob[1 . . . m], which stores the sum of the probabilities of the characters
+participating in the class of each pattern position. Nrgrep stores an array of English letter probabilities,
+but this can be tailored to other purposes and the ﬁnal scheme is robust with respect to changes in those
+probabilities from one language to another. The construction of prob takes O(mσ ) time in the worst
+case.
+Second, we build an array pprob[1 . . . m, 1 . . . m], where pprob[i, (cid:21)] stores the probability of
+matching the subpattern Pi...i+(cid:21)−1. This is computed in O(m2) time by dynamic programming,
+
+pprob[i, 0] ←− 1, pprob[i, (cid:21) + 1] ←− prob[i] × pprob[i + 1, (cid:21)]
+
+for increasing (cid:21) values.
+Third, we build an array mprob[1 . . . m, 1 . . . m, 1 . . . m], where mprob[i, j, (cid:21)] gives the probability
+of matching any pattern substring of length (cid:21) in Pi...j−1. This is computed in O(m3) time by dynamic
+programming using the formulas
+
+mprob[i, j, 0] ←− 1
+((cid:21) > 0) mprob[i, i + (cid:21) − 1, (cid:21)] ←− 0
+mprob[i, j, (cid:21)] ←− 1 − (1 − pprob[i, (cid:21)])(1 − mprob[i + 1, j, (cid:21)])
+
+((cid:21) > 0, j − i ≥ (cid:21))
+
+for decreasing i values. Note that we have used the formula for the union of independent events
+P r(A ∪ B) = 1 − (1 − P r(A))(1 − P r(B)).
+Finally, the average cost per character associated to a subpattern Pi...j is computed with the following
+rationale. With probability 1 we inspect one window character. If any pattern position in the range
+i . . . j matches the window character read, then we read a second character (recall Section 3.2). If any
+consecutive pair of pattern positions in i . . . j matches the two window characters read, then we read a
+third character, and so on. This is what we have computed in mprob. The expected number of window
+characters to read is therefore
+
+pcost[i, j] ←− mprob[i, j, 0] + mprob[i, j, 1] + ··· + mprob[i, j, j − i]
+
+(1)
+
+In the BDM/BNDM algorithm, as soon as the window sufﬁx read ceases to be found in the pattern,
+we shift the window to the position following the character that caused the mismatch. A simpliﬁed
+computation considers that the above pcost[i, j] (which is an average) can be used as a ﬁxed value, and
+therefore we approximate the real average number of operations per text character as
+
+ops[i, j] ←−
+
+pcost[i, j]
+
+j − i − pcost[i, j] + 1
+
+which is the average number of characters inspected divided by the shift obtained. Once this is
+obtained we select the (i, j ) pair that minimizes the work to do. We also avoid considering cases
+where j − i > w. The total time needed to obtain this has been O(m3).
+The amount of work is reduced by noting that we can check the ranges in increasing order of i values,
+and therefore we do not need the ﬁrst coordinate of mprob (which can be independently computed for
+each i). Moreover, we start by considering maximum j , since in practice longer subpatterns tend to be
+better than shorter ones. We keep the best value found up to now and avoid considering ranges (i, j )
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1283
+
+a
+
+b
+
+c
+ε
+
+d
+ε
+
+e
+
+f
+
+h
+
+g
+ε
+
+Figure 8. A non-deterministic automaton accepting the pattern "abc?d?efg?h".
+
+which cannot be better than the current best solution even for pcost[i, j] = 1 (note that since i is tried
+in ascending order and j in descending order, the whole pattern is tried ﬁrst). This reduces, in practice,
+the cost to O(m2 log m).
+
+As a result of this procedure we not only obtain the best subpattern to search for (under a simpliﬁed
+cost model) but also a hint of how many operations per character we will perform. If this number is
+larger than 1, then it is faster and safer to switch to plain Shift-Or. This is precisely what nrgrep does.
+
+5. SEARCHING FOR EXTENDED PATTERNS
+
+As explained in Section 2, we have considered optional and repeatable (classes of) characters as the
+features allowed in our extended patterns. Each of these features is treated in a different way and all
+are integrated in an automaton which is more general than that of Figure 1. Over this automaton we
+later apply the general forward and backward search machinery.
+
+5.1. Optional characters
+
+Let us consider the pattern "abc?d?efg?h". A non-deterministic automaton accepting that pattern
+is drawn in Figure 8.
+
+The ﬁgure is chosen so as to show that multiple consecutive optional characters could exist.
+This outrules the simplest solution (which works when that does not happen): one could set up a
+bit mask O with ones in the optional positions (in our example, O = 01001100), and let the ones in
+previous states of D propagate to them. Hence, after the normal update to D, we could perform
+
+D ←− D | ((D << 1) & O)
+
+For example, this works if we have read "abcdef" (D = 00100000) and the next text character
+is "h", since the above operation would convert D to 01100000 before operating it against B[”h”] =
+10000000. However, it does not work if the text is "abefgh", where both consecutive optional
+characters have been omitted.
+
+A general solution needs to propagate each active state in D so as to ﬂood all the states ahead it that
+correspond to optional characters. In our example, we would like that when D is 00000010 (and in
+general whenever its second bit is active), it becomes 00001110 after the ﬂooding.
+
+This is achieved with three masks, A, I and F , marking different aspects of the states related to
+optional characters. More speciﬁcally, the ith bit of A is set if this position in P is optional; that of I is
+set if this is the position of the ﬁrst optional character of a block (of consecutive optional characters);
+and that of F is set if this is the position after the last optional character of a block. In our example,
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1284
+
+G. NAVARRO
+
+c
+
+f
+
+a
+
+b
+
+c
+
+d
+
+e
+
+g
+
+h
+
+f
+ε
+
+Figure 9. A non-deterministic automaton accepting the pattern "abc+def*gh".
+
+A = 01001100, I = 01000100 and F = 10010000. After performing the normal transition on D, we
+do as follows
+
+Df ←− D | F
+D ←− D | (A & ((∼ (Df − I ))(cid:1)Df ))
+
+whose rationale is as follows. The ﬁrst line adds a 1 at the positions following optional blocks in D.
+In the second line we add some active states to D. Since the states to add are and-ed with A, let us
+just consider what happens inside a speciﬁc optional block. The effect that we want is that the ﬁrst 1
+(counting from the right) ﬂoods all the block bits to the left of it. We subtract I from Df , which is
+equivalent to subtracting 1 at each block. This subtraction cannot propagate its effect outside the block
+because there is a 1 (coming from ‘|F ’ in Df ) after the highest bit of the block. The effect of the
+subtraction is that all the bits until the ﬁrst 1 (counting from the right) are reversed (e.g. 1000000− 1 =
+0111111), and the rest are unchanged. In general, bx bx−1 . . . bx−y10z−1 = bx bx−1 . . . bx−y01z. When
+this is reversed by the ‘∼’ operation we get ∼ bx ∼ bx−1 . . . ∼ bx−y10z. Finally, when this is xor-ed
+with the same Df = bx bx−1 . . . bx−y10z we get 1x−y+10z+1.
+This is precisely the effect we wanted: the last 1 has ﬂooded all the bits to the left. The 1 itself
+has been converted to zero, however, but it is restored when the result is or-ed with the original D.
+This works even if the last active state in the optional block is the leftmost bit of the block. Note that it
+is necessary to and with A at the end to ﬁlter out the bits of F that survive the process whenever the
+block is not all zeros. On the other hand, it is necessary to or Df with F because a block of all zeros
+would propagate the ‘−’ operation outside its limits.
+Note that we could have a border problem if there are optional characters at the beginning of the
+pattern. As seen later, however, this cannot happen when we select the best subpattern for fast scanning,
+but it has to be dealt with when verifying the whole pattern.
+
+5.2. Repeatable characters
+
+There are two kinds of repeatable characters, marked in the syntax by "*" (zero or more repetitions)
+and "+" (one or more repetitions). Each of them can be simulated using the other since a+ = aa∗
+and a∗ = a+?. For involved technical reasons (that are related, for example, to the ability to build
+easily the masks for the reversed patterns and border conditions for the veriﬁcation) we preferred the
+second choice, despite that it uses one more bit than necessary for the "*" operation. Figure 9 shows
+the automaton for "abc+def*gh".
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1285
+
+The bit-parallel simulation of this automaton is more straightforward than for the optional characters.
+We just need to have a mask S[c] that for each character c tells which patterns positions can remain
+active when we read character c. In the above example, S["c"] = 00000100 and S["f"] = 00100000.
+The ε-transition is handled with the mechanism for optional characters. Therefore a complete
+simulation step permitting optional and repeatable characters is as follows.
+
+D ←− ((D << 1) | 0m−11) & B[tj]) | (D & S[tj])
+Df ←− D | F
+D ←− D | (A & ((∼ (Df − I ))(cid:1)Df ))
+
+5.3. Forward and backward search
+
+Our aim is to extend the approach used for simple patterns to patterns containing optional symbols.
+Forward scanning is immediate once we learn how to simulate the different automata using bit
+parallelism. We just have to add an initial self-loop to enable text scanning (this is already done in
+the last formula). We detect the ﬁnal positions of occurrences and then check the surrounding record
+and context conditions.
+
+Backward searching needs, in principle, only to obtain an automaton that recognizes reverse factors
+of the pattern. This is obtained by building exactly the same automaton of the forward scan (without
+initial self-loop) on the reverse pattern, and letting all the states be initial (i.e. initializing D with all
+active states). However, there are some problems to deal with, all of them deriving from the fact that
+the occurrences have variable length now.
+
+Since the occurrences do not have a ﬁxed length, we have to compute the minimum length of a
+possible match of the pattern (e.g. 7 in the example "abc+def*gh") and use this value as the width
+of the search window in order not to lose any potential occurrence. As before, we set up an automaton
+that recognizes all the reverse factors of the automaton and use it to traverse the window backward.
+Because the occurrences are not all of the same length, the fact that we arrive to the beginning of the
+window does not immediately imply that the pattern is present. For example, a 7-length text window
+could be "cdefffg". Despite that this is a factor of the pattern and therefore we would reach the
+window beginning, no pattern occurrence starts in the beginning of the window.
+
+Therefore, each time we arrive to the beginning of the window we have to ﬁrst check that the initial
+state is active and then run a forward veriﬁcation from the window beginning on, until either we ﬁnd a
+match (i.e. the last automaton state is activated) or we determine that no match can start at the window
+position under consideration (i.e. the automaton runs out of active states). The automaton used for
+this forward veriﬁcation is the same as for forward scanning, except that the initial self-loop is absent.
+However, as we see next, veriﬁcation is in fact a little more complicated and we mix it with the rest of
+veriﬁcations that are needed on every occurrence (surrounding record, context, etc.).
+
+5.4. Verifying occurrences
+
+In fact, the veriﬁcation is a little different since, as we see in the next subsection, we select a subpattern
+for the scanning (as before, this is necessary if the pattern has more than w characters/classes, but
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1286
+
+G. NAVARRO
+
+can also be convenient on shorter patterns). Say that P = P1SP2, where S is the subpattern that
+has been selected for fast text scanning. Each time the backward search determines that a given
+text position is a potential start point for an occurrence of S, we obtain the surrounding record
+and check, from the candidate text position, the occurrence of SP2 in the forward direction and
+P1 in the backward direction (do not confuse forward/backward scanning with forward/backward
+veriﬁcation!).
+
+When we had a simple pattern, it was only required to check that each text character belonged to
+the corresponding pattern class. Since the occurrences have variable length, we need to use pre-built
+automata for SP2 and for the reversed version of P1. These automata do not have the initial self-loop.
+However, this time we need to use a multi-word bit-parallel simulation, since the patterns could be
+longer than the computer word.
+
+Note also that, under this scenario, the forward scanning also needs veriﬁcation. In this case we ﬁnd
+a guaranteed end position of S in the text (not a candidate one as for backward searching). Hence we
+check, from that ﬁnal position, P2 in forward direction and P1S in backward direction. Note that we
+need to check S again because the automaton cannot tell where is the beginning of S, and there could
+be various beginning positions.
+
+A ﬁnal complication is introduced by record limits and context conditions. Since we require that a
+valid occurrence lies totally inside a record, we should submit for veriﬁcation the smallest possible
+occurrence. For example, the pattern "b[ab]*cde?" has many occurrences in the text record
+"bbbcdee", and we should report "bcd" in order to guarantee that no valid occurrence will be
+missed. However, it is possible that the context conditions require the presence of certain strings
+immediately preceding or following the occurrence. For example, if the context condition tells that
+the occurrence should begin a record, then the minimal occurrence "bcd" would not qualify, while
+"bbbcde" would do.
+
+Fortunately, context conditions about the initial and ﬁnal positions of occurrences are independent,
+and hence we can check them separately. So we treat the forward and backward parts of the veriﬁcation
+separately. For each one, we traverse the text and ﬁnd all the positions that represent the beginning
+(or ending) of occurrences and submit them to the context checking mechanism until one is accepted,
+the record ends, or the automaton runs out of active states.
+
+5.5. Selecting a good search subpattern
+
+As before, we would like to select the best subpattern for text scanning, since we have anyway
+to check the potential occurrences. We want to apply an algorithm similar to that for simple
+patterns. However, this time the problem is more complicated because there are more arrows in the
+automaton.
+We compute prob as before, adding another array sprob[1 . . . m], which is the probability of staying
+at state i via the S[c] array. The major complication is that a factor of length (cid:21) starting at pattern
+position i does not necessarily ﬁnish at pattern position i + (cid:21) − 1. Therefore, we ﬁll an array
+pprob[1 . . . m, 1 . . . m, 1 . . . L], where L is the minimum length of an occurrence of P (at most m)
+and pprob[i, j, (cid:21)] is the sum of the probabilities of all the factors of length (cid:21) that start at position i and
+do not reach after pattern position j . In our example "abc+def*gh", pprob[3, 6, 4] should account
+for "ccccc", "ccccd", "cccde", "ccdef" and "cdeff".
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1287
+
+This is computed as
+
+(i ≤ j )
+(i ≤ j ∧ (cid:21) > 0)
+
+pprob[i, i − 1, (cid:21)] ←− 0
+pprob[i, j, 0] ←− 1
+pprob[i, j, (cid:21)] ←− prob[i] × pprob[i + 1, j, (cid:21) − 1]
++ sprob[i] × pprob[i, j, (cid:21) − 1]
++ (if ith bit of A is set) pprob[i + 1, j, (cid:21)]
+
+which is ﬁlled for decreasing i and increasing (cid:21) in O(m3) time. Note that we are simplifying the
+computation of probabilities, since we are computing the probability of a set of factors as the sum of
+the individual probabilities, which is only true if the factors are not disjoint.
+Similarly to pprob[i, j, (cid:21)] we have mprob[i, j, (cid:21)] as the probability of any factor of length (cid:21) starting
+at position i or later and not surpassing position j . This is trivially computed from pprob as for simple
+patterns.
+
+Finally, we compute the average cost per character as before. We consider subpatterns from
+length min(m, w) until a length that is so short that we will always prefer the best solution found
+up to now. For each subpattern considered we compute the expected cost per window as the sum of the
+probabilities of the subpatterns of each length, i.e.
+
+pcost[i, j] ←− mprob[i, j, 0] + mprob[i, j, 1] + ··· + mprob[i, j, j − i]
+
+and later obtain the cost per character as pcost[i, j]/((cid:21) − pcost[i, j] + 1), where l is the minimum
+length of an occurrence of the interval (i, j ).
+
+As for simple patterns, we ﬁll pprob and mprob in lazy form, together with the computation of the
+best factor. This makes the expected cost of the algorithm closer to O(m2 log m) than to the worst case
+O(m3) (really O(m2 min(m, w))).
+
+Note that it is not possible (because it is not optimal) to select a subpattern that starts or ends with
+optional characters or with "*". If it happens that the best subpattern gives one or more operations per
+text character, we switch to forward searching and select the ﬁrst min(m, w) characters of the pattern
+(excluding initial and ﬁnal "?"s or "*"s).
+
+In particular, note that it is possible that the scanning subpattern selected has not any optional or
+repeatable character. In this case we use the scanning algorithm for simple patterns, despite that at
+veriﬁcation time we use the checking algorithm of extended patterns.
+
+6. SEARCHING FOR REGULAR EXPRESSIONS
+
+The most complex patterns that nrgrep can search for are regular expressions. For this sake, we use the
+technique explained in Section 3.4 [15,17], both for forward and backward searching. However, some
+aspects need to be dealt with in a real software.
+
+6.1. Space problems
+
+The ﬁrst problem is space, since the T table needs O(2m) entries and this can be unmanageable for
+long patterns. Despite that we expect that the patterns are not very long in typical text searching, some
+reasonable solution has to be provided when this is not the case.
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1288
+
+G. NAVARRO
+
+We permit the user to specify the amount of memory that can be used for the table, and split the bit
+masks in as many parts as needed to meet the space requirements. Since we do not search for masks
+longer than w bits, it is in fact unlikely that the text scanning part needs more than three or four table
+accesses per text character. Attending to the most common alternatives, we developed separate code
+for the cases of one and two tables, which permits much faster scanning since register usage is enabled.
+
+6.2. Subpattern ﬁltering
+
+As for simple and extended patterns, we select the best subpattern for the scanning phase, and
+check all the potential occurrences for complete occurrences and for record and context conditions.
+This means, according to Section 3.4, that we need a forward and a backward automaton for the selected
+subpattern, and that we also need forward and backward veriﬁcation automata to check for the complete
+occurrence. An exception is when, given the result of selecting the best factor, we prefer to use forward
+scanning, in which case only that automaton is needed (but the two veriﬁcation automata are still
+necessary). All the complications addressed for extended patterns are present on regular expressions as
+well, namely, those derived from the fact that the occurrences may have different lengths.
+
+It may also happen that, after selecting the search subpattern, it turns out to be just a simple or
+an extended pattern, in which case the search is handled by the appropriate search algorithm, which
+should be faster. The veriﬁcation is handled as a general regular expression. Note that heuristics
+like those of Gnu Grep, which tries to ﬁnd a literal string inside the regular expression in order to
+use it as a ﬁlter, are no more than particular cases of our general optimization method. This makes
+our approach much smoother than others. For example Gnu Grep will be much faster to search for
+"c+(aaaaa|bbbbb)c+" (where the strings "caaaaac" and/or "cbbbbbc" can be used to ﬁlter
+the search) than for "c+[ab][ab][ab][ab][ab]c+", while the difference should not be as large.
+Regarding optimal use of space (and also because accessing smaller tables is faster) we use a state
+remapping function. When a subset of the states of the automaton is selected for scanning we build a
+new automaton with only the necessary states. This reduces the size of the tables.
+
+What is left is to explain how we select the best factor to search for. This is much more complex on
+
+regular expressions than on extended patterns.
+
+6.3. Selecting an optimal necessary factor
+
+The ﬁrst non-trivial task on a regular expression is to determine what is a necessary factor, which
+is deﬁned as a subexpression that has to match inside every occurrence of the whole expression.
+For example, "fgh" is not a necessary factor of "ab(cde|fghi)jk", but "cd|fgh" is. Note that
+any range of states is a necessary factor in a simple or extended pattern.
+
+Determining necessary subexpressions is complicated if we try to do it using the automaton graph
+only. We rather make use of the syntax tree of the regular expression as well. The main trouble is caused
+by the ‘|’ operator, which forces us to choose one necessary factor from each branch. We simplify the
+problem by ﬁxing the minimum occurrence length and searching for a necessary factor of that length
+on each side. In our previous example, we could select "cd|fg" or "de|hi", for example, but not
+"cd|fgh". However, we are able to take the whole construction, namely "cde|fghi".
+
+The procedure is recursive and aims at ﬁnding the best necessary factor of minimum length (cid:21)
+
+provided we already know (we consider later the computation of these data):
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1289
+
+• wlens[0 . . . m], where wlens[i] is the minimum length of a path from i to a ﬁnal state;
+• mark, markf[0 . . . m, 0 . . . L], where mark[i, (cid:21)] is the bit mask of all the states reachable in
+(cid:21) steps from state i, and markf sets the corresponding ﬁnal states;
+• cost[0 . . . m, 0 . . . L], where cost[i, (cid:21)] is the average cost per character if we search for all the
+paths of length (cid:21) leaving from state i.
+
+The method starts by analyzing the root operator of the syntax tree. Depending on the type of
+
+operand, we do as follows.
+
+Concatenation: choose the best factor (minimum cost) among both sides of the expression. Note that
+factors starting in the left side can continue to the right side, but we are deciding about where the
+initial positions are.
+
+Union: choose the best factor from each side and take the union of the states. The average cost is the
+maximum over the two sides (not the sum, since the cost is related to the average number of
+characters to inspect).
+
+One or more repetition (+): the minimum is one repetition, so ignore the node and treat the subtree.
+Zero or more repetitions (?,∗): the subtree cannot contain a necessary factor since it does not need
+to appear in the occurrences. Nothing can be found starting inside it. We assign a high cost to
+the factors starting inside the subexpression to make sure that it is not chosen in a concatenation,
+and that a union containing it will be equally undesirable.
+
+Simple character or class (tree leaf): there is only one possible initial position, so choose it unless
+
+its wlens value is smaller than (cid:21).
+
+The procedure delivers a set of selected states and the proper initial and ﬁnal states for the selected
+
+subautomaton. It also delivers a reasonable approximation of the average cost per character.
+
+The rest of the work is to obtain the input for this procedure. The ideas are similar as for extended
+patterns, but the techniques need to make heavier use of graph traversal and are more expensive.
+For example, just computing wlens and L = wlens[initial state], i.e. shortest paths from any
+state to a ﬁnal state, we need a Floyd-like algorithm that takes O(Lm3/w) = O(min(m3, m4/w))
+time.
+Arrow probabilities prob are loaded as before, but pprob[i, (cid:21)] now gives the total probability of all
+the paths of length (cid:21) leaving state i, and it includes the probability of reaching i from a previous state.
+In Glushkov’s construction, all the arrows reaching a state have the same label, so pprob is computed
+for increasing (cid:21) using the formulas
+
+pprob[i, 0] ←− 1
+pprob[i, 1] ←− prob[i]
+pprob[i, (cid:21)] ←− prob[i] ×
+
+((cid:21) ≥ 2)
+
+(cid:2)
+
+j,(i,j )∈NF A
+
+pprob[j, (cid:21) − 1]
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1290
+
+G. NAVARRO
+
+This takes O(Lm2) = O(min(m3, m2w)) time. At the same time we compute the mark,markf
+masks, at a total cost of O(min(m3, m4/w)):
+
+mark[i, 0], markf[i, 0] ←− 0m+1
+mark[i, 1], markf[i, 1] ←− 0m−i10i−1
+
+((cid:21) ≥ 2)
+((cid:21) ≥ 2)
+
+mark[i, (cid:21)]
+markf[i, (cid:21)]
+
+(cid:3)
+
+mark[j, (cid:21) − 1]
+
+←− mark[i, (cid:21) − 1] ∪
+←−
+
+(cid:3)
+
+j,(i,j )∈NF A
+markf[j, (cid:21) − 1]
+
+j,(i,j )∈NF A
+
+for increasing (cid:21) values. Once pprob is computed, we build mprob[0 . . . m, 0 . . . L, 0 . . . L], so that
+mprob[i, (cid:21), (cid:21)(cid:15)] is the probability of any path of length (cid:21)(cid:15)
+inside the area mark[i, (cid:21)]. This is computed in
+O(L2m2) = O(min(m4, m2w2)) time with the formulas:
+
+((cid:21)(cid:15) > (cid:21)) mprob[i, (cid:21), (cid:21)(cid:15)] ←− 0
+mprob[i, (cid:21), 0] ←− 1
+
+(cid:4)
+
+(0 < (cid:21)(cid:15) ≤ (cid:21)) mprob[i, (cid:21), (cid:21)(cid:15)] ←− 1 − (1 − pprob[i, (cid:21)(cid:15)])
+Finally, the search cost is computed as always using mprob, in O(L2m) = O(min(m3, mw2)) time.
+Again, it is possible that the scanning subpattern selected is in fact a simpler type of pattern, such
+as a simple or extended one. In this case we use the appropriate scanning procedure, which should be
+faster.
+
+(1 − mprob[j, (cid:21) − 1, (cid:21)(cid:15)])
+
+j,(i,j )∈NF A
+
+Another non-trivial possibility is that even the best necessary factor is too bad (i.e. it has a high
+predicted cost per character). In this case we select from the initial state of the automaton a subset
+of it that ﬁts in the computer word (i.e. at most w states), intended for forward scanning. Since
+all the occurrences found with this automaton will have to be checked, we would like to select
+the subautomaton that ﬁnds the least possible spurious matches. If m ≤ w then we use the whole
+automaton, otherwise we try to minimize the probability of getting outside the set of selected states.
+To compute this, we consider that the probability of reaching a state is inversely proportional to its
+shortest path from the initial state. Hence we add states farther and farther from the root until we have
+w states. All this takes O(m2) time.
+
+This probabilistic assumption is of course simplistic, but an optimal solution is quite hard and at this
+
+point we know that the search will be costly anyway.
+
+6.4. Veriﬁcation
+
+A ﬁnal non-trivial problem is how to determine which states should be present in the forward and
+backward veriﬁcation automata once the best scanning subautomaton is selected. Since we have chosen
+a necessary factor, we know for sure that the automaton is ‘cut’ in two parts by the necessary factor.
+If we have chosen a backward scanning, then the veriﬁcations start from the initial states of the
+scanning automaton, otherwise they start from its ﬁnal states.
+Figure 10 illustrates these automata for the pattern "abcd(d|ε)(e|f)de", where we have
+selected "d(d|ε)(e|f)" as our scanning subexpression. This corresponds to the states {3, 4, 5, 6, 7}
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1291
+
+Backward scanning
+
+Backward verification automaton
+(reverse arrows)
+
+Forward verification automaton
+
+a
+
+0
+
+b
+
+1
+
+c
+
+d
+
+3
+
+d
+
+4
+
+2
+
+e
+
+5
+
+Forward scanning
+
+Backward verification automaton
+(reverse arrows)
+
+a
+
+0
+
+b
+
+1
+
+c
+
+d
+
+3
+
+d
+
+4
+
+2
+
+e
+
+5
+
+d
+
+7
+
+d
+
+e
+
+8
+
+9
+
+6
+
+f
+
+Forward verification automaton
+
+d
+
+7
+
+d
+
+e
+
+8
+
+9
+
+6
+
+f
+
+e
+
+f
+
+e
+
+f
+
+Figure 10. Forward and backward veriﬁcation automata corresponding to forward and backward scanning of the
+automaton for "abcd(d|ε)(e|f)de". The shaded states are the initial ones for veriﬁcation. In practice we use
+
+the complete automaton because ‘cutting off’ the exact veriﬁcation subautomaton is too complicated.
+
+of the original automaton. The selected arrows and states are in boldface in the ﬁgure (note that
+arrows leaving from the selected subautomaton are not selected). Depending on whether the selected
+subautomaton is searched with backward or forward scanning, we know the text position where
+its initial or ﬁnal states, respectively, were reached. Hence, in backward scanning the veriﬁcation
+starts from the initial states of the subautomaton, while it starts from the ﬁnal states in case
+of forward scanning. We need two full automata: the original one and one with the arrows
+reversed.
+There is, however, a complication when verifying a regular expression in this scheme. Assume the
+search pattern is AXB|CY D, for strings A, B, C, D, X and Y . The algorithm could select X|Y as the
+scanning subpattern. Now, in the text AXD, the backward veriﬁcation for A|C would ﬁnd A and the
+forward veriﬁcation for B|D would ﬁnd D, and therefore an occurrence would be incorrectly triggered.
+Worse than that, it could be the case that X = Y , so there is no hope in distinguishing what to check
+based on the initial states of the scanning automaton.
+
+The problem, which does not appear in simpler types of patterns, is that there is a set of initial states
+for the veriﬁcation. The backward and forward veriﬁcations tell us that some state of the set can be
+extended to a complete occurrence, but there is no guarantee that there is a single state in that set that
+can be extended in both directions. To overcome this problem we check the initial states one by one,
+instead of using a set of initial states and doing just one veriﬁcation.
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1292
+
+G. NAVARRO
+
+7. APPROXIMATE PATTERN MATCHING
+
+All the previous algorithms permit specifying a ﬂexible search pattern, but they do not allow any
+difference between the pattern speciﬁed and its occurrence in the text. We now consider the problem
+of permitting at most k insertions, deletions, replacements or transpositions in the pattern.
+
+We let the user to specify that only a subset of the four allowed errors are permitted. However,
+designing one different search algorithm for each subset was impractical and against the spirit of a
+uniform software. So we have considered that our criterion of permitting these four types of errors
+would be the most commonly preferred in practice and have a unique scanning phase under this model
+(as all the previous algorithms, we have a scanning and a veriﬁcation phase). Only at the veriﬁcation
+phase, which is hopefully executed a few times, we take care of only applying the permitted operations.
+Note that we cannot miss any potential match because we scan with the most permissive error model.
+We also wrote in nrgrep specialized code for k = 1 and k = 2, which are the most common cases and
+using a ﬁxed k permits better register usage.
+
+7.1. Simple patterns
+
+We make use of the three techniques described in Section 3.5, choosing the one that promises to be the
+best.
+
+7.1.1. Forward and backward searching
+In forward searching, k + 1 similar rows corresponding to the pattern are used. There exists a bitparallel 
+algorithm to simulate the automaton in case of k insertions, deletions and replacements [8], but
+despite that the automaton that incorporates transpositions has been depicted [27] (see Figure 6), no bit
+parallel formula for the complete operation has been shown. We do that now.
+We store each row in a machine word, R0 . . . Rk, just as for the base technique. The temporary
+states are stored as T1 . . . Tk. The bit masks Ri are initialized to 0m−i1i as before, while all the Ti
+are initialized to 0m. The update procedure to produce R(cid:15)
+upon reading text character tj is as
+follows:
+R(cid:15)
+for i ∈ 1 . . . k do
+
+and T (cid:15)
+
+0
+
+←− ((R0 << 1)
+i ←− ((Ri << 1) & B[tj])
+R(cid:15)
+i ←− (Ri−1 << 2) & B[tj]
+T (cid:15)
+
+| 0m−11) & B[tj]
+| Ri−1
+(Ti & (B[tj] << 1))
+
+|
+
+|
+
+(Ri−1 << 1)
+
+|
+
+(R(cid:15)
+
+i−1
+
+<< 1)
+
+The rationale of the procedure is as follows. The ﬁrst three lines are as for the base technique without
+transpositions. The second line of the formula for R(cid:15)
+i corresponds to transpositions. Note that the new
+T (cid:15)
+value is computed accordingly to the old R value, so it is 2 text positions behind. Once we compute
+the new bit masks R(cid:15)
+for text character tj , we take those old R masks that were not updated with tj ,
+shift them in two positions (aligning them for the position tj+1 and killing the states that do not match
+with tj ). This is equivalent to processing two characters: tj . At the next iteration (tj+1), we shift left
+the mask B[tj+1] and kill the states of T that do not match. The net effect is that, at iteration j + 1, we
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1293
+
+are or-ing R(cid:15)
+
+i with
+Ti (j + 1) & (B[tj+1] << 1) = (Ri−1(j ) << 2) & B[tj]) & (B[tj+1] << 1)
+= (((Ri−1(j ) << 1) & B[tj+1]) << 1) & B[tj]
+
+which corresponds to two forward transitions with the characters tj+1tj . If those characters matched
+the text, then we permit the activation of R(cid:15)
+i.
+A match is detected as before, when Rk & 10m−1 is not zero. Since we may cut w characters from
+the pattern, the context conditions, and the possibility that the user really wanted to permit only some
+types of errors, we have to check each match found by the automaton before reporting it. We detail
+later the veriﬁcation procedure.
+
+Backward searching is adapted from this technique exactly as it is done from the basic algorithm
+without transpositions. A subtle point is that we cannot consider the automaton dead until both the R
+and the T masks run out of active states, since T can awake a dead R.
+
+As before, we select the best subpattern to search for, which is of length at most w. The algorithm to
+select the best subpattern has to account for the fact that we are allowing errors. A good approximation
+is obtained by considering that any factor will be alive for k turns, and then adding the normal expected
+number of window characters to read until the factor does not match. So we add k to cost[i, j] in
+Equation (1). Now it is more possible than before (for large k/m) that the ﬁnal cost per character is
+larger than one, in which case we prefer forward scanning.
+
+7.1.2. Splitting into k + 1 subpatterns
+
+This technique can be directly adapted from previous work, taking care of leaving a hole between each
+pair of pieces. For the checking of complete occurrences in candidate text areas we use the general
+veriﬁcation engine (we have a different preprocessing for the case of each of the k+1 pieces matching).
+Note that it makes no sense to design a forward search algorithm for this case: if the average cost per
+character is more than one, this means that the probability of ﬁnding a subpattern is so high that we
+will pay too much time verifying spurious matches, in which case the whole method does not work.
+The main difﬁculty that remains is how to ﬁnd the best set of k + 1 equal length pieces to search
+for. We start by computing prob and pprob as in Section 4.5. The only difference is that now we are
+interested only in lengths up to L = (cid:24)(m − k)/(k + 1)(cid:25), which is the maximum length of a piece
+(the m − k comes out because there are k unused characters in the partition§). This cuts down the cost
+to compute these vectors to O(m2/k).
+Now, we compute pcost[1 . . . m, 1 . . . L], where pcost[i, (cid:21)] gives the average cost per window
+when searching for the factor Pi...i+(cid:21)−1. For this sake, we compute for each i value the matrix
+mprob[1 . . . L, 1 . . . L], where mprob[(cid:21), r] is the probability of any factor of length r in Pi...i+(cid:21)−1.
+
+§The numerator is in fact converted into m if no transpositions are permitted. Despite that the scanning phase will allow
+transpositions anyway, the possible matches missed by converting the numerator to m all include transpositions, which by
+hypothesis are not permitted.
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1294
+
+G. NAVARRO
+
+This is computed for each i in O(m2/k2) time as
+
+((cid:21) ≥ r > 0) mprob[(cid:21), r] ←− 1 − (1 − pprob[i + (cid:21) − r, r])(1 − mprob[(cid:21) − 1, r])
+
+((cid:21) < r) mprob[(cid:21), r] ←− 0
+mprob[(cid:21), 0] ←− 1
+pcost[i, (cid:21)] ←− L(cid:2)
+
+mprob[(cid:21), r]
+
+r=0
+
+All this is computed for every i, for increasing (cid:21), in O(m3/k2) total time. The justiﬁcation
+interesting part is
+for the previous formula is similar to that
+mbest[1 . . . m, 1 . . . k + 1], where mbest[i, s] is the expected cost per character of the best s
+pattern pieces starting at pattern position i. The strings selected have the same length. Together
+with mbest we have ibest[i, s], which tells where must the ﬁrst string start in order to obtain
+mbest.
+
+in Section 4.5. Now,
+
+the most
+
+The maximum length for the pieces is L. We try all the lengths from L to 1, until we determine that
+even in the best case we cannot improve our current best cost. For each possible piece length (cid:21) we
+compute the whole mbest and ibest, as follows:
+
+mbest[i, 0] ←− 0
+(i > m−s(cid:21)−(s−1)∧ s >0) mbest[i, s] ←− 1
+(i ≤ m−s(cid:21)−(s−1)∧ s >0) mbest[i, s] ←− min(mbest[i+1, s],
+
+where cost = min(1, pcost[i, (cid:21)]/((cid:21)−pcost[i, (cid:21)]+1))
+
+1−(1−cost)(1−mbest[i+(cid:21)+1, s−1]))
+
+which is computed for decreasing i. The rationale is that mbest[i, s] can choose whether to start the
+ﬁrst piece immediately or not. The second case is easy since mbest[i + 1, s] is already computed, and
+ibest[i, s] is made equal to ibest[i + 1, s]. In the ﬁrst case, we have that the cost of the ﬁrst piece is cost
+and the other s−1 pieces are chosen in the best way from Pi+(cid:21)+1...m according to mbest[i+(cid:21)+1, s−1].
+In this case ibest[i, s] = i. Note that as the total cost to search for the k pieces we could take the
+maximum cost, but we obtained better results by using the model of the probability of the union of
+independent events.
+
+All this costs in the worst case O(m2), but normally the longest pieces are the best and the
+cost becomes O(mk). At the end we have the best length (cid:21) for the pieces, the expected cost per
+character in mbest[1, k + 1] and the optimal initial positions for the pieces in i0 = ibest[1, k + 1],
+i1 = ibest[i0 + (cid:21) + 1, k], i2 = ibest[i1 + (cid:21) + 1, k − 1], and so on. Finally, if mbest[1, k + 1] ≥ 1
+(actually larger than a smaller number) we know that we reach the window beginning with probability
+high enough and therefore the whole scheme will not work well. In this case we have to choose between
+forward or backward searching.
+Summarizing the costs, we pay O(m3/k2 + m2) in the worst case and O(m3/k2 + km) in practice.
+Normally k is small so the cost is close to O(m3) in all cases.
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1295
+
+7.1.3. Veriﬁcation
+
+Finally, we explain the veriﬁcation procedure. This is necessary because of the context conditions, of
+the possibly restricted set of edit operations, and because in some cases we are not sure that there is
+actually a match. Veriﬁcation can be called from the forward scanning (in which case, in general, we
+have partitioned the pattern in P = P1SP2 and know that at a given text position a match of S ends);
+from the backward scanning (where we have partitioned the pattern in the same way and know that at
+a given text position the match of a factor of S begins); or from the partitioning into k + 1 pieces (in
+which case we have partitioned P = P0S1P1 . . . Sk+1Pk+1 and know that at a given text position the
+exact occurrence of a given Si begins).
+In general, all we know about the possible match of P around text position j is that, if we partition
+P = PLPR (a partition that we know), then there should be a match of PL ending at Tj and a match
+of PR starting at Tj+1, and that the total number of errors should not exceed k. In all the cases, we
+have precomputed forward automata corresponding to PL and PR (the ﬁrst one is reversed because the
+veriﬁcation goes backward). In forward and backward scanning there is just one choice for PL and PR,
+while for partitioning into k + 1 pieces there are k + 1 choices (all of them are precomputed).
+We run the forward and backward veriﬁcation from text character j , in both directions. Fortunately,
+the context conditions that make a match valid or invalid can be checked at each extreme separately.
+So we go backward and, among all the positions where a legal match of PL can begin, we choose the
+one with minimum error level kL. Then we go forward looking for legal occurrences of PR with k− kL
+errors. If we ﬁnd one, then we report an occurrence (and the whole record is reported). In fact we take
+advantage of each match found during the traversal: if we are looking the pattern with k errors and ﬁnd
+a legal endpoint with k(cid:15) ≤ k, we still continue searching for better occurrences, but now allowing just
+k(cid:15) − 1 errors. This saves time because the veriﬁcation automaton needs just to use (k(cid:15) − 1) + 1 rows.
+A complicated condition can arise because of transpositions: the optimal solution may involve
+transposing Tj with Tj+1, an operation that we are not permitting because we chose to split the
+veriﬁcation there. We solve this in a rather simple but effective way: if we cannot ﬁnd an occurrence in
+a candidate area, we give it a second chance after transposing both characters in the text.
+
+7.2. Extended patterns
+The treatment for extended patterns is quite a combination of the extension from simple to extended
+patterns without errors and the use of k + 1 rows or the partition into k + 1 pieces in order to permit k
+errors. However, there are a few complications that deserve mention.
+
+The ﬁrst is that the propagation of active states due to optional and repeatable characters does not
+mix well with transpositions (for example, try to draw an automaton that ﬁnds "abc?de" with one
+transposition in the text "...adbe..."). We solved the problem in a rather practical way. Instead
+of trying to simulate a complex automaton, we have two parallel automata. The R masks are used in
+the normal way without permitting transpositions (but permitting the other errors and the optional and
+repeatable characters), and they are always one character behind the current text position. Each T mask
+is obtained from the R mask of the previous row by processing the last two text characters in reverse
+order, and its result is used for the R mask of the same row in the next iteration. The code to process
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1296
+
+G. NAVARRO
+
+0
+
+i
+
+i
+
+←− ((R0 << 1) | 0m−11)&B[tj−1]
+
+text position j (the initial values are as before) is
+R(cid:15)
+for i ∈ 1 . . . k do
+i ←− ((Ri << 1) & B[tj−1]) | (Ri & S[tj−1]) | Ri−1 | (Ri−1 << 1) | (R(cid:15)
+R(cid:15)
+i−1
+| F
+Df ←− R(cid:15)
+| (A & ((∼ (Df − I ))(cid:1)Df ))
+i ←− R(cid:15)
+R(cid:15)
+i ←− ((Ri−1 << 1) | 0m−11) & B[tj] | (Ri−1 & S[tj])
+T (cid:15)
+Df ←− T (cid:15)
+| F
+| (A & ((∼ (Df − I ))(cid:1)Df ))
+i ←− T (cid:15)
+T (cid:15)
+i ←− ((T (cid:15)
+i << 1) | 0m−11) & B[tj−1] | (T (cid:15)
+T (cid:15)
+where the A, I and F masks are deﬁned in Section 5.
+
+i & S[tj−1])
+
+i
+
+i
+
+<< 1) | Ti
+
+A second complication is that subpattern optimization changes. For the forward and backward
+automata we use the same technique for searching without errors but we add k to the number of
+processed window positions for any subpattern. So it remains to be explained how is the optimization
+for the partitioning into k + 1 subpatterns.
+We have prob and sprob computed in O(m) time as for normal extended patterns. A ﬁrst condition
+is that the k + 1 pieces must be disjoint, so we compute reach[1 . . . m, 1 . . . L(cid:15)], where L(cid:15) =
+(cid:24)(L − k)/(k + 1)(cid:25) is the maximum length of a piece as before (L is the minimum length of a pattern
+occurrence as in Section 5) and reach[i, (cid:21)] gives the last pattern position reachable in (cid:21) text characters
+from i. This is computed in O(m2) time as reach[i, 0] = i and, for increasing (cid:21) > 0,
+t ←− reach[i, (cid:21) − 1] + 1
+while (t < m ∧ (A & 0m−t 10t−1
+reach[i, (cid:21)] ←− t
+We then compute pprob, mprob and pcost exactly as in Section 5.5, in O(m3) time. Finally, the
+selection of the best set of k + 1 subpatterns is done with mbest and ibest just as in Section 7.1.2,
+the only difference being that reach is used to determine which is the ﬁrst unused position if pattern
+position i is chosen and a minimum piece length (cid:21) has to be reserved for it. The total process takes
+O(m3) time.
+
+(cid:26)= 0m) t ←− t + 1
+
+7.3. Regular expressions
+
+Finally, nrgrep permits searching for regular expressions allowing errors. The same mechanisms used
+for simple and extended patterns are used, namely using k + 1 replicas of the search automaton and
+splitting the pattern into k + 1 disjoint pieces. Both adaptations present important complications with
+respect to their simpler counterparts.
+
+7.3.1. Forward and backward search
+
+One problem in regular expressions is that the concept of ‘forward’ does not immediately mean one
+shift to the right. Approximate searching with k+1 copies of the NFA of the regular expression implies
+being able to move ‘forward’ from row i to row i + 1, as Figure 11 shows.
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1297
+
+a
+
+a
+
+a
+
+b
+
+b
+
+b
+
+c
+
+c
+
+c
+
+d
+
+d
+
+d
+
+e
+
+e
+
+e
+
+d
+
+d
+
+d
+
+f
+
+f
+
+f
+
+e
+
+e
+
+e
+
+f
+
+f
+
+f
+
+d
+
+d
+
+d
+
+d
+
+d
+
+d
+
+e
+
+e
+
+e
+
+0 errors
+
+1 error
+
+2 errors
+
+Figure 11. Glushkov’s resulting NFAs for the search of the regular expression "abcd(d|ε)(e|f)de" with two
+insertions, deletions or replacements. To simplify the plot, the dashed lines represent deletions and replacements
+
+(i.e. they move by  ∪ {ε}), while the vertical lines represent insertions (i.e. they move by ).
+
+For this reason, we use our table T , which for each state D¶ gives the bit mask of all the states
+
+←− T[R0] & B[tj]
+
+reachable from D in one step. The update formula upon reading a new text character tj is therefore
+R(cid:15)
+oldR0 ←− R0
+for i ∈ 1 . . . k do
+
+0
+
+|
+
+]
+
+| Ri−1
+
+| T [Ri−1 | R(cid:15)
+i−1
+(T [T[oldRi−1] & B[tj]] & B[tj−1])
+
+i ←− (T[Ri] & B[tj])
+R(cid:15)
+oldRi−1 ←− Ri−1
+The rationale is as follows. R(cid:15)
+0 is computed according to the simple formula for regular expression
+searching without errors. For i > 0, R(cid:15)
+i permits arrows coming from matching the current character
+(T[Ri] & B[tj]), ‘vertical’ arrows representing insertions in the pattern (Ri−1) and ‘diagonal’ arrows
+].
+i−1), which are joined in T [Ri−1|R(cid:15)
+representing replacements (from Ri−1) and deletions (from R(cid:15)
+i−1
+Finally, transpositions are arranged in a rather simple way. In oldR we store the value of R two positions
+in the past (note the way we update it to avoid having two arrays, oldR and oldoldR), and each time we
+permit from that state the processing of the last two text character in reverse order.
+
+Forward scanning, backward scanning, and the veriﬁcation of occurrences are carried out in the
+normal way using this update technique. The technique to select the best necessary factor is unaltered
+except that we add k to the number of characters that are scanned inside every text window.
+
+¶Recall that in the deterministic simulation, each bit mask of active NFA states D is identiﬁed as a state.
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1298
+
+G. NAVARRO
+
+a
+
+b
+
+c
+
+ε
+
+d
+
+d
+
+e
+
+e
+
+d
+
+e
+
+f
+
+f
+
+Figure 12. An automaton recognizing reverse preﬁxes of two necessary factors of "abcd(d|ε)(e|f)de",
+
+based on the Glushkov construction of Figure 5. Note that there are no transitions among subexpressions.
+
+7.3.2. Splitting into k + 1 subexpressions
+If we can select k+1 necessary factors of the regular expression as done in Section 6.3 for selecting one
+necessary factor, then we can be sure that at least one of them will appear unaltered in any occurrence
+with k errors or less. As before, in order to include the transpositions we need to ensure that one
+character is left between consecutive necessary factors.
+
+We ﬁrst consider how, once the subexpressions have been selected, can we perform the multipattern
+search. Each subexpression has a set of initial and ﬁnal states. We reverse all the arrows and convert
+the formerly initial states of all the subexpressions into ﬁnal states. Since we search for any reverse
+factor of the regular expression, all the states are made initial.
+
+We set the window length to the shortest path from an initial to a ﬁnal state. At each window position,
+we read the text characters backward and feed the transformed automaton. Each time we arrive to a
+ﬁnal state we know that the preﬁx of a necessary subexpression has appeared. If we happen to be at the
+beginning of the window then we check for the whole pattern as before. We keep masks with the ﬁnal
+states of each necessary factor in order to determine, from the current mask of active states, which of
+them matched (recall that a different veriﬁcation is triggered for each).
+Figure 12 illustrates a possible selection of two necessary factors (corresponding to k = 1) for our
+running example "abcd(d|ε)(e|f)de". These are "abc" and "(d|ε)(e|f)de", where the
+ﬁrst "d" has been left to separate both necessary factors. Their minimum length is 3, so this is the
+window length to use.
+The difﬁcult part is how to select k + 1 necessary and disjoint factors from a regular expression.
+Disjoint means that the subautomata do not share states (this ensures that there is a character separating
+them, which is necessary for transpositions). Moreover, we want the best set, and we want that all them
+have the same minimum path length from an initial to a ﬁnal state.
+
+We believe that an algorithm ﬁnding the optimal choice has a time cost which grows exponentially
+with k. We have therefore made the following simpliﬁcation. Each node s is assigned a number Is
+which corresponds to the length of the shortest path reaching it from the initial state. We do not permit
+picking arbitrary necessary factors, but only those subautomata formed by all the states s that have
+numbers i ≤ Is ≤ i + (cid:21), for some i and (cid:21). This (cid:21) is the minimum window length to search using
+that subautomata, and should be the same for all the necessary factors chosen. Moreover, every arrow
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1299
+
+a
+
+b
+
+1
+
+1
+
+0
+
+0
+
+c
+
+2
+
+2
+
+3
+
+3
+
+d
+
+d
+
+4
+
+4
+
+I s
+
+e
+
+5
+
+5
+
+e
+
+f
+
+f
+
+6
+
+5
+
+d
+
+d
+
+7
+
+5
+
+e
+
+8
+
+6
+
+9
+
+7
+
+Figure 13. Numbering Glushkov’s NFA states for the regular expression "abcd(d|ε)(e|f)de".
+
+leaving out of the chosen subautomaton is dropped. Finally, note that if the i values corresponding to
+any pair of subautomata chosen differ by more than (cid:21) then we are sure that they are disjoint.
+Figure 13 illustrates this numbering for our running example. The partition obtained in Figure 12
+corresponds to choosing the ranges [0, 3] and [4, 7] as the sets of states (this corresponds to the sets
+{0, 1, 2, 3} and {4, 5, 6, 7, 8, 9}). Of course the method does not permit us to choose all the legal sets
+of subautomata. In this example, the necessary subautomaton {6, 7, 8} cannot be picked because it
+includes some, but not all, states numbered 5.
+
+Numbering the states is easily done by a closure process starting from the initial state in O(Lm2/w)
+time, where L is the minimum length of a string matching the whole regular expression. As before,
+L(cid:15) = (cid:24)(L − k)/(k + 1)(cid:25) is the maximum possible length of a string matching a necessary factor.
+To determine the best factors, we ﬁrst compute prob, pprob, mprob and cost exactly as in Section 6.3.
+The only difference is that now we are only interested in starting from sets of initial states of the same Is
+number (there are L possible choices) and we are interested in analyzing factors of length no more than
+L(cid:15) = O(L/k). This lowers the costs to compute the previous arrays to O((L(cid:15)m)2) = O((Lm/k)2).
+We also make sure that we do not select subautomata that need more than w bits to be represented.
+
+Once we have the expected cost of choosing any possible Is value and any possible minimum factor
+length (cid:21), we can apply the optimization algorithm of Section 7.1.2, since we have in fact ‘linearized’
+the problem: thanks to our simpliﬁcation, the optimization problem is similar to when we had a single
+pattern and needed to extract the best set of k+1 disjoint factors from it, of a single length (cid:21). This takes
+O(L2) in the worst case but should in practice be closer to O(kL).
+
+Hence the total optimization algorithm needs O(m4) time at worst.
+
+8. A PATTERN MATCHING SOFTWARE
+
+Finally, we are in position to describe the software nrgrep. Nrgrep has been developed in ANSI C
+(cid:27)
+and tested on Linux and Solaris platforms. Its source code is publicly available under a Gnu license
+.
+We discuss now its main aspects.
+
+(cid:27)
+
+From http://www.dcc.uchile.cl/∼gnavarro/pubcode/.
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1300
+
+G. NAVARRO
+
+8.1. Usage and options
+
+Nrgrep receives in the command line a pattern and a list of ﬁles to search. The syntax of the pattern is
+given in Section 2. If no options are given, nrgrep searches the ﬁles in the order given and prints all the
+lines where it ﬁnds the pattern. If more than one ﬁle is given then the ﬁle name is printed prior to the
+lines that have matched inside it, if there is one. If no ﬁle names are given, it receives the text from the
+standard input.
+
+The default behavior of nrgrep can be modiﬁed with a set of possible options, which preﬁxed by the
+
+minus sign can precede the pattern speciﬁcation. Most of them are derived from agrep:
+
+i: the search is case insensitive;
+w: only whole words matching the pattern are accepted;
+x: only whole records (e.g. lines) matching the pattern are accepted;
+c: just counts the matches, but does not print them;
+l: outputs the names of the ﬁles containing matches, but not the matches themselves;
+G: outputs the whole contents of the ﬁles containing matches;
+h: does not output ﬁle names;
+n: prints records preceded by their record number;
+v: reverse matching, reporting the records that do not match.
+d < delim >:
+
+sets the record delimiter to < delim >, which is "\n#" by default. A "#" at the end
+of the delimiter makes it appear as a part of the previous record (default is next), so by default
+the end of line is the record delimiter and is considered as a part of the previous record;
+
+cutting very long records that do not ﬁt in a buffer;
+
+sets the buffer size, default is 64 kB. This affects the efﬁciency and the possibility of
+
+b < bufsize >:
+s < sep >: prints the string < sep > between each pair of records output;
+k < err > [idst]: allows up to < err > errors in the matches. If idst is not present the errors
+permitted are (i)nsertions, (d)eletions, (s)ubstitutions and (t)ranspositions, otherwise a subset of
+them can be speciﬁed, e.g. "-k 3ids";
+
+L: takes the pattern literally (no special characters);
+H: explains the usage and exits.
+
+We now discuss brieﬂy how each of these options are implemented: -i is easily carried out by
+using classes of characters; -w and -x are handled using context conditions; -c, -l, -G, -h, -b
+and -s are easily handled, but some changes are necessary such as stopping the search when the ﬁrst
+match is found for -l and -G; -n and -v are more complicated because they force all the records
+to be processed, so we ﬁrst search for the record delimiters and then search for the pattern inside
+the records (normally we search for the pattern and ﬁnd record delimiters around occurrences only);
+-d is arranged by changing the record delimiter only (it has to be a simple pattern, but classes or
+characters are permitted); -k switches to approximate searching and the [idst] ﬂags are considered
+at veriﬁcation time only; and -L avoids the normal parsing process and considers the pattern as a
+simple string.
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1301
+
+Of course it is permitted to combine the options in a single string preceded by the minus sign or as
+a sequence of strings, each preceded by the minus sign. Some combinations, however, make no sense
+and are automatically overriden (a warning message is issued): ﬁlenames are not printed if the text
+comes by the standard input; -c and -G are not compatible and -c dominates; -n and -l are not
+compatible and -l dominates; -l and -G are not compatible and -G dominates; and -G is ignored
+when working on the standard input (since -G works by printing the whole ﬁle from the shell).
+
+8.2. Parsing the pattern
+
+One important aspect that we have not discussed is how is the parsing done. In principle we just have
+to parse a regular expression. However, our parser module carries out some other tasks, such as the
+following.
+
+Parsing our extended syntax: some of our operations, such as "?" and classes of characters, are not
+part of the classical regular expression syntax. The result of the parsing is a syntax tree which is
+not discarded, since as we have seen it is useful later for preprocessing regular expressions.
+
+Map the pattern to bit mask positions: the parser determines the number of states required by the
+
+pattern and assigns the bit positions corresponding to each part of the pattern speciﬁcation.
+
+Determine type of subexpression: given the whole pattern or a subset of its states, the parser is able
+
+to determine which type of expression is involved (simple, extended or regular expression).
+
+Algebraic simpliﬁcation: the parser performs some algebraic simpliﬁcation on the pattern to optimize
+
+the search and reduce the number of bits needed for it.
+
+The parsing phase operates in a top-down way. It ﬁrst tries to parse an or ("|") of subexpressions.
+Each of them is parsed as a concatenation of subexpressions, each of which is a ‘single expression’
+ﬁnished with a sequence of "*", "?" or "+" terminators, and the single expression is either a single
+symbol, a class of characters or a top-level expression in parentheses. Apart from the syntax tree, the
+parser produces a mapping from positions of the pattern strings to leaves of the syntax tree, meaning
+that the character or class described at that pattern position must be loaded at that tree leaf.
+
+The second step is the algebraic simpliﬁcation, which proceeds bottom-up and is able to enforce the
+following rules at any level.
+(1) If [C1] and [C2] are classes of characters then [C1] | [C2] −→ [C1C2].
+(2) If [C] is a class, then [C] | ε, ε | [C] −→ [C]?.
+(3) If E is any subexpression, then E · ε, ε · E −→ E.
+(4) If E is any subexpression, then E∗∗, E ?∗, E+∗, E ∗ ?, E + ?, E∗+, E ?+ −→ E ∗, and
+(5) ε | ε, ε∗, ε?, ε+ −→ ε.
+(6) A subexpression which can match the empty string and appears at the beginning or at the end of
+
+E ? ? −→ E ?, E++ −→ E+.
+
+the pattern is replaced by ε, except when we need to match whole words or records.
+
+To collapse classes of characters in a single node (ﬁrst rule) we traverse the obtained mapping from
+pattern positions to tree leaves, ﬁnd those mapping to the leaves that store [C1] and [C2] and make all
+them point to the new leaf that represents [C1C2].
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1302
+
+G. NAVARRO
+
+More simpliﬁcations are possible, but they are more complicated and we chose to stop here for the
+current version of nrgrep. Some interesting simpliﬁcations that may reduce the number of bits required
+to represent the pattern are xwz|uwv −→ (x|u)w(z|v), EE∗ −→ E+ and E|E −→ E for arbitrarily
+complex E (right now we do that just for leaves).
+
+After the simpliﬁcation is done we assign positions in the bit mask corresponding to each
+character/class in the pattern. This is easily done by traversing the leaves left to right and assigning one
+bit to each leaf of the tree except to those storing ε instead of a class of characters. Note that this works
+as expected on simple and extended patterns as well. For several purposes (including Glushkov’s NFA
+construction algorithm) we need to store which are the bit positions used inside every subtree, which
+of these correspond to initial and ﬁnal states, and whether the empty string matches the subexpression.
+All this is easily done in the same recursive traversal over the tree.
+Once we have determined the bits that correspond to each tree leaf and the mapping from pattern
+positions to tree leaves, we build a table of bit masks B, such that B[c] tells which pattern positions are
+activated by the character c. This B table can be directly used for simple and extended patterns, and it
+is the basis to build the DFA transitions of regular expressions.
+
+Finally,
+
+the parser is able to tell which is the type of the pattern that
+
+it has processed.
+This can be different from what the syntax used to express the pattern may suggest, for example
+"a(b|c)dε*e(f|g)" is the simple pattern "a[bc]de[fg]", which is discovered by the
+simpliﬁcation procedure. This is in our general spirit of not being mislead by simple problems
+presented in a complicated way, which motivated us to select optimum subpatterns to search for. As a
+secondary effect of simpliﬁcations, the number of bits required to represent the pattern may be reduced.
+A second reason to be able to determine the real type of pattern is that the scanning subpattern
+selected can be simpler than the whole pattern and hence it can admit a faster search algorithm. For this
+sake we permit determining the type not only of the whole pattern but also of a selected set of positions.
+The algorithm for determining the type of pattern or subpattern starts by assuming a simple pattern
+until it ﬁnds evidence of an extended pattern or a regular expression. The algorithm enters recursively
+into the syntax tree of the pattern avoiding entering subexpressions where no selected state is involved.
+Among those that have to be entered in order to reach the selected states, it answers ‘simple’ for the
+leaves of the tree (characters, classes and ε), and in concatenations it takes the most complex type
+among the two sides. When reaching an internal node "?", "*" or "+" it assumes ‘extended’ if
+the subtree was just a single character, otherwise it assumes ‘regular expression’. The latter is always
+assumed when an or ("|") that could not be simpliﬁed is found.
+
+8.3. Software structure
+
+Nrgrep is implemented as a set of modules, which permits easy enrichment with new types of patterns.
+Each type of pattern (simple, extended and regular expression) has two modules to deal with the exact
+and the approximate case, which makes six modules: simple, esimple, extended, eextended,
+regular, eregular (the preﬁx "e" stands for allowing (e)rrors). The other modules are as follows.
+
+basics, options, except, memio: basic deﬁnitions, exception handling, and memory and I/O
+
+management functions.
+
+bit masks: handles operations on simple and multi-word bit masks.
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1303
+
+buffer: implements the buffering mechanism to read ﬁles.
+
+record: takes care of context conditions and record management.
+
+parser: performs the parsing.
+
+search: template that exports the preprocessing and search functions which are implemented in the
+
+six modules described (simple, etc).
+
+shell: interacts with the user and provides the main program.
+
+The template search facilitates the management of different search algorithms for different pattern
+types. Moreover, we remind that the scanning procedure for a pattern of a given type can use a
+subpattern whose type is simpler, and hence a different scanning function is used. This is easily handled
+with the template.
+
+9. SOME EXPERIMENTAL RESULTS
+
+We present now some experiments comparing the performance of nrgrep version 1.1 against that of its
+best known competitors, Gnu grep version 2.4 and agrep version 3.0.
+
+Agrep [1] uses for simple strings a very efﬁcient modiﬁcation of the Boyer–Moore–Horspool
+algorithm [9]. For classes of characters and wild cards (denoted "#" and equivalent to ".*") it uses an
+extension of the Shift-Or algorithm explained in Section 3.1, in all cases based on forward scanning.
+For regular expressions it uses a forward scanning with the bit parallel simulation of Thompson’s
+automaton, as explained in Section 3.4. Finally, for approximate searching of simple strings it tries to
+use partitioning into k + 1 pieces and a multipattern search algorithm based on Boyer–Moore, but if
+this does not promise to yield good results it prefers a bit-parallel forward scanning with the automaton
+of k + 1 rows (these techniques were explained in Section 3.5). For approximate searching of more
+complex patterns agrep uses only this last technique.
+
+Gnu grep cannot search for approximate patterns, but it permits all the extended patterns and regular
+expressions. Simple strings are searched for with a Boyer–Moore–Gosper search algorithm (similar to
+Horspool). All the other complex patterns are searched for with a lazy deterministic automaton, i.e. a
+DFA whose states are built as needed (using forward scanning). To speed up the search for complex
+patterns, grep tries to extract their longest necessary string, which is used as a ﬁlter and searched for as
+a simple string. In fact, grep is able to extract a necessary set of strings, i.e. such that one of the strings
+in the set has to appear in every match. This set is searched for as a ﬁlter using a Commentz–Walter
+like algorithm [29], which is a kind of multipattern Boyer–Moore. As we will see, this extension makes
+grep very powerful and closer to our goal of a smooth degradation in efﬁciency as the pattern gets more
+complex.
+
+The experiments were carried out over 100 MB of English text extracted from Wall Street Journal
+articles of 1987, which are part of the TREC collection [30]. Two different machines were used: SUN
+is a Sun UltraSparc-1 of 167 MHz with 64 MB RAM running Solaris 2.6, and INTEL is an i686 of
+550 MHz with 64 MB RAM running Linux Red Hat 6.2 (kernel 2.2.14-5.0). Both are 32-bit machines
+(w = 32).
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1304
+
+G. NAVARRO
+
+Table I. Sizes of the different softwares under comparison.
+
+Software
+
+agrep v. 3.0
+grep v. 2.4
+nrgrep v 1.1
+
+Source size
+
+(kB)
+
+412.49
+472.65
+281.52
+
+Executable size
+
+(SUN)
+(kB)
+
+152.79
+80.91
+92.50
+
+Executable size
+
+(INTEL)
+
+(kB)
+
+136.26
+73.83
+89.59
+
+To illustrate the complexity of the code, we show the sizes of the sources and executables in Table I.
+The source size is obtained by summing up the sizes of all the ".c" and ".h" ﬁles. The size of the
+executables is computed after running Unix’s "strip" command on them. As can be seen, nrgrep is
+in general a simpler software.
+
+The experiments were repeated for 100 different patterns of each kind. To minimize the interference
+of I/O times in our measures, we had the text in a local disk, we considered only user times and we
+asked the programs to show the count of matching records only. The records were the lines of the ﬁle.
+The same patterns were searched for on the same text for grep, agrep and nrgrep.
+
+Our ﬁrst experiment shows the search times for simple strings of lengths 5 to 30. Those strings
+were randomly selected from the same text starting at word beginnings and taking care of including
+only letters, digits and spaces. We also tested how the "-i" (case insensitive search) and "-w"
+(match whole words) affected the performance, but the differences were negligible. We also made
+this experiment allowing 10% and 20% of errors (i.e. k = (cid:24)0.1m(cid:25) or k = (cid:24)0.2m(cid:25)). In the case of errors
+grep is excluded from the comparison because it does not permit approximate searching.
+
+As Figure 14 shows, nrgrep is competitive against the others, more or less depending on the machine
+and the pattern length. It works better on the INTEL architecture and on moderate length patterns rather
+than on very short ones. It is interesting to notice that in our experiments grep performed better than
+agrep.
+When searching allowing errors, nrgrep is slower or faster than agrep depending on the case.
+With low error levels (10%) they are quite close, except for m = 20, where for some reason agrep
+performs consistently bad on SUN. With moderate error levels (20%) the picture is more complicated
+and each of them is better for different pattern lengths. This is a point of very volatile behavior because
+20% happens to be very close to the limit where splitting into k + 1 pieces ceases to be a good choice,
+and a small error estimating the probability of a match produces dramatic changes in the performance.
+Depending on each pattern, a different search technique is used.
+On the other hand, the search permitting transpositions is consistently worse than the one not
+permitting them. This is not only because when splitting into k + 1 pieces they may have to be shorter
+to allow one free space among them, but also because even when they can have the same length the
+subpattern selection process has more options to ﬁnd the best pieces if no space has to be left among
+them.
+The behavior of nrgrep, however, is not as erratic as it seems to be. The non-monotonic behavior can
+be explained in terms of splitting into k + 1 pieces. As m grows, the length of the pieces that can be
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1305
+
+Exact searching on SUN
+
+Exact searching on INTEL
+
+34
+
+32
+
+30
+
+28
+
+26
+
+24
+
+22
+
+20
+
+18
+
+60
+
+55
+
+50
+
+45
+
+40
+
+35
+
+30
+
+Agrep
+Grep
+Nrgrep
+
+5
+
+10
+
+15
+
+20
+
+25
+
+30
+
+m
+
+Approximate searching on INTEL
+
+Agrep 10%
+Nrgrep 10%
+Nrgrep 10% (transp)
+Agrep 20%
+Nrgrep 20%
+Nrgrep 20% (transp)
+
+5
+
+10
+
+15
+
+20
+
+25
+
+30
+
+Agrep
+Grep
+Nrgrep
+
+5
+
+10
+
+15
+
+20
+
+25
+
+30
+
+m
+
+Approximate searching on SUN
+
+Agrep 10%
+Nrgrep 10%
+Nrgrep 10% (transp)
+Agrep 20%
+Nrgrep 20%
+Nrgrep 20% (transp)
+
+2
+
+1.8
+
+1.6
+
+1.4
+
+1.2
+
+1
+
+0.8
+
+0.6
+
+45
+
+40
+
+35
+
+30
+
+25
+
+20
+
+15
+
+10
+
+5
+
+0
+
+5
+
+10
+
+15
+
+20
+
+25
+
+30
+
+m
+
+m
+
+Figure 14. Search times on 100 MB for simple strings using exact and approximate searching.
+
+searched for grows, tending to the real m/(k+1) value from below. For example, for k = 20% of m, we
+have in the case of transpositions to search for two pieces of length 2 when m = 5. For m = 10 we have
+to search for three pieces of length 2, which is estimated to produce too many veriﬁcations and then
+another method is used. For m = 15, however, we have to search for four pieces of length 3, which has
+a much lower probability of occurrence and suggests splitting again into k + 1 pieces. The differences
+between searching using or not using transpositions is explained in the same way. For m = 5, we have
+to search for two pieces of length 2 no matter whether transpositions are permitted. But for m = 10 we
+can search for three pieces of length 3 if no transpositions are permitted or not, which yields a much
+better search time for that case. We remark that permitting transpositions has the potential of yielding
+approximate searching of better quality, and hence obtain the same (or better) results using a smaller k.
+Our second experiment aims at evaluating performance when searching for simple patterns that
+include classes of characters. We have selected strings as before from the text, and have replaced some
+random positions with a class of characters. The classes have been: upper and lower case versions of
+the letter replaced (called ‘case’ in the experiments), all the letters ([a-zA-Z], called ‘letters’ in the
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1306
+
+G. NAVARRO
+
+m = 10 on SUN
+
+m = 10 on INTEL
+
+10
+
+9
+
+8
+
+7
+
+6
+
+5
+
+4
+
+3
+
+2
+
+1
+
+10
+
+9
+
+8
+
+7
+
+6
+
+5
+
+4
+
+3
+
+2
+
+1
+
+0
+
+20
+
+18
+
+16
+
+14
+
+12
+
+10
+
+8
+
+6
+
+4
+
+2
+
+Agrep - case
+Agrep - letters
+Agrep - all
+Grep - case
+Grep - letters
+Grep - all
+Nrgrep - case
+Nrgrep - letters
+Nrgrep - all
+
+0
+
+1
+
+2
+
+3
+
+# of classes
+
+m = 10 on SUN
+
+4
+
+5
+
+Agrep - case
+Agrep - letters
+Agrep - all
+Grep - case
+Grep - letters
+Grep - all
+Nrgrep - case
+Nrgrep - letters
+Nrgrep - all
+
+0
+
+2
+
+4
+
+6
+
+8
+
+10
+
+# of classes
+
+m = 15, allowing 2 errors on SUN
+
+Agrep - case
+Agrep - letters
+Agrep - all
+Nrgrep - case
+Nrgrep - letters
+Nrgrep - all
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+42
+
+40
+
+38
+
+36
+
+34
+
+32
+
+30
+
+28
+
+26
+
+24
+
+42
+
+40
+
+38
+
+36
+
+34
+
+32
+
+30
+
+28
+
+26
+
+24
+
+22
+
+48
+
+46
+
+44
+
+42
+
+40
+
+38
+
+36
+
+34
+
+32
+
+Agrep - case
+Agrep - letters
+Agrep - all
+Grep - case
+Grep - letters
+Grep - all
+Nrgrep - case
+Nrgrep - letters
+Nrgrep - all
+
+0
+
+1
+
+2
+
+3
+
+# of classes
+
+m = 20 on INTEL
+
+4
+
+5
+
+Agrep - case
+Agrep - letters
+Agrep - all
+Grep - case
+Grep - letters
+Grep - all
+Nrgrep - case
+Nrgrep - letters
+Nrgrep - all
+
+0
+
+2
+
+4
+
+6
+
+8
+
+10
+
+# of classes
+
+m = 15, allowing 2 errors on INTEL
+
+Agrep - case
+Agrep - letters
+Agrep - all
+Nrgrep - case
+Nrgrep - letters
+Nrgrep - all
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+# of classes
+
+# of classes
+
+Figure 15. Exact and approximate search times on 100 MB for simple patterns with a
+
+varying number of classes of characters.
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1307
+
+m = 10 on SUN
+
+m = 10 on INTEL
+
+10
+
+8
+
+6
+
+4
+
+2
+
+0
+
+Agrep - *’s
+Agrep - +’s
+Grep - ?’s
+Grep - *’s
+Grep - +’s
+Nrgrep - ?’s
+Nrgrep - *’s
+Nrgrep - +’s
+
+0
+
+1
+
+2
+
+3
+
+4
+
+5
+
+# of special symbols
+
+m = 20 on SUN
+
+3.5
+
+3
+
+2.5
+
+2
+
+1.5
+
+1
+
+0.5
+
+2
+
+30
+
+25
+
+20
+
+15
+
+10
+
+5
+
+0
+
+1
+
+Agrep - *’s
+Agrep - +’s
+Grep - ?’s
+Grep - *’s
+Grep - +’s
+Nrgrep - ?’s
+Nrgrep - *’s
+Nrgrep - +’s
+
+4
+
+6
+
+8
+
+10
+
+# of special symbols
+
+m = 8, allowing 1 error on SUN
+
+Agrep - *’s
+Agrep - +’s
+Nrgrep - ?’s
+Nrgrep - *’s
+Nrgrep - +’s
+
+1.5
+
+2
+
+2.5
+
+3
+
+3.5
+
+4
+
+# of special symbols
+
+44
+
+42
+
+40
+
+38
+
+36
+
+34
+
+32
+
+30
+
+28
+
+26
+
+24
+
+44
+
+42
+
+40
+
+38
+
+36
+
+34
+
+32
+
+30
+
+28
+
+26
+
+24
+
+22
+
+44
+
+43
+
+42
+
+41
+
+40
+
+39
+
+38
+
+37
+
+36
+
+Agrep - *’s
+Agrep - +’s
+Grep - ?’s
+Grep - *’s
+Grep - +’s
+Nrgrep - ?’s
+Nrgrep - *’s
+Nrgrep - +’s
+
+0
+
+1
+
+2
+
+3
+
+4
+
+5
+
+# of special symbols
+
+m = 20 on INTEL
+
+Agrep - *’s
+Agrep - +’s
+Grep - ?’s
+Grep - *’s
+Grep - +’s
+Nrgrep - ?’s
+Nrgrep - *’s
+Nrgrep - +’s
+
+0
+
+2
+
+4
+
+6
+
+8
+
+10
+
+# of special symbols
+
+m = 8, allowing 1 error on INTEL
+
+Agrep - *’s
+Agrep - +’s
+Nrgrep - ?’s
+Nrgrep - *’s
+Nrgrep - +’s
+
+1
+
+1.5
+
+2
+
+2.5
+
+3
+
+3.5
+
+4
+
+# of special symbols
+
+Figure 16. Exact and approximate search times on 100 MB for extended patterns with a varying number of
+
+operators. Where, on SUN, Agrep is out of bounds, it takes nearly 18s.
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1308
+
+G. NAVARRO
+
+Table II. The regular expressions searched for (written with the syntax of nrgrep). Note that
+
+some are extended patterns.
+
+No.
+
+Pattern
+
+Size
+
+(# chars)
+
+Minimum
+length (cid:21)
+
+% of lines that match
+
+exactly
+
+1 error
+
+2 errors
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+
+American|Canadian
+American|Canadian|Mexican
+Amer[a-z]*can
+Amer[a-z]*can|Can[a-z]*ian
+Ame(i|(r|i)*)can
+Am[a-z]*ri[a-z]*an
+(Am|Ca)(er|na)(ic|di)an
+American#*policy
+A(mer|i)+can#*p(oli|cy)
+
+16
+23
+8
+15
+9
+8
+14
+15
+15
+
+8
+7
+7
+6
+6
+6
+8
+14
+8
+
+1.245
+1.288
+0.990
+1.245
+0.990
+0.991
+1.245
+0.002
+0.007
+
+1.561
+1.604
+1.309
+1.731
+1.312
+1.422
+1.561
+0.003
+0.013
+
+1.872
+2.134
+1.693
+8.733
+2.262
+3.756
+1.905
+0.008
+0.164
+
+experiment) and all the characters (".", called ‘all’ in the experiments). We have considered pattern
+lengths of 10 and 20 and an increasing number of positions converted into classes. We show also the
+case of length 15 and k = 2 errors (excluding grep).
+As Figure 15 shows, nrgrep deals much more efﬁciently with classes of characters than its
+competitors, worsening slowly as there are more or bigger classes to consider. Agrep always yields
+the same search time (coming from a Shift-Or-like algorithm). Grep, on the other hand, worsens
+progressively as the number of classes grows, but is independent of how big the classes are, and it
+worsens much faster than nrgrep. We have included the case of zero classes basically to show the
+effect of the change of agrep’s search algorithm.
+
+Our third experiment deals with extended patterns. We have selected strings as before from the
+text and have added an increasing number of operators "?", "*" or "+" to it, at random positions
+(avoiding the ﬁrst and last ones). For this purpose we had to use the "-E" option of grep, which deals
+with regular expressions, and convert e+ into ee∗ for agrep. Moreover, we found no way to express
+the "?" in agrep, since even allowing regular expressions, it did not permit specifying the ε string
+or the empty set (a? = (a|ε) = (a|∅∗)). We also show how agrep and nrgrep perform to search for
+extended patterns allowing errors. Because of agrep’s limitations, we chose m = 8 and k = 1 errors
+(no transpositions permitted) for this test.
+
+As Figure 16 shows, agrep has a constant search time coming again from Shift-Or-like searching
+(plus some size limitations on the pattern). Both grep and nrgrep improve as the problem becomes
+simpler, but nrgrep is consistently faster. Note that the problem is necessarily easier with the "+"
+operator because the minimum length of the pattern is not reduced as the number of operators grows.
+We have again included the case of zero operators to show how agrep jumps.
+
+With respect to approximate searching, nrgrep is consistently faster than agrep, whose cost is a kind
+of worst case which is reached when the minimum pattern length becomes 4. This is indeed a very
+difﬁcult case for approximate searching and nrgrep wisely chooses to do forward scanning on that
+case.
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1309
+
+Table III. Search times for the selected regular expressions. There are empty cells because agrep
+
+severely restricts the lengths of the complex patterns that can be approximately searched for.
+
+grep
+
+No.
+
+0 errors
+
+0 errors
+
+agrep
+1 error
+
+2 errors
+
+0 errors
+
+nrgrep
+1 error
+
+2 errors
+
+SUN
+1
+2
+3
+4
+5
+6
+7
+8
+9
+INTEL
+1
+2
+3
+4
+5
+6
+7
+8
+9
+
+8.13
+8.14
+1.57
+7.74
+2.01
+2.39
+9.00
+1.69
+2.84
+
+34.87
+34.41
+30.86
+35.61
+33.81
+34.95
+35.27
+28.70
+34.18
+
+18.46
+18.12
+9.27
+18.07
+9.46
+9.41
+18.23
+18.39
+18.54
+
+42.43
+42.46
+40.12
+41.81
+40.34
+39.96
+41.13
+42.10
+41.59
+
+23.64
+
+32.95
+
+22.93
+23.13
+
+32.75
+33.03
+
+43.34
+
+44.86
+
+43.43
+43.31
+
+44.78
+45.88
+
+2.31
+2.41
+2.42
+3.84
+2.41
+3.18
+2.04
+1.76
+3.04
+
+25.16
+28.78
+22.90
+33.72
+26.01
+27.29
+23.87
+23.33
+27.61
+
+4.78
+12.34
+3.49
+13.28
+10.08
+25.03
+3.60
+3.33
+8.27
+
+38.33
+42.38
+32.48
+45.06
+39.78
+43.28
+36.51
+32.53
+39.44
+
+52.40
+58.81
+33.06
+29.42
+18.83
+31.30
+18.99
+5.24
+18.16
+
+55.82
+58.18
+48.04
+50.52
+43.84
+58.21
+44.23
+35.81
+43.42
+
+Our fourth experiment considers regular expressions. It is not easy to deﬁne what is a ‘random’
+regular expression, so we have tested nine complex patterns that we considered interesting in order
+to illustrate the different efﬁciency alternatives. These have been searched for with zero, one and two
+errors (no transpositions permitted). Table II shows the patterns selected and some aspects that explain
+the efﬁciency problems in searching for them.
+
+Table III shows the results. These are more complex to interpret than in the previous cases, and there
+
+are important differences in the behavior of the same code depending on the machine used.
+
+For example, grep performed consistently well on INTEL, while it showed wide differences on SUN.
+We believe that this comes from the fact that in some cases grep cannot ﬁnd a suitable set of ﬁltering
+strings (patterns 1, 2, 4 and 7). In those cases the time corresponds to that of a forward DFA. On the
+INTEL machine, however, the search times are always good.
+
+Another example is agrep, which has basically two different times on SUN and always the same time
+on INTEL. Despite agrep always using forward scanning with a bit-parallel automaton, on the SUN
+it takes half the time when the pattern is very short (up to 12 positions), while it is slower for longer
+patterns. This difference seems to come from the number of computer words needed for the simulation,
+but this seems not to be important on the INTEL machine. The approximate search using agrep (which
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1310
+
+G. NAVARRO
+
+works only on the shorter patterns) scales in time accordingly to the number of computer words used,
+although there is a large constant factor added in the INTEL machine.
+
+Nrgrep performs well on exact searching. All the patterns yield fast search times, in general better
+than those of grep on INTEL and worse on SUN. The exception is where grep does not use ﬁltering
+in the SUN machine, and nrgrep becomes much faster. When errors are permitted the search times of
+nrgrep vary depending on its ability to ﬁlter the search. The main aspects that affect the search time
+are the frequency of the pattern and its size. When compared to agrep, nrgrep always performs better
+on exact searching, and better or similarly on approximate searching.
+
+The general conclusions from the experiments are that nrgrep is, for exact searching, competitive
+against agrep and grep, while it is in general superior (sometimes by far) when searching for classes
+of characters and extended patterns, exactly or allowing errors. When it comes to search for regular
+expressions, nrgrep is in general, but not always, faster than grep and agrep.
+
+One ﬁnal word about nrgrep’s smoothness is worthwhile. The reader may get the impression that
+nrgrep’s behavior is not as smooth as promised because it takes very different times for different
+patterns, for example on regular expressions, while agrep’s behavior is much more predictable.
+The point is that some of these patterns are indeed much simpler than others, and nrgrep is much
+faster at searching for the simpler ones. Agrep, on the other hand, does not distinguish between simple
+and complicated cases. Grep does a much better job but it does not deal with the complex area of
+approximate searching. Something similar happens on other cases: nrgrep had the highest variance
+when searching for patterns where classes were inserted at random points. This is because this random
+process does produce a high variance in the complexity of the patterns: it is much simpler to search for
+the pattern when all the classes are in one extreme (then cutting it out from the scanning subpattern)
+than when they are uniformly spread. Nrgrep’s behavior simply mimics the variance in its input,
+precisely because it takes time proportional to the real complexity of the search problem.
+
+10. CONCLUSIONS
+
+We have presented nrgrep, a fast online pattern-matching tool especially well suited for complex pattern
+searching on natural language text. Nrgrep is now at version 1.1, and publicly available under a Gnu
+license. Our belief is that it can be a successful new member of the grep family. The Free Software
+Foundation has shown interest in making nrgrep an important part of a new release of Gnu grep, and
+we are currently deﬁning the details.
+
+The most important improvements of nrgrep over the other members of the grep family are as follows
+
+Efﬁciency: nrgrep is similar to the others when searching for simple strings (a sequence of single
+characters) and some regular expressions, and generally much faster for all other types of
+patterns.
+
+Uniformity: our search model is uniform, based on a single concept. This translates into smooth
+variations in the search time as the pattern gets more complex, and into an absence of the obscure
+restrictions present in agrep.
+
+Extended patterns: we introduce a class of patterns which is intermediate between simple patterns
+
+and regular expressions and develop efﬁcient search algorithms for it.
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+NR-GREP
+
+1311
+
+Error model: we include character transpositions in the error model.
+
+Optimization: we ﬁnd the optimal subpattern to scan the text and check the potential occurrences for
+
+the complete pattern.
+
+Some possible extensions and improvements have been left for future work. The ﬁrst one is a
+better computation of the matching probability, which has a direct impact on the ability of nrgrep
+for choosing the right search method (currently it normally succeeds, but not always). A second one
+is a better algebraic optimization of the regular expressions, which has also an impact on the ability to
+correctly compute the matching probabilities. Finally, we would also like to be able to combine exact
+and approximate searching as agrep does, where parts of the pattern accept errors and others do not.
+It is not hard to do this by using bit masks that control the propagation of errors.
+
+ACKNOWLEDGEMENTS
+
+Most of the algorithmic work preceding nrgrep was done in collaboration with Mathieu Rafﬁnot, who
+unfortunately had no time to participate in this software.
+
+REFERENCES
+
+1. Wu S, Manber U. Agrep—a fast approximate pattern-matching tool. Proceedings of the USENIX Technical Conference.
+
+USENIX Association: Berkeley, CA, 1992; 153–162.
+
+2. Manber U, Wu S. GLIMPSE: A tool to search through entire ﬁle systems. Proceedings of the USENIX Technical Conference,
+
+Winter 1994. USENIX Association: Berkeley, CA, 1994; 23–32.
+
+3. Moura E, Navarro G, Ziviani N, Baeza-Yates R. Fast and ﬂexible word searching on compressed text. ACM Transactions
+
+4. Navarro G, Moura E, Neubert M, Ziviani N, Baeza-Yates R. Adding compression to block addressing inverted indexes.
+
+on Information Systems 2000; 18(2):113–139.
+
+Information Retrieval 2000; 3(1):49–77.
+
+5. Navarro G, Rafﬁnot M. Flexible Pattern Matching in Strings. Cambridge University Press, 2001. To appear.
+6. Crochemore M, Rytter W. Text Algorithms. Oxford University Press, 1994.
+7. Baeza-Yates R, Ribeiro-Neto B. Modern Information Retrieval. Addison-Wesley, 1999.
+8. Wu S, Manber U. Fast text searching allowing errors. Communications of the ACM 1992; 35(10):83–91.
+9. Horspool R. Practical fast searching in strings. Software Practice and Experience 1980; 10:501–506.
+10. Boyer R, Moore J. A fast string searching algorithm. Communications of the ACM 1977; 20(10):762–772.
+11. Baeza-Yates R, Gonnet G. A new approach to text searching. Communications of the ACM 1992; 35(10):74–82.
+12. Navarro G, Rafﬁnot M. A bit-parallel approach to sufﬁx automata: Fast extended string matching. Proceedings of the
+9th International Symposium on Combinatorial Pattern Matching (CPM’98), Piscataway, NJ (Lecture Notes in Computer
+Science, vol. 1448). Springer: Berlin, 1998; 14–33.
+
+13. Navarro G, Rafﬁnot M. Fast and ﬂexible string matching by combining bit-parallelism and sufﬁx automata. ACM Journal
+
+14. Czumaj A, Crochemore M, Gasieniec L, Jarominek S, Lecroq T, Plandowski W, Rytter W. Speeding up two stringof 
+Experimental Algorithmics 2000; 5(4): online journal.
+
+matching algorithms. Algorithmica 1994; 12:247–267.
+
+15. Navarro G, Rafﬁnot M. Fast regular expression searching. 3rd International Workshop on Algorithm Engineering
+
+(WAE’99), London, UK (Lecture Notes in Computer Science, vol. 1668). Springer: Berlin, 1999; 198–212.
+
+16. Kukich K. Techniques for automatically correcting words in text. ACM Computing Surveys 1992; 24(4):377–439.
+17. Navarro G, Rafﬁnot M. Compact DFA representation for fast regular expression search. Proceedings of the 5th
+International Workshop on Algorithm Engineering (WAE’01), Aarhus, Denmark, August 2001 (Lecture Notes in Computer
+Science).
+
+18. Baeza-Yates R. Text retrieval: Theory and practice. 12th IFIP World Computer Congress, September 1992, vol. I. Elsevier,
+
+1992; 465–476.
+
+19. Knuth D, Morris J, Pratt V. Fast pattern matching in strings. SIAM Journal on Computing, 1977; 6(1):323–350.
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+1312
+
+G. NAVARRO
+
+20. Baeza-Yates R, Navarro G. Faster approximate string matching. Algorithmica 1999; 23(2):127–158.
+21. Myers G. A fast bit-vector algorithm for approximate string matching based on dynamic progamming. Journal of the ACM
+
+1999; 46(3):395–415.
+
+22. Rafﬁnot M. On the multi backward dawg matching algorithm (MultiBDM). Proceedings of the 4th South American
+
+Workshop on String Processing (WSP’97), Valparaiso, Chile, Carleton University Press: Ottawa, CA, 1997; 149–165.
+
+23. El-Mabrouk N, Crochemore M. Boyer-moore strategy to efﬁcient approximate string matching. Proceedings of the 7th
+International Symposium on Combinatorial Pattern Matching (CPM’96) (Lecture Notes in Computer Science, vol. 1075).
+Springer: Berlin, 1996; 24–38.
+
+24. Thompson K. Regular expression search algorithm. Communications of the ACM 1968; 11(6):419–422.
+25. Berry G, Sethi R. From regular expression to deterministic automata. Theoretical Computer Science 1986; 48(1):117–126.
+26. Navarro G. A guided tour to approximate string matching. ACM Computing Surveys 2001; 33:31–88.
+27. Melichar B. String Matching with k Differences by Finite Automata. Proceedings of the 13th International Congress on
+
+Pattern Recognition (ICPR’96), 1996. IEEE CS Press, 1996; 256–260.
+
+28. Navarro G, Baeza-Yates R. Very fast and simple approximate string matching. Information Processing Letters 1999; 72:65–
+
+70.
+
+29. Commentz-Walter B. A string matching algorithm fast on the average. Proceedings of the 6th International Colloquium
+on Algorithms, Languages and Programming ICALP’79 (Lecture Notes in Computer Science, vol. 71). Springer: Berlin,
+1979; 118–132.
+
+30. Harman D. Overview of the Third Text REtrieval Conference. Proceeding of the 3rd Text REtrieval Conference (TREC-3),
+
+NIST Special Publication 500-225, Gaithersburg, MD, 1995; 1–19.
+
+Copyright  2001 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2001; 31:1265–1312
+
+

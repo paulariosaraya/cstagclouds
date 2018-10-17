@@ -1,0 +1,1292 @@
+3
+1
+0
+2
+
+ 
+
+g
+u
+A
+6
+
+ 
+
+ 
+ 
+]
+
+C
+D
+.
+s
+c
+[
+ 
+ 
+
+1
+v
+9
+1
+4
+1
+
+.
+
+8
+0
+3
+1
+:
+v
+i
+X
+r
+a
+
+Improving the GPU space of computation under
+
+triangular domain problems.
+
+Crist´obal A. Navarro
+
+Computer Science department
+
+University of Chile
+
+Chile
+
+Email: crinavar@dcc.uchile.cl
+
+Nancy Hitschfeld
+
+Computer Science department
+
+University of Chile
+
+Email: nancy@dcc.uchile.cl
+
+Abstract—There is a stage in the GPU computing pipeline
+where a grid of thread-blocks is mapped to the problem domain.
+Normally, this grid is a k-dimensional bounding box that covers
+a k-dimensional problem no matter its shape. Threads that fall
+inside the problem domain perform computations, otherwise
+they are discarded at runtime. For problems with non-square
+geometry, this is not always the best idea because part of the
+space of computation is executed without any practical use. Twodimensional 
+triangular domain problems, alias td-problems, are
+a particular case of interest. Problems such as the Euclidean
+distance map, LU decomposition, collision detection and simulations 
+over triangular tiled domains are all td-problems and they
+appear frequently in many areas of science. In this work, we
+propose an improved GPU mapping function g(λ), that maps
+any λ block to a unique location (i, j) in the triangular domain.
+The mapping is based on the properties of the lower triangular
+matrix and it works at a block level, thus not compromising
+thread organization within a block. The theoretical improvement
+from using g(λ) is upper bounded as I < 2 and the number
+of wasted blocks is reduced from O(n2) to O(n). We compare
+our strategy with other proposed methods; the upper-triangular
+mapping (UTM), the rectangular box (RB) and the recursive
+partition (REC). Our experimental results on Nvidia’s Kepler
+GPU architecture show that g(λ) is between 12% and 15% faster
+than the bounding box (BB) strategy. When compared to the
+other strategies, our mapping runs signiﬁcantly faster than UTM
+and it is as fast as RB in practical use, with the advantage that
+thread organization is not compromised, as in RB. This work also
+contributes at presenting, for the ﬁrst time, a fair comparison of
+all existing strategies running the same experiments under the
+same hardware.
+
+I.
+
+INTRODUCTION AND RELATED WORK
+
+GPU computing is without question an important research
+area [1], [2] since the release of general purpose computing
+platforms such as CUDA [3] and OpenCL [4]. For every GPU
+application, there is a stage where a grid of blocks, also known
+as the space of computation, is mapped to a problem domain to
+eventually solve it. This mapping can be deﬁned as a function
+f (x) : Rk → Rp that transforms each k-dimensional point
+x = (x1, x2, ..., xk) of the grid to a unique p-dimensional
+point of the problem domain. In other words, f (x) maps the
+space of computation to the problem domain.
+
+When the problem domain is simple in shape, rectangular
+or square grids are good choices because the bounding box
+matches exactly the domain. Rectangular or square grids are
+the most used ones and they are characterized for using the
+bounding box strategy (BB), where f (x) = x.
+
+There are also other types of problems that do not match
+a box shaped domain because they have a different geometry.
+More in detail, some 2D problems have a triangular shaped
+domain. We call these type of problems triangular-domainproblems 
+or simply td-problems. Building a square grid for
+a td-problem is not the best choice because entire blocks of
+computation, containing hundreds of threads, are wasted and
+discarded at runtime, leading to a cost in performance. The
+scenario is illustrated in Figure 1.
+
+Fig. 1. The BB strategy is not the best choice for td-problem.
+
+Many computational problems are in fact
+
+td-problems;
+simulations over triangular tilings (e.g John Conway’s Game
+of life [5]), collision detection tables, LU decomposition,
+graph adjacencies and Euclidean distance maps (EDM), among
+others. The problem of improving the space of computation
+is important, because each contribution in this matter will
+have an impact on every td-problem. Related work in the
+ﬁeld of distance maps has proposed GPU implementations for
+parallel computation of DNA sequence distances [6] which
+is based on EDM. In their work, Ying et al. mention that
+the problem domain is indeed symmetric and they do realize
+that only the upper or lower triangular part of the interaction
+matrix requires computation. Li et al. [7] have also worked on
+GPU-based EDMs on large data and have also identiﬁed the
+symmetry involved in the computation. In both works, there
+has not been a proposal for a strategy regarding the mapping of
+the grid to the problem domain. Packed data structures have
+been proposed in the ﬁeld of lineal algebra for representing
+triangular and symmetric matrices with applications to LU
+and Cholesky decomposition [8]. Jung et. al. [9] proposed
+the rectangular box strategy for accessing and storing a
+triangular matrix (upper of lower). As a result, they achieve
+data structures with practically half the size with respect to
+
+classical methods based on the full matrix. In 2009, Ries et
+al. contributed with a parallel GPU method for the triangular
+matrix inversion [10]. The authors identify that the space of
+computation can be improved by using a recursive partition of
+the grid, based on divide and conquer. In 2012, Q. Avril et. al.
+[11] proposed a mapping function that given a thread id k, it
+computes the coordinates (a, b), based on the properties of the
+upper-triangular section of a symmetric matrix. The authors
+mention that they use Carmack’s and Lomont’s fast square root
+approximation (based on the Newton-Raphson approximation
+algorithm [12]) for speeding up the mapping function. The
+authors also mention that all approximation errors can be ﬁxed
+by using only two conditionals statements. The motivation
+behind our work is similar to the one of Q. Avril et. al., but
+it uses the idea of the lower-triangular matrix instead of the
+upper one, and instead of mapping threads, we map blocks.
+These two differences are critical for achieving a simpler, faster
+and exact mapping function for N < 30, 000.
+
+Up to date, there has not been a dedicated comparison
+of the different strategies proposed for improving the space
+of computation. In the best case, we can ﬁnd a comparison
+against the BB strategy [11] but the authors did not give
+details if the BB kernel was optimized or not. For example,
+ﬁltering by block coordinates whenever is possible is faster
+than ﬁltering by the thread id. In this paper we address this
+lack of comparisons and present for the ﬁrst time results for
+all strategies running the same tests under the same hardware.
+
+The rest of the manuscript includes a formal deﬁnition of
+g(λ) (section II), details about its implementation and how we
+chose the best square root function (section III). In section
+IV we present experimental results for all existing strategies.
+All strategies are tested under the same conditions; to execute
+a dummy kernel and a kernel for computing the EDM using
+1, 2, 3 and 4 features. Both kernels run in the range N ∈
+[1024, 30720] with N a multiple of 1024. Results, advantages
+and disadvantages are discussed in section V.
+
+II. THE MAPPING FUNCTION
+
+A. Formulation
+
+Let A be a td-problem of size N (N +1)/2, n = ⌈N/ρ⌉ the
+number of blocks needed to cover the data along a dimension
+and ρ the number of threads per block per dimension, or
+dimensional blocksize. A BB strategy would simply build a
+square grid, namely GBB, of nxn blocks and put conditional
+instructions to cancel the computations outside the problem
+domain. A ﬁner analysis tells that n(n + 1)/2 blocks are
+sufﬁcient to cover the problem domain of A. These blocks
+can be indexed in the following way:
+
+mapping. Figure 2 illustrates GLT M and how it is smaller
+than GBB (from Figure 1) while still providing the necessary
+amount of blocks to cover the problem domain. The result
+
+Fig. 2. The LTM strategy uses just the necessary amount of blocks to cover
+the problem domain.
+
+is a reduction from n(n − 1)/2 ∈ O(n2) to n/2 ∈ O(n)
+wasted blocks. In other words, conditional statements will only
+occur when the block lies on the diagonal, in order to ﬁlter
+the threads in the upper part.
+
+The next step is to formulate g(λ) = (i, j) where (i, j)
+are the coordinates in problem space and λ is the index of the
+block Bx,y computed as λ = x + yn′ in grid space.
+Lemma. For any block Bx,y with index λ = x + yn′ and
+λ ∈ [0, n(n + 1)/2− 1], its corresponding i, j coordinates are
+computed with a mapping function g(λ):
+
+g(λ) = (i, j) = (cid:16)jr 1
+
+4
+
++ 2λ −
+
+1
+
+2k, λ − i(i + 1)/2(cid:17)
+
+Proof: Block index λ can be written as:
+
+λ =
+
+x
+
+Xk=1
+
+k
+
+(2)
+
+(3)
+
+The index of the far left block that lies on the same row of the
+λ-th block corresponds to the sum in the range [1, i]. Similarly,
+the index of the far left block of the (i + 1)-th row is a sum in
+the range [1, i + 1]. That is, for all λ indices under the same
+row i, the range of the summation will lie in a range [1, i + ǫ],
+where ǫ < 1. With this observation, λ can be bounded:
+
+i
+
+Xk=1
+
+k ≤ λ <
+
+i+1
+
+Xk=1
+
+k
+
+(4)
+
+Using (3) in (4), we get that x ∈ [i, i + 1) therefore i = ⌊x⌋.
+Equation (3) can be re-written as
+
+λ =
+
+x(x + 1)
+
+2
+
+(5)
+
+0
+1
+3
+...
+
+n(n−1)
+
+2
+
+2
+4
+...
+n(n−1)
+
+2 + 1
+
+5
+...
+...
+
+...
+...
+
+A =
+
+(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)
+
+(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)
+
+n(n+1)
+
+2 − 1
+
+The idea is to ﬁrst build a two-dimensional balanced grid,
+namely GLT M , that will contain all n(n + 1)/2 blocks. By
+balanced, we mean that the size per dimension of the grid must
+
+be n′ = ⌈pn(n + 1)/2⌉ per dimension. For the rest of the
+
+paper we will name our method as LTM for lower triangular
+
+i = ⌊x⌋ = jp1/4 + 2λ − 1/2k
+
+which is a second order equation with a = 1, b = 1 and
+c = −2:
+
+x2 + x − 2λ = 0
+
+(1)
+
+with a positive solution of:
+
+√1 + 8λ − 1
+
+2
+
+x =
+
+The row of the λ-th block can now be computed as:
+
+= p1/4 + 2λ − 1/2
+
+(6)
+
+(7)
+
+(8)
+
+Finally, j is the distance from the λ-th block to the left most
+block in the same row:
+
+j = λ −
+
+i(i + 1)
+
+2
+
+(9)
+
+If the diagonal is not needed, then g(λ) becomes:
+
+g(λ) = (i, j) = (cid:16)jr 1
+
+4
+
++ 2λ +
+
+1
+
+2k, λ − i(i + 1)/2(cid:17) (10)
+
+When comparing LTM and UTM [11], we identify several
+differences: (1) LTM is based on the lower triangular-matrix
+mapping. (2) g(λ) uses fewer ﬂoating point operations than in
+UTM. (3) LTM maps blocks and not threads as in UTM. (4)
+Since g(λ) is a map of blocks and the number of blocks is
+n = N/ρ, the square root gives smaller approximation errors,
+allowing exact computation for larger values of N .
+
+B. Bounds on the improvement factor
+
+The LTM strategy depends strongly on the square root
+which is asymptotically O(M (n)) [13] where M (n) is the
+cost of multiplying two numbers of n digits. Considering that
+real numbers are represented by a ﬁnite number of digits (i.e
+ﬂoating point numbers with a maximum of m digits), then all
+basic operations cost a ﬁxed amount of time units, leading to
+a constant cost M (m) = Cs ∈ O(1). All other computations
+are elemental arithmetic operations and will be taken as an
+additional cost of Ca ∈ O(1). The LTM strategy has a cost
+of τ = Cs + Ca = O(1) for each mapping performed. On
+the other hand, the BB strategy checks for each block if
+By <= Bx in order to know if the threads inside have to
+do work or not, leading to a constant cost of β ∈ O(1). For
+this particular case, asymptotic analysis will not give useful
+information about the improvement factor, since both the LTM
+and BB strategies lie in the same complexity order (i.e O(n2)).
+Therefore, we proceed with a ﬁner analysis in order to ﬁnd the
+constants involved in the improvement factor.
+
+Let |GBB| and |GLT M| be the amount of blocks for the BB
+and LTM strategies, respectively, and ρ the amount of threads
+per block per dimension as mentioned earlier. If we assume
+that β is cheaper than τ, we get that τ = kβ with a constant
+k ≥ 1. The improvement factor I can be obtained by dividing
+the total cost of BB by LTM across their entire grids:
+
+Since k > 1, the range of I is:
+
+0 < I < 2
+
+(15)
+
+Any value in the range 1 < I < 2 means an improvement in
+performance and a value in the range 0 < I < 1 will mean
+a slowdown respect to the BB strategy. Constant k can be
+interpreted as the cost and overhead of the mapping function. A
+value of k ≈ 1 means that the maximum possible improvement
+is achieved; Imax ≈ 2, under large n. In practice, a value of
+k ≈ 1 is too optimistic and will not occur in practice. Our
+hypothesis is that actual hardware could give a value in the
+range 1.5 ≤ k < 2.0 which would correspond to 1.00 < I ≤
+1.33. Any value of k ≥ 2 will lead to no improvement at
+all, resulting in slower performance than the BB strategy. It
+is important to put emphasis on the fact that Ca (arithmetic
+operations) will not have much room for optimization as Cs.
+Therefore, getting the maximum possible value of I will ﬁnally
+depend on how small is Cs, which is the square root.
+
+III.
+
+IMPLEMENTATION
+
+A. Choosing the best implementation for LTM
+
+The performance of the LTM strategy depends strongly
+on how fast the computation of index i is. More precisely,
+the computation of the square root as mentioned earlier. For
+this, we made three implementations of the LTM strategy and
+tested them against the BB strategy in order to keep the fastest
+one. The ﬁrst one, named ’LTM-X’, uses the default sqrtf (x)
+function from CUDA; this is the simplest one.
+
+The second implementation of LTM, named ’LTM-N’,
+computes the square root by using three iterations of the
+Newton-Raphson method [13], [12]. More in detail, we use the
+implementation of Carmack and Lomont. This implementation
+became famous because it has proved to be effective for
+applications that allow small errors. The initial value used
+is the magic number ’0x5f3759df’ (this initial guess became
+known when ’Id Software’ released Quake 3 source code back
+in the year 2005). We added a constant of ǫ = 10−4 to the
+computation of i to automatically repair the ﬂoating point
+point error. With this small change, the computation of the
+i coordinate becomes exact for the range N ∈ [0, 30720].
+
+The third implementation, named ’LTM-R’, uses the hardware 
+implemented reciprocal square root, rsqrtf (x):
+
+√x =
+
+x
+√x
+
+= x rsqrtf (x)
+
+(16)
+
+I =
+
+β|GBB|ρ2
+τ|GLT M|ρ2 =
+
+βn2
+
+τ n(n + 1)/2
+
+=
+
+2βn2
+
+τ n2 + τ n
+
+(11)
+
+This implementation is as simple as LTM-X, with the only
+difference that it adds ǫ = 10−4 just like in LTM-N.
+
+As shown in (11), the improvement does not depend on the
+threads, but instead, on the blocks. For large n, I becomes:
+
+I =
+
+2βn2
+
+τ n2 + τ n ≈
+
+2β
+τ
+
+(12)
+
+If τ ≥ 2β, performance is equal to or worse than that of BB.
+A real improvement is achieved when:
+β ≤ τ < 2β
+
+(13)
+
+By using the relation τ = kβ in (12) we get that:
+
+I ≈ 2/k
+
+(14)
+
+We measured the improvement factor of each implementation,
+ running a dummy kernel that only computes the i, j
+indices and writes the sum i + j to a constant location in
+memory. It is necessary to perform a memory write using
+the coordinates, otherwise the compiler can optimize the
+code removing part of the mapping cost. Figure 3 shows
+the improvement factor between BB and LTM as well as a
+comparison on the amount of wasted blocks.
+
+From the results, we observe that LTM-X is slower than
+BB, only achieving I ≈ 0.7. LTM-N achieves an improvement
+of I ≈ 1.03 which is only a little better than BB. LTM-R
+
+Improvement factor
+
+Wasted blocks
+
+ 1.2
+
+ 1.15
+
+ 1.1
+
+ 1.05
+
+ 1
+
+ 0.95
+
+ 0.9
+
+ 0.85
+
+BB
+LTM
+
+s
+k
+c
+o
+l
+b
+
+ 
+
+#
+
+1e+07
+
+1e+06
+
+1e+05
+
+1e+04
+
+1e+03
+
+1e+02
+
+1e+01
+
+LTM-R
+BB reference
+LTM-N
+LTM-X
+
+ 0
+
+ 5000
+
+ 10000
+
+ 15000
+
+ 20000
+
+ 25000
+
+ 30000
+
+ 35000
+
+ 0
+
+ 5000
+
+ 10000
+
+ 15000
+
+ 20000
+
+ 25000
+
+ 30000
+
+N
+
+size
+
+Fig. 3. Only the LTM-R implementation runs faster than the BB strategy. On the right, the number of wasted blocks a a function of N.
+
+achieved a value of I ≈ 1.15. From the results we observe
+that using the inverse square root is the best option, thus we
+keep LTM-R.
+
+We also tried an alternative version of LTM using a
+lookup table for the mapping, but performance was as slow
+as using the default square root sqrtf (x), even when the
+Kepler architecture has an efﬁcient mechanism for accessing
+a common value for all threads (uniform-load feature) within
+a block. We did not include these results because memory
+limitations did not allow us to experiment in the full range
+of N ∈ [1024, 30720]. It is important to mention that the
+implementation of the LTM strategy worked fast for the Kepler
+architecture but not for Fermi (previous architecture), which
+achieved I < 1 in all cases.
+
+B. Implementing the other strategies
+
+Apart from LTM, we also implemented BB, RB, REC and
+UTM strategies following the details given by the authors.
+However, we added the following restriction: the mapping
+cannot use the global memory of the GPU. This means no
+auxiliary array and no lookup tables. A couple of constants
+are allowed though. We made this restriction because we are
+considering practical use of these strategies, that is, to dedicate
+the entire GPU memory for the td-problem being solved.
+
+For the bounding box (BB) strategy, we make blocks above
+the diagonal to be discarded immediately, without needing to
+compute a thread coordinate. This is done by checking the
+following: if Bx > By is true, then the thread returns. For the
+rest of the threads, the coordinate is computed. The condition
+i > j is still performed to discard threads above the diagonal,
+where Bx = By. This implementation of BB is faster than
+computing the thread coordinate for every block and ﬁltering
+afterwards.
+
+The rectangular box (RB) strategy is based on the work of
+Jung et. al. [9]. This method takes the sub-triangular portion
+of the threads where tx > N/2, rotates it CCW and places
+it above the diagonal
+to form a vertical rectangular grid
+(see Figure 4). In the original work, the authors map the
+thread coordinates with the help of a texture. In this case, we
+perform the coordinate mapping arithmetically without using
+
+any texture. All threads below the diagonal just need to do
+i = ty − 1, while j remains the same. Threads on or above the
+diagonal must compute i = N − ty − 1 and j = N − i − 1.
+This mapping is for even values of N . The case of odd N is
+the same idea but partitioning at ⌊N/2⌋.
+
+The recursive partition (REC) strategy was proposed for
+the GPU by [10] et. al.. In this method, the size of the problem
+is deﬁned as N = m2k where k and m are positive integers
+and m is a multiple of ρ (the blocksize). The idea is do a
+binary bottom-up recursion of k levels, similar to merge-sort
+(see Figure 4). At each level, a grid of blocks is launched
+for parallel execution. Their method requires an additional
+pass for computing the blocks at the diagonal. The details of
+how the grid is built and how blocks are distributed are well
+explained in [10]. In the original work, the mapping of blocks
+to their respective locations at each level is achieved by using
+a lookup table stored in constant memory. In this work, we do
+the mapping at runtime as with RB.
+
+Fig. 4. The RB and REC strategies.
+
+The upper-triangular mapping (UTM) was proposed by
+Avril et. al. [11] for performing efﬁcient collision detection
+on the GPU. This method is very similar to LTM. Given a
+problem size N , and a thread index k, its unique pair (a, b)
+is given by a = ⌊ −(2n+1)+√4n2−4n−8k+1
+⌋ and b = (a + 1) +
+k − (a−1)(2n−a)
+. This strategy uses the idea of mapping to
+the upper-triangular matrix without the diagonal. Mapping to
+
+−2
+
+2
+
+the upper-triangular matrix still allows solving lower-triangular
+shaped domains, and vice-versa via transposition.
+
+IV. EXPERIMENTAL RESULTS
+
+Our experimental design consists of measuring the performance 
+of LTM-R and compare it against all existing strategies;
+bounding box (BB), upper-triangular mapping (UTM) [11],
+rectangular box (RB) [9] and the recursive partition (REC)
+[10]. We checked the output for each strategy to be always
+correct and the same, for all cases. Two tests are performed to
+each strategy; (1) the dummy kernel and (2) the EDM kernel.
+The dummy kernel just adds the coordinates and saves the
+result into a ﬁxed memory location, the implementation is as
+simple as possible. The purpose of the dummy kernel is to
+measure just the cost of the strategy and not the problem being
+solved. Test (2) consists of a real problem; to compute the
+Euclidean distance matrix (EDM) using one, two, three, and
+four features. The purpose of the second test is to measure
+what is the performance of all strategies when solving a real
+problem. Testing with different number of features will give
+an idea on what is the behavior when increasing the work per
+thread.
+
+The hardware used for all experiments is shown in table
+
+(I).
+
+TABLE I.
+
+HARDWARE USED FOR EXPERIMENTS.
+
+Component Description
+
+CPU
+RAM
+GPU
+API
+
+Intel(R) Core(TM) i7-3770K @ 3.50GHz
+32GB DDR3 1333MHZ
+Geforce GTX 680 (2GB, 1536 cores)
+CUDA 5.0
+
+The results for the dummy kernel, EDM-1D, EDM-4D and
+
+the improvement behavior are shown in Figure 5.
+
+Results on the dummy kernel show that the RB strategy is
+the fastest one achieving up to 25% of improvement over BB.
+LTM comes in the second place achieving approximately 13%
+of improvement over BB. The REC and UTM strategies gave
+an unexpected result; they performed slower than BB for the
+whole range of N .
+
+The EDM problem is solved by computing the Euclidean
+distance dij for all pairs. The distance between a pair of
+elements ai, aj is computed as:
+
+d
+
+f (i, j) = vuut
+Xk=1
+
+(ak
+
+i − ak
+j )2
+
+(17)
+
+Where d is the number of features and superscript k speciﬁes
+which feature of the element will be used.
+
+From the results on EDM, we observe that the improvement
+of RB is reduced to an average of 14%, practically half of
+what it achieved with the dummy kernel. LTM maintains the
+same performance as in the dummy kernel, within the range
+12% ˜15%. The performance of REC strategy now becomes
+faster than BB for N > 5, 000 and achieves up to 5% of
+improvement for N = 30, 720. UTM achieves the slowest
+performance of all strategies. The behavior of UTM can only
+
+be explained by the the overhead incurred in computing the
+square root and repairing the coordinates with conditionals. We
+conﬁrmed in section III that manual square root computation
+is still not fast enough. Results for EDM using two and three
+features showed similar results, therefore we decided not to
+include them.
+
+In the last ﬁgure, we can see that the behavior of I as a
+function of the number of features with N = 30, 720 does
+not vary signiﬁcantly for LTM and RB. For the case of REC
+and UTM, the number of features does have an impact on
+performance, being beneﬁcial for UTM.
+
+V. CONCLUSION
+
+Our main result from this work is the proposal of a function
+g(λ) for mapping a grid-blocks to a any td-problem, achieving
+an average improvement factor of I = 1.15 with respect to the
+BB strategy, where the theoretical range is 0 < I < 2. The reason 
+for such improvement is the fact that the number of wasted
+blocks at runtime is reduced from O(n2) to O(n), making the
+cores waste less time on unnecessary conditional instructions.
+The implementation of the LTM strategy is extremely short in
+code and totally detached from the problem, making it easy
+to adopt. Such improvement of I = 1.15 was only achievable
+when using the inverse square root (LTM-R). We think that this
+technical aspect is key to understanding that the square root
+plays a critical role in the cost of the mapping function. For
+our case, we found that the reciprocal square root was the most
+convenient option. The ǫ value worked correctly in the range
+that ﬁts on our GPU memory, that is N ∈ [1 to 30,000] (using
+blocks of size 16x16). This range is already useful for practical
+use. For bigger ranges, ǫ must be reﬁned or another approach
+must be taken for ﬁxing eventual errors. As long as the error
+is e ≤ 1, block-level (i.e., non-branching) conditionals can ﬁx
+the result. When comparing our method with other state of
+the art strategies, we found that LTM and RB are the fastest
+methods up to date. Additionally, LTM does not compromise
+thread organization as RB, giving an important advantage. This
+means that when using shared memory and thread coarsening,
+the implementation will become easier using LTM rather than
+RB, since latter would need to put conditionals in order to run
+different code when processing threads below, on and above
+the diagonal.
+
+The results obtained for REC are still promising. Even with
+the overhead of k kernel calls, it still performs faster than BB.
+We think that this strategy can become even faster for GPU
+architectures that allow recursive kernel invocation.
+
+The results of UTM were not expected to be slower than
+BB. Our hypothesis is that the cause of such performance is
+the manual computation of the square root and the conditionals
+involved for repairing the computed value. We believe that if
+UTM uses the block mapping approach and the inverse square
+root trick, its performance will increase considerably and will
+not need conditionals for the range N ∈ [1, 30720].
+
+In the future, GPUs will eventually become faster, each
+time having more special function units (SFU) and FP32 units
+per multi-processor, speeding up the computation of the square
+root. At that point, the LTM strategy will be able to use the
+default sqrt function and achieve an improvement factor of
+I > 1. As a ﬁnal conclusion, we can say that improving
+
+dummy kernel
+
+EDM with 1 feature
+
+BB
+RB
+REC
+LTM
+UTM
+
+BB
+RB
+REC
+LTM
+UTM
+
+]
+s
+
+m
+
+[
+ 
+e
+m
+
+i
+t
+
+ 50
+
+ 45
+
+ 40
+
+ 35
+
+ 30
+
+ 25
+
+ 20
+
+ 15
+
+ 10
+
+ 5
+
+ 0
+
+ 0
+
+ 5000
+
+ 10000
+
+ 15000
+
+ 20000
+
+ 25000
+
+ 30000
+
+ 35000
+
+ 0
+
+ 5000
+
+ 10000
+
+ 15000
+
+ 20000
+
+ 25000
+
+ 30000
+
+ 35000
+
+N
+
+N
+
+EDM with 4 features
+
+I behavior on EDM for N=30K
+
+BB
+RB
+REC
+LTM
+UTM
+
+ 1.15
+
+ 1.1
+
+ 1.05
+
+I
+
+ 1
+
+ 0.95
+
+ 0.9
+
+ 0.85
+
+BB
+RB
+REC
+LTM
+UTM
+
+]
+s
+
+m
+
+[
+ 
+e
+m
+
+i
+t
+
+]
+s
+
+m
+
+[
+ 
+e
+m
+
+i
+t
+
+ 30
+
+ 25
+
+ 20
+
+ 15
+
+ 10
+
+ 5
+
+ 0
+
+ 60
+
+ 50
+
+ 40
+
+ 30
+
+ 20
+
+ 10
+
+ 0
+
+ 0
+
+ 5000
+
+ 10000
+
+ 15000
+
+ 20000
+
+ 25000
+
+ 30000
+
+ 35000
+
+ 1
+
+ 2
+
+ 3
+
+ 4
+
+N
+
+# features
+
+Fig. 5. Results for the dummy kernel, EDM and the behavior of I when scaling the number of features.
+
+the space of computation for td-problem has proven to be
+advantageous in theory as well as in practice.
+
+ACKNOWLEDGMENT
+
+The authors would like to thank Anonymous for funding
+the PhD program of the ﬁrst author. This work was partially
+supported by the project XXXX.
+
+REFERENCES
+
+[1]
+
+[2]
+
+J. D. Owens, M. Houston, D. Luebke, S. Green, J. E. Stone, and J. C.
+Phillips, “GPU Computing,” Proceedings of the IEEE, vol. 96, no. 5,
+pp. 879–899, May 2008.
+J. Nickolls and W. J. Dally, “The gpu computing era,” IEEE Micro,
+vol. 30, no. 2, pp. 56–69, Mar. 2010.
+
+[3] Nvidia-Corporation, Nvidia CUDA C Programming Guide, 2012.
+[4] Khronos OpenCL Working Group, The OpenCL Speciﬁcation, version
+
+1.0.29, 8 December 2008.
+
+[5] M. Gardner, “The fantastic combinations of John Conway’s new solitaire 
+game “life”,” Scientiﬁc American, vol. 223, pp. 120–123, Oct.
+1970.
+
+[6] Z. Ying, X. Lin, S. C.-W. See, and M. Li, “Gpu-accelerated dna
+distance matrix computation,” in Proceedings of the 2011 Sixth Annual
+ChinaGrid Conference, ser. CHINAGRID ’11. Washington, DC, USA:
+IEEE Computer Society, 2011, pp. 42–47.
+
+[7] Q. Li, V. Kecman, and R. Salman, “A chunking method for euclidean 
+distance matrix calculation on large dataset using multi-gpu,”
+in Proceedings of the 2010 Ninth International Conference on Machine
+Learning and Applications, ser. ICMLA ’10. Washington, DC, USA:
+IEEE Computer Society, 2010, pp. 208–213.
+
+[8] F. Gustavson, “New generalized data structures for matrices lead to
+a variety of high performance algorithms,” in Parallel Processing
+and Applied Mathematics, ser. Lecture Notes in Computer Science,
+R. Wyrzykowski, J. Dongarra, M. Paprzycki, and J. Wasniewski, Eds.
+Springer Berlin / Heidelberg, 2006, vol. 2328, pp. 418–436.
+
+[9] D. P. O. Jin Hyuk Jung, “Exploiting structure of symmetric or triangular
+
+matrices on a gpu,” Tech. Rep., 2008.
+
+[10] F. Ries, T. De Marco, M. Zivieri, and R. Guerrieri, “Triangular matrix
+inversion on graphics processing unit,” in Proceedings of the Conference
+on High Performance Computing Networking, Storage and Analysis, ser.
+SC ’09. New York, NY, USA: ACM, 2009, pp. 9:1–9:10.
+
+[11] Q. Avril, V. Gouranton, and B. Arnaldi, “Fast collision culling in largescale 
+environments using gpu mapping function,” in EGPGV, 2012, pp.
+71–80.
+
+[12] H. A. Peelle, “To teach Newton’s square root algorithm,” SIGAPL APL
+
+Quote Quad, vol. 5, no. 4, pp. 48–50, Dec. 1974.
+
+[13] T. J. Ypma, “Historical development of the Newton-Raphson method,”
+
+SIAM Rev., vol. 37, no. 4, pp. 531–551, Dec. 1995.
+
+EDM with 2 features
+
+BB
+RB
+REC
+LTM
+UTM
+
+]
+s
+
+m
+
+[
+ 
+e
+m
+
+i
+t
+
+ 50
+
+ 45
+
+ 40
+
+ 35
+
+ 30
+
+ 25
+
+ 20
+
+ 15
+
+ 10
+
+ 5
+
+ 0
+
+ 0
+
+ 5000
+
+ 10000
+
+ 15000
+
+ 20000
+
+ 25000
+
+ 30000
+
+ 35000
+
+N
+
+EDM with 3 features
+
+BB
+RB
+REC
+LTM
+UTM
+
+]
+s
+
+m
+
+[
+ 
+e
+m
+
+i
+t
+
+ 60
+
+ 50
+
+ 40
+
+ 30
+
+ 20
+
+ 10
+
+ 0
+
+ 0
+
+ 5000
+
+ 10000
+
+ 15000
+
+ 20000
+
+ 25000
+
+ 30000
+
+ 35000
+
+N
+
+EDM performance
+
+BB
+TDM-R
+
+]
+s
+
+m
+
+[
+ 
+e
+m
+
+i
+t
+
+ 40
+
+ 35
+
+ 30
+
+ 25
+
+ 20
+
+ 15
+
+ 10
+
+ 5
+
+ 0
+
+ 0
+
+ 5000
+
+ 10000
+
+ 15000
+
+ 20000
+
+ 25000
+
+ 30000
+
+size
+
+

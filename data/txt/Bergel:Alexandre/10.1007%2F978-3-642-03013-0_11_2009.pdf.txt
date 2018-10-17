@@ -1,0 +1,1760 @@
+Adding State and Visibility Control
+
+to Traits Using Lexical Nesting(cid:1)
+
+Tom Van Cutsem1,(cid:1)(cid:1), Alexandre Bergel2, St´ephane Ducasse2,
+
+and Wolfgang De Meuter1
+
+1 Programming Technology Lab, Vrije Universiteit Brussel, Belgium
+
+2 RMoD research group, INRIA Lille, France
+
+Abstract. Traits are reusable building blocks that can be composed to share
+methods across unrelated class hierarchies. Original traits are stateless and cannot
+express visibility control for methods. Two extensions, stateful traits and freezable 
+traits, have been proposed to overcome these limitations. However, these extensions 
+introduce complexity and have not yet been combined to simultaneously
+add both state and visibility control to traits.
+
+This paper revisits the addition of state and visibility control to traits. Rather
+than extending the original traits model with additional operations, we allow traits
+to be lexically nested within other modules. Traits can then have (shared) state
+and visibility control by hiding variables or methods in their lexical scope. Although 
+the Traits’ “ﬂattening property” has to be revisited, the combination of
+traits with lexical nesting results in a simple and expressive trait model. We discuss 
+an implementation of the model in AmbientTalk and specify its operational
+semantics.
+
+1 Introduction
+
+Traits have been proposed as a mechanism to compose and share behavioral units between 
+distinct class hierarchies. They are an alternative to multiple inheritance, the most
+signiﬁcant difference being that name conﬂicts must be explicitly resolved by the trait
+composer. Traits are recognized for their potential in supporting better composition and
+reuse. They have been integrated into a signiﬁcant number of languages, such as Perl 6,
+Slate [1], Squeak [2], DrScheme OO [3] and Fortress [4]. Although originally designed
+in a dynamically typed setting, several type systems have been built for Traits [5,6,7,8].
+Several extensions of the original traits have been proposed to ﬁx their limitations.
+Stateful traits present a solution to include state in traits [9]. In addition to deﬁning
+methods, a trait may deﬁne state. This state is private by default and may be accessed
+within the composing entity. Freezable traits [10] provide a visibility control mechanism
+for methods deﬁned in a trait: a method may either be (i) public and late bound or (ii)
+private and early bound. This enables the composer to change a trait method’s visibility
+at composition time to deal with unanticipated name conﬂicts.
+
+Although these extensions have been formally described and implementations were
+proposed, their main drawback is that the resulting language has too many operators
+
+(cid:1) Funded by the Interuniversity Attraction Poles Program, Belgian State, Belgian Science Policy.
+(cid:1)(cid:1) Postdoctoral Fellow of the Research Foundation - Flanders (FWO).
+
+S. Drossopoulou (Ed.): ECOOP 2009, LNCS 5653, pp. 220–243, 2009.
+c(cid:1) Springer-Verlag Berlin Heidelberg 2009
+
+Adding State and Visibility Control to Traits Using Lexical Nesting
+
+221
+
+and may introduce complex interactions with the host language. For example, freezable 
+traits introduce early bound message dispatch semantics to support method privacy
+which may conﬂict with the host language’s late bound semantics. Stateful traits introduce 
+private state that may conﬂict with the host language’s visibility rules. Finally,
+stateful traits must extend the host language’s memory layout with a “copy down” technique 
+[11] when linearizing variables whose offset in the memory layout is not constant
+among different composition locations.
+
+This paper proposes a unique and simpler extension to traits to achieve both state and
+visibility control (to distinguish public from private state and behavior). We ﬁrst revisit
+previous extensions to traits (as deﬁned by among others this paper’s second and third
+author). Subsequently, instead of providing two different visibility control mechanisms
+– one for state and another one for methods – we use lexical scoping as the sole visibility
+control mechanism for both state and methods.
+
+Our approach is validated in AmbientTalk, a classless object-based language. In AmbientTalk,
+ traits are plain, ﬁrst-class objects that can be lexically nested (within other
+objects or methods). Traits can have private or public state. Unanticipated name conﬂicts 
+can be reduced because a trait can make methods private by hiding them in its
+lexical scope. However, there is no mechanism to fully support unanticipated name
+conﬂicts, since the composer cannot rename or hide conﬂicting methods.
+
+The contribution of this paper is a trait model that supports both state and visibility
+control without the introduction of any new composition operators, in contrast to stateful 
+or freezable traits. Instead, our model relies on the introduction of one feature: lexical 
+nesting. Our simpler model does require more support from its host language than
+the original one and is therefore not as straightforward to add to existing languages as
+is the original. Our contribution is validated as follows:
+
+– we describe an existing implementation of our model in the AmbientTalk language.
+– we demonstrate the effectiveness of our trait model by using it to structure a nontrivial 
+Morphic-like UI framework.
+
+– we provide an operational semantics to model lexical nesting of objects and the
+
+composition of lexically nested traits.
+
+The paper is organized as follows. We ﬁrst give a brief review of traits and point out
+some limitations related to state and visibility (Section 2). We then show how lexical
+nesting may be combined with traits (Section 3). To illustrate the implication of this
+combination in practice, we discuss a small case study (Section 4). We then formalize
+our approach by giving an operational semantics (Section 5), the properties of which are
+subsequently discussed (Section 6). A related work section (Section 7) and a conclusion
+end this paper (Section 8).
+
+2 Traits and Their Limitations
+
+This section provides a brief description of the original Traits model. Readers already
+familiar with Traits may safely skip Section 2.1 and jump directly to Section 2.2.
+
+222
+
+T. Van Cutsem et al.
+
+2.1 Traits in a Nutshell
+
+An exhaustive description of Traits may be found in previous work [12]. This section
+highlights the most relevant aspects of Traits for the purpose of this paper.
+
+Reusable groups of methods. A trait is a set of methods that serves as the behavioral
+building block of classes and is a primitive unit of code reuse. Traits cannot deﬁne state
+but may manipulate state via accessor methods.
+Explicit composition. A class is built by reference to its superclass, uses a set of traits,
+deﬁnes state (variables) and behavior (methods) that glue the traits together; a class
+implements the required trait methods and resolves any method conﬂicts. Trait composition 
+respects the following three rules:
+
+– Methods deﬁned in the composer (i.e., class or trait) using a trait take precedence
+over trait methods. This allows methods deﬁned in a composer to override methods
+with the same name provided by used traits; we call these methods glue methods.
+– Traits may be ﬂattened. In any class composer the traits can be in-lined to yield an
+equivalent class deﬁnition that does not use traits. This helps to understand classes
+that are composed of a large number of traits.
+
+– Composition order is irrelevant. All the traits have the same precedence, and hence
+
+conﬂicting trait methods must be explicitly disambiguated by the composer.
+
+Conﬂict resolution. While composing traits, method conﬂicts may arise. A conﬂict
+arises if two or more traits are combined that provide identically named methods not
+originating from the same trait. The composer can resolve a conﬂict in two ways:
+by deﬁning a (glue) method that overrides the conﬂicting methods, or by excluding
+a method from all but one trait. Traits allow method aliasing to introduce an additional
+name for a method provided by a trait. The new name is used to obtain access to a
+method that would otherwise be unreachable because it has been overridden.
+
+2.2 Issues with Freezable Traits and Stateful Traits
+
+Since the original paper Traits: Composable Units of Behavior was published at ECOOP
+2003 [13], several communities expressed their interest in Traits. In spite of its acceptance,
+ the trait model suffers from several drawbacks.
+
+State. First, state is not modeled: a trait is made of a set of method deﬁnitions, required
+method declarations and a composition expression. At that time, allowing traits to deﬁne
+variables was not considered and was intentionally left as future work. The follow-up
+work, stateful traits [9], addressed this very issue. It introduces state and a visibility
+mechanism for variable privacy. Trait variables are private. Variable sharing is obtained
+with a new composition operation (called @@). Variables deﬁned in different traits may
+be merged when those traits are composed with each other. This model raises several
+questions regarding encapsulation since a trait may be proposed as a black box and the
+composer has means to “open” it up. Since a linear object memory layout is employed
+in most efﬁcient object-oriented language implementation, a trait variable may have a
+different offset in the object layout at different composer locations. To be able to keep
+using a linear object layout, a technique known as “copy down” has to be employed [11].
+
+Adding State and Visibility Control to Traits Using Lexical Nesting
+
+223
+
+Visibility. Second, no visibility control was proposed in the original version of traits.
+Reppy and Turon [14] proposed a visibility mechanism `a la Java with public and private
+keywords. These access modiﬁers determine the visibility the members will have after
+they are inlined into a class but cannot be changed by the trait composer. Although
+having these visibilities for classes seems to be widely accepted, having the very same
+visibilities for traits seems not appropriate since the range of composition operators is
+far greater than the one for classes. Van Limberghen and Mens [15] showed that adding
+public/private/protected properties to attributes in mixins does not offer an adequate
+encapsulation mechanism. Traits can be composed in more ways than classes or mixins.
+Freezable Traits [10] introduced visibility control to fully support unanticipated name
+conﬂicts. The composer may change the visibility of trait methods at composition time
+using two new operators freeze and defrost: the ﬁrst operator turns a public late-bound
+method into a private early-bound method while the second reverts a private method
+into a public one. The problem of Freezable Traits is that it is complex to grasp the
+consequence of a change. More importantly Freezable Traits are based on the use of
+early-bound method dispatch. Such a mechanism may not be available in the host language 
+implementation and adding it may radically change the resulting language.
+
+Analysis. The two extensions to traits described above were designed in separation.
+Combining them into a unique language leads to a complex situation where two different 
+visibility mechanisms coexist. Although doable, this would signiﬁcantly raise the
+complexity of the trait model since 3 new operators (@@, freeze, defrost) and two visibility 
+mechanisms would need to be added, which clearly goes against the simplicity
+of the original model.
+
+In the following Section, we extend traits with both state and visibility control solely
+by combining them with lexical nesting of objects in the host language. Our model does
+not introduce any additional composition operators with respect to the original model.
+
+3 Lexically Nested Object-Based Traits
+
+In this Section, we discuss how state and visibility control can be added to traits. Our
+ﬁrst change to the model is that we no longer represent traits as distinct, declarative
+program entities, but rather as plain runtime objects (as in Self [16]). More speciﬁcally,
+traits will be represented as objects that close over their lexical environment i.e., as
+closures. In languages that support closures, such as Scheme, function bodies close over
+their deﬁning lexical environment. By doing so, the lexical environment may outlive the
+activation record in which it was created. Thus, a lexically free variable will retain its
+value and is said to have an indeﬁnite extent. This property enables closures to hide
+(mutable) variables and auxiliary functions in their lexically enclosing scope.
+
+In the following section we discuss how lexical scoping can and has been reconciled
+with object-oriented programming. We then introduce lexically nested traits in Section
+3.2. Section 3.3 discusses how to compose such traits.
+
+3.1 Objects as Closures
+It has long been known that closures can be used to implement objects [17, 18, 19].
+While closures successfully capture the essence of OOP, the expression of objects as
+
+224
+
+T. Van Cutsem et al.
+
+functions and message passing as function calls models objects only as a “second class”
+abstraction. There do exist a number of object-oriented languages that have introduced
+ﬁrst-class support for objects and message passing without losing the beneﬁts of representing 
+objects as closures. Examples of such languages include Emerald [20], ECMAScript 
+(a.k.a. Javascript) [21], Beta [22], E [23] and Newspeak [24].
+
+We introduce traits as closures in the AmbientTalk language [25,26], an object-based
+
+distributed programming language that is closest in style to Miller’s E language.
+
+Objects as closures in AmbientTalk. AmbientTalk is a classless, object-based language.
+Listing 1 deﬁnes a simple counter abstraction with operations to access, increment and
+decrement its value. In languages that support (either ﬁrst or second class) objects as
+closures, the role of classes as object generators is often replaced by functions that
+return a new object whenever they are called (cf. E [23], Emerald [20], Scheme [18]).
+We will name such functions, like the makeCounter function deﬁned above, “constructor
+functions”. To create a new counter, one calls the makeCounter constructor function.
+
+
+
+def makeCounter(val) {
+
+object: {
+
+def count() { val };
+def inc() { val := val + 1 };
+def dec() { val := val - 1 };
+
+}
+
+}
+
+
+
+
+
+
+Listing 1. Constructor function for counter objects.
+
+AmbientTalk fully exploits lexical scoping and allows object deﬁnitions to be nested
+within other object deﬁnitions or within the scope of a function or method body. In the
+above listing, the object construction expression object: {...} is lexically nested within
+the function makeCounter. The object expression groups the methods and ﬁelds of an
+object and evaluates to a new, independent object. Within the expression one can refer
+to lexically free variables, such as val. Objects close over their lexical environment,
+such that these variables have an indeﬁnite extent. This allows the counter to keep track
+of its state using val, while keeping this variable completely hidden within its lexical
+scope. Executing makeCounter(0).val will raise an exception.
+
+This simple object model removes the need for special language constructs for object
+creation (replaced by calling a constructor function), visibility control (hiding names using 
+lexical scoping), special constructor methods (replaced by constructor functions),
+static ﬁelds or methods (which are free variables of the constructor function) and singletons 
+(by not nesting an object deﬁnition within a constructor function).
+
+Lexical nesting and inheritance. AmbientTalk, like Self [27], supports object-based
+inheritance which is a relationship between two objects, a delegator and a delegate,
+rather than between a class and a superclass. Object-based inheritance implies that if the
+delegator receives a message it does not understand, it will delegate this message to its
+delegate object. Delegating a message to an object is different from sending a message
+to an object. Delegation, as ﬁrst proposed by Henry Lieberman [28], implies that if a
+
+Adding State and Visibility Control to Traits Using Lexical Nesting
+
+225
+
+matching method is found in the delegate, in the subsequent method invocation the self
+pseudovariable will refer to the delegator (that is: the object that originally received the
+message). This property ensures that object-based inheritance properly supports method
+overriding.
+
+In AmbientTalk, every object has a ﬁeld named super which refers to an object’s delegate.
+ There is only one such ﬁeld in each object; multiple inheritance is not supported.
+Objects by default delegate to an object named nil. Listing 2 exempliﬁes object-based
+inheritance. It shows the abstraction of a counter that cannot be decremented below
+zero. The delegate of such a “positive” counter object is a regular counter object. Any
+message for which a positive counter does not implement a method will be delegated
+to a regular counter object. The positive counter overrides the dec method and, if the
+counter has not reached zero yet, explicitly delegates the dec message to its delegate by
+means of the syntax superˆdec().
+
+
+
+def isStrictlyPositive(x) { x > 0 };
+
+def makePositiveCounter(val) {
+
+extend: makeCounter(val) with: {
+
+def dec() {
+
+if: isStrictlyPositive(self.count()) then: {
+
+superˆdec()
+
+}
+
+}
+
+}
+
+}
+
+
+Listing 2. Object-based inheritance.
+
+
+
+
+
+Because AmbientTalk allows both lexical nesting and (object-based) inheritance, we
+must clarify the semantics of looking up identiﬁers, as there are now two hierarchies of
+names: the lexical scope (starting with the object itself, ending in the top-level scope
+via lexical nesting) and the object’s inheritance chain (starting with self, ending in nil
+via each object’s super ﬁeld). An unqualiﬁed identiﬁer, such as val, is always looked
+up in the object’s lexical scope. A qualiﬁed identiﬁer, such as inc in c.inc() or count in
+self.count(), is looked up in the receiver’s inheritance chain. The major difference with
+mainstream object-oriented languages is that m() is not equivalent to self.m(). This is
+similar to method lookup in Newspeak [24], except that in Newspeak the inheritance
+chain is still considered if the method is not lexically visible.
+
+The example given above shows how the positive counter abstraction can unambiguously 
+make use of both lexically visible as well as inherited methods. The call to
+isStrictlyPositive is guaranteed to refer to the lexically visible deﬁnition. The invocation 
+self.count() will ﬁnd the method deﬁned in the delegate object.
+
+3.2 Lexically Nested Traits
+
+AmbientTalk supports trait-based composition between objects. An object can import
+zero or more traits when it is deﬁned. This causes the object to acquire all of the methods
+deﬁned by its imported traits, as if it had deﬁned those methods itself. If an imported
+
+226
+
+T. Van Cutsem et al.
+
+method name clashes with another imported name, or with a name explicitly deﬁned
+by the importing object, an exception is raised when the object is created to signal
+this conﬂict. Conﬂicts should be dealt with by the programmer by either aliasing an
+imported method name or by excluding it.
+
+In AmbientTalk, traits are regular objects rather than distinct runtime values or static
+program declarations. Any object can play the role of a trait. Hence, like all objects,
+traits can make use of lexical nesting to hide private state or auxiliary functions. To the
+best of our knowledge, this combination hasn’t been achieved before: it is a novel property 
+that is not available in other languages with explicit support for trait composition.
+Listing 3 deﬁnes a trait that provides a reusable abstraction for animating arbitrary
+objects. The example is taken from the implementation of a Morphic-like graphical
+kernel for AmbientTalk which is discussed in more detail in Section 4. The animation
+trait is parameterized with the refresh rate between animation calls (in milliseconds). It
+provides two methods, start and stop, to start and stop the animation loop. The start
+method triggers the animation loop by sending the message every:do: to its timer, passing 
+as the second argument an anonymous zero-argument closure to be executed every
+refreshRate milliseconds. Note that the timer variable is hidden within the lexical environment 
+of the animation trait object. As such, the variable is private to the trait and
+will not be visible to the composing clients. This example illustrates that traits can be
+stateful in AmbientTalk.
+
+
+
+def makeAnimationTrait(refreshRate) {
+
+def timer := makeTimer();
+object: {
+
+def start() { timer.every: refreshRate do: { self.animate() } };
+def stop() { timer.reset() };
+
+}
+
+}
+
+
+Listing 3. A trait as a regular object.
+
+
+
+
+
+To actually perform the animation, the animation trait requires the composite (i.e.,
+the object using the trait) to deﬁne a method named animate. The set of methods required
+by a trait is implicit in the source code. A method is required by a trait if the trait does
+not implement the method, yet it is invoked in the code (e.g. by means of a self-send).
+Listing 4 shows the implementation of a particle morph that uses the above animation
+trait to move within a given direction at a constant rate (see Section 4 for a more indepth 
+explanation of a “morph”). We assume that makeCircleMorph creates an object
+that is graphically represented as a circle. The particle morph implements the animate
+method as required by the animation trait. At each step of the animation, the particle
+morph moves itself at the given moveRate.
+
+Composition of traits is performed by means of the import statement. Because the
+animation trait is stateful, the particle morph ﬁrst generates a new instance of this trait
+(by invoking the makeAnimationTrait constructor function) and then imports this new instance.
+ The operational effect of the import statement is that the particle morph acquires
+its own, local deﬁnitions for the methods start and stop. How exactly this acquisition
+of methods takes place is the topic of the following section. For now, it sufﬁces to
+
+Adding State and Visibility Control to Traits Using Lexical Nesting
+
+227
+
+
+
+def makeParticleMorph(radius, moveRate, dx, dy) {
+
+extend: makeCircleMorph(radius) with: {
+
+import makeAnimationTrait(moveRate);
+def animate() {
+
+self.move(dx, dy);
+
+};
+
+}
+
+}
+
+
+Listing 4. Composing an object with a trait.
+
+
+
+
+
+understand that when start is sent to a particle morph, the implementation of the animation 
+trait is invoked and a self.animate() call will invoke the particle morph’s animate
+method, as expected.
+
+Conﬂict resolution. When the composite object is created, the import statement raises
+an exception if the composite and the trait deﬁne slots with the same name. It is up to
+the composite to explicitly resolve name conﬂicts between imported traits, or between
+an imported trait and itself. The composite can do so by aliasing or excluding imported
+methods1. For example, the particle morph can import the animation trait as follows:
+
+
+
+import makeAnimationTrait(moveRate) alias start := startMoving
+exclude stop;
+
+
+
+
+
+
+
+In this case, the particle morph will acquire a method named startMoving rather than
+start. Because the stop method is excluded, the particle morph will not acquire this
+method such that it cannot be stopped by client code.
+
+Initialization. As discussed previously, AmbientTalk objects are constructed by calling 
+ordinary functions. All code executed when calling such constructor functions is
+regarded as initialization code. When objects are used as traits (i.e., constructed as part
+of an import statement), their initialization code is ran in the order in which the import
+statements occur in the code. If more control over the composition of initialization code
+is required, such code can be transferred to a dedicated trait method that can then be
+composed, aliased or excluded at will by the composing object.
+
+3.3 Flattening Lexically Nested Traits
+
+We now discuss how exactly a composite object acquires the method deﬁnitions of its
+imported traits. In the original version of the traits model, trait composition enjoys the
+so-called ﬂattening property, which states that the semantics of a class deﬁned using
+traits is exactly the same as that of a class constructed directly from all of the nonoverridden 
+methods of the traits [13]. The intuitive explanation is that trait composition
+can be understood in terms of copy-pasting the method deﬁnitions of the trait into the
+class deﬁnition.
+
+1 Note that aliasing solves name conﬂicts, but does not guarantee that the intentional behavior
+of the composed traits is preserved. This issue has previously been addressed [10] and is not
+further discussed here.
+
+228
+
+T. Van Cutsem et al.
+
+When traits can be lexically nested, trait composition no longer adheres to the ﬂattening 
+property. The reason is that each imported trait method has its own distinct lexical 
+environment upon which it may depend. If the method body of an imported trait
+method were copy-pasted verbatim into the composing object, lexically free variables of
+the method may become unbound or accidentally rebound to a variable with the same
+name in the lexical environment of the composing object. An imported trait method
+should retain its own lexical environment, which implies that it is not equivalent to a
+method deﬁned by the composing object with the same method body.
+
+In this Section, we explore an alternative semantics for trait composition based on
+delegation to avoid the obvious problems related to the ﬂattening property when traits
+are closures. More speciﬁcally, we make use of a language feature of AmbientTalk that
+has not been explained thus far, which is the explicit delegation of messages between
+objects. In what follows, we ﬁrst discuss this language feature. Subsequently, we apply
+it to implement trait composition.
+
+Explicit delegation. As discussed in Section 3.1, an AmbientTalk object delegates
+any message it does not understand to the delegate object stored in its super ﬁeld.
+This mechanism is known as object-based inheritance. In this case, delegation of the
+message happens implicitly. However, AmbientTalk also provides a delegation operator 
+ˆ that allows objects to explicitly delegate messages to objects other than the object
+stored in their super ﬁeld. This enables objects to reuse code from different objects
+without resorting to multiple inheritance. Listing 5 exempliﬁes such reuse by extracting
+the reusable behavior of enumerable collections into a separate object (modeled after
+Ruby’s Enumerable mixin module 2). All reusable methods depend on a required method
+named each:. A collection representing an interval of integers [min, max[ reuses this
+behavior by providing an implementation for each:.
+
+
+
+def Enumerable := object: {
+def collect: function {
+
+def sequence := makeSequence();
+self.each: { |elt| sequence.append(function(elt)) };
+sequence
+
+};
+def detect: predicate {...};
+...
+
+}
+def makeInterval(min, max) {
+
+extend: Collection with: {
+
+// delegate messages to Enumerable to acquire its behavior
+def collect: function { Enumerableˆcollect: function };
+def detect: predicate { Enumerableˆdetect: predicate };
+...
+def each: function { // the method needed by Enumerable
+
+// apply function to all Integer objects between min and max
+min.to: max do: function
+
+};
+
+}
+
+}
+
+
+Listing 5. Composition of a reusable object via explicit delegation.
+
+2 http://www.ruby-doc.org/core/classes/Enumerable.html
+
+
+
+
+
+Adding State and Visibility Control to Traits Using Lexical Nesting
+
+229
+
+In order to reuse the functionality provided by Enumerable, the interval object deﬁnes
+a number of delegating methods. The sole purpose of such methods is to explicitly delegate 
+a message to another object. The expression objˆm() denotes the delegation of
+a message m to an object obj. Recall from Section 3.1 that the difference between a
+delegation and a regular message send (i.e., obj.m()) is that the former leaves the self
+pseudovariable unchanged during the invocation of m() (i.e., self is not rebound to refer
+to obj). This property is crucial to enable the kind of reuse exempliﬁed above: the implementation 
+of Enumerable’s methods is only partial. It depends on a method call to each:
+(shown underlined) that should generate a sequence of the collection’s elements by
+feeding them to a single-argument function. This method is therefore implemented by
+the interval object. Because the interval uses explicit delegation to forward the collect:
+and detect: messages to Enumerable, any occurrence of self.each: in these methods will
+refer to the implementation provided by the interval object.
+
+The above example shows that explicit delegation allows objects to reuse partially
+implemented methods via object composition rather than via (object-based) inheritance.
+The advantage of composition over (multiple) inheritance is that it enables the reuse of
+methods from multiple objects without introducing ambiguity. Its disadvantage is that
+the composing object needs to deﬁne explicit delegating methods for each method it
+wants to reuse as part of its interface. Below, we discuss how the deﬁnition of these delegating 
+methods can be automated, by deﬁning trait composition in terms of generating
+delegating methods.
+
+Trait composition by delegating method generation. Even though traits cannot be
+ﬂattened in a language that models traits as closures (as discussed previously), we can
+attribute a simple semantics to trait composition in terms of explicit delegation. To
+acquire a method deﬁned in an imported trait object, the composite object can generate
+a delegating method for it. This has the following desirable properties:
+
+– Because the composite explicitly delegates to the trait object, the trait method is
+invoked in its proper lexical environment. The lexical environment of the trait’s
+methods is unaffected by the trait composition.
+
+– Because delegation does not alter the binding of self, this pseudovariable can be
+
+used by the trait to invoke its required methods, implemented by the composite.
+
+Given this semantics, if we regard the Enumerable object as a trait, the interval object’s
+deﬁnitions for the delegating methods can be replaced by a single import Enumerable
+statement to achieve the same operational effect. Listing 6 shows the deﬁnition of the
+particle morph from Section 3.2 where the trait import has been transformed into a set
+of delegating methods. In this example, we assume t_ to be a fresh variable name. Note
+that the animation trait’s methods retain their proper lexical environment. Furthermore,
+this semantics respects the ability of nested traits to close over their lexical environment
+to encapsulate state and private behavior. For example, the particle morph cannot access
+the timer variable associated with its imported trait.
+
+Given the semantics of trait composition by means of explicit delegation, aliasing 
+a method by means of alias oldName := newName generates the delegating method
+def newName() { t_ˆoldName() } and the semantics of exclude name is simply that no delegating 
+method for name is deﬁned in the importing scope.
+
+230
+
+T. Van Cutsem et al.
+
+
+
+def makeParticleMorph(radius, moveRate, dx, dy) {
+
+def t_ := makeAnimationTrait(moveRate);
+extend: makeCircleMorph(radius) with: {
+
+// import is transformed into a set of delegating method definitions
+def start() { t_ˆstart() };
+def stop() { t_ˆstop() };
+def animate() {
+
+self.move(dx, dy);
+
+};
+
+}
+
+}
+
+
+
+
+
+
+Listing 6. Trait composition is transformed into delegation.
+
+Dealing with state. The example objects that we have shown up to now have private
+state because the ﬁelds holding this state are hidden in their lexical environment. It
+is also possible for objects to declare ﬁelds directly as part of their public interface.
+Since traits are ordinary objects, they may also declare ﬁelds in addition to methods. As
+previously described, when a trait is imported a delegate method is deﬁned for each of
+its provided methods. In addition, for each ﬁeld provided by the trait, a ﬁeld with the
+same name is deﬁned in the object that imports the trait. Each object that imports a trait
+with public state will thus have its own copy of that state. As is the case with methods,
+an exception is raised if the names of imported ﬁelds conﬂict with those deﬁned in the
+importing object.
+
+3.4 Summary
+
+Objects can be augmented with private state and visibility control by allowing them to
+close over their environment of deﬁnition. We added these properties to traits by similarly 
+representing them as plain objects that close over their environment of deﬁnition.
+However, when representing traits in this way, the traditional way of composing traits
+by ﬂattening them must be reconsidered. If we were to copy the method bodies of a
+trait’s provided methods directly in the importing scope, their lexical scope would be
+ill-deﬁned. One way to reconcile trait composition with lexical nesting is by expressing
+the composition in terms of delegating methods that delegate a message to a trait. The
+composite acquires the delegating method, rather than the method’s implementation.
+The use of delegation allows the trait to execute the method in its proper lexical scope
+yet access any required methods provided by the composite via self-sends.
+
+Contrary to Stateful and Freezable traits, our model does not introduce any new trait
+composition operators, thus preserving the simplicity of the original model. The drawback 
+is that our model cannot express certain compositions that can be expressed using
+Stateful or Freezable traits. For example, contrary to Freezable Traits we provide no
+operators to deal with unanticipated name conﬂicts since the composer cannot change
+the visibility of a trait’s provided ﬁelds or methods.
+
+4 Case Study: AmbientMorphic
+
+We demonstrate the applicability of lexically nested traits by means of a concrete case
+study. AmbientMorphic is a minimal implementation of the Morphic user-interface
+
+Adding State and Visibility Control to Traits Using Lexical Nesting
+
+231
+
+construction framework [29] in AmbientTalk3. In Morphic, the basic unit of abstraction
+is called a morph. A morph is an object with a graphical manifestation on the screen.
+Morphs can be composed into typical user interface widgets, but they can equally be
+used for rendering more lively applications such as e.g. a simulation of atoms in a gas
+tank [30]. The goal of the morphic framework is to create the illusion that the graphical
+“objects” which can be seen on the screen really are the objects that the programmer
+manipulates in the code.
+
+Morphic is an ideal case study for traits because morphs can be decomposed into
+many different yet interdependent concerns. Typical concerns include drawing and redrawing,
+ resizing, keeping track of which morph has the current focus, determining
+what morph is currently under the cursor (which is represented by the “hand morph” in
+Morphic), etc. In our framework, a Morph is composed of many small traits that each encode 
+such a concern. Figure 1 depicts a subset of the framework. The entire framework
+totals 18 traits (13 of which are stateful) and 12 morphs.
+
+AnimatableTrait
+
+timer
+
+start
+stop
+
+animate
+
+CompositeMorphTrait
+
+BouncableTrait
+
+directionVector
+animate
+touchedLeft
+touchedRight
+touchedTop
+touchedBottom
+
+addMorph
+removeMorph
+rootMorph
+...
+
+Morph
+
+drawOn: canvas
+
+ProtoMorphTrait
+
+ownerMorph
+
+onDropped
+owner
+
+MorphCollectionTrait
+
+childMorphs
+
+addSubmorph
+removeSubmorph
+visitSubmorphs: block
+...
+
+ColorableTrait
+
+ResizableTrait
+
+PositionableTrait
+
+PickableTrait
+
+myColor
+
+color
+color:=
+
+w, h
+
+width
+height
+resize
+bounds
+...
+
+absoluteX
+absoluteY
+
+owner
+
+x, y
+
+absoluteX
+absoluteY
+relativeX
+relativeY
+...
+
+isPickable, boundingBox
+
+pick
+isInside
+drop
+...
+
+bounds
+absoluteX
+absoluteY
+owner
+...
+
+Legend
+
+Trait Name
+
+private state
+
+provided
+methods
+
+required
+methods
+
+Uses Trait
+
+Fig. 1. A selection of the traits used in the AmbientMorphic framework
+
+Decomposing a morph into separate traits leads to separation of concerns (i.e., increased 
+modularity) and also enables programmers to reuse traits to build other kinds
+of morphs (i.e., increased reuse). Because our trait model additionally enables state and
+visibility control, we gain the following beneﬁts:
+
+1. Since traits can be stateful, the Morph object does not need to be polluted with the
+
+ﬁelds, accessors and mutators that would otherwise be required by the traits.
+
+2. State remains well encapsulated within each trait. If one of the traits modiﬁes the
+
+representation of its state, this will not impact the Morph.
+
+3 The framework is included in the open-source AmbientTalk distribution available online at
+
+http://prog.vub.ac.be/amop.
+
+232
+
+T. Van Cutsem et al.
+
+These beneﬁts would not have been achieved using the original traits model. The
+ﬁrst beneﬁt can be achieved with stateful traits and the second with freezable traits.
+However, these extensions have not before been combined into a single model.
+
+5 Operational Semantics
+
+We now formalize the features presented in Section 3 by providing an operational semantics 
+for three increasingly descriptive calculi: PROTOLITE, LEXLITE, and AMBIENTTALKLITE.
+ PROTOLITE is a core calculus that is gradually extended with the
+features required for lexically nested traits. The goal of this formalization is to provide
+the necessary technical description required when one would want to reproduce our implementation 
+of lexically nested traits. This section does not provide any hint on how
+to make this implementation fast (this is not the focus of this paper), but it conveys the
+necessary details to realize one.
+
+PROTOLITE is a minimal language that captures the essence of a dynamically typed,
+object-based programming language. It features ex-nihilo object creation, message passing,
+ ﬁeld access and update and ﬁnally explicit delegation (as discussed in Section 3.3).
+We chose not to formalize AmbientTalk’s support for implicit delegation via super ﬁelds
+because it is not essential to our discussion on trait composition.
+
+While PROTOLITE allows object deﬁnitions to be syntactically nested within other
+object deﬁnitions, objects are not allowed to refer to lexically free ﬁelds or methods.
+LEXLITE extends PROTOLITE with proper lexically nested objects. This enables nested
+objects to access lexically visible ﬁelds and methods of their enclosing objects, a key
+property for adding state and visibility control to traits. Finally, AMBIENTTALKLITE
+extends LEXLITE with support for trait composition.
+
+Related work. A number of calculi that describe delegation or traits have been formulated 
+so far. δ [31] is an imperative object based calculus with delegation. δ allows
+objects to change their behavior at runtime. Updates to an object’s ﬁelds can be either
+lazy or eager. δ also introduces a form of explicit delegation. An object has a number
+of delegates (which may be dynamically added or removed) and a message may be
+explicitly directed at a delegate. We chose not to use δ as our starting point because
+dynamic addition and removal of delegates and methods is not required for our purpose
+and because it does not support lexical nesting.
+
+Incomplete Featherweight Java [32] is an extension of Featherweight Java with incomplete 
+objects i.e., objects that require some missing methods which can be provided
+at run-time by composition with another complete object. The mechanism for method
+invocation is based on delegation and it is disciplined by static typing. The authors
+extend the class-based inheritance paradigm to make it more ﬂexible.
+
+Bono and Fisher [33] have designed an imperative object calculus to support classbased 
+programming via a combination of extensible objects and encapsulation. Two
+pillars of their calculus are an explicit type hierarchy and an automatic propagation of
+changes. Their focus is thus rather different from ours.
+
+Adding State and Visibility Control to Traits Using Lexical Nesting
+
+233
+
+5.1 PROTOLITE
+
+Figure 2 presents the syntax of PROTOLITE. This syntax is reduced to the minimum set
+of syntactic constructions that models object creation, message sending, and message
+delegation. We use the meta-variable e for expressions, m for method names, f for ﬁeld
+names and x for variable names.
+
+e = object{ﬁeld
+
+∗
+
+| e.f | e.f := e | e.m(e∗) | eˆm(e∗) | e(cid:1)oid(cid:2)ˆm(e∗)
+| e ; e | x | self | nil | oid
+
+∗}
+
+meth
+
+meth = m(x∗) = e
+ﬁeld = f := e
+
+Fig. 2. PROTOLITE expressions (run-time expressions are shown underlined)
+
+Objects are created by means of the object creation expression object{. . .}. An object 
+consists of a set of ﬁelds and methods. We assume that all object expressions are
+valid, i.e., ﬁeld and method names are unique within an object creation expression. Each
+ﬁeld declaration is associated with an initialization expression, which is evaluated when
+the object is created. Messages may be sent to the result of an expression using an arbitrary 
+number of arguments (e.m(e∗)). Messages may also be delegated (eˆm(e∗)). The
+ﬁgure shows run-time expressions, which are underlined, following the notation of Flatt
+et. al [34]. These expressions cannot be formulated in source code. They exist at runtime 
+and may contain annotations to store additional information about the expression
+(shown using (cid:1)(cid:2)).
+
+Figure 3 shows the evaluation contexts using the notation of Felleisen and Hieb [35].
+Evaluation contexts specify the evaluation order on expressions. For example, the receiver 
+expression of a message send must be evaluated before its arguments. The notation 
+v∗ E e∗
+indicates the evaluation of expressions from left to right. The names v, o
+and o(cid:2)
+
+are meta-variables that designate object references.
+
+E = [ ] | E.f | E.f := e | E.m(e∗) | E(cid:1)o(cid:2)ˆm(e∗)
+
+| o.f := E | o.m(v∗ E e∗) | o(cid:1)o(cid:2)(cid:2)ˆm(v∗ E e∗) | E ; e
+
+v, o, o(cid:2) = nil | oid
+
+Fig. 3. PROTOLITE Evaluation contexts
+
+Figure 4 describes the generation of PROTOLITE run-time expressions. Such expressions 
+are generated to annotate objects and replace self. This annotation and replacement 
+occurs before evaluating a ﬁeld initialization expression contained in an object
+deﬁnition and before evaluating a method body.
+
+Message sending and delegation require a mechanism to bind the self pseudovariable 
+to an arbitrary value (the receiver). The [[e]]o operator recursively replaces all
+references to self by o in the expression e. References to self within a nested object
+creation expression in e are not substituted because self references within this expression 
+should refer to the nested object itself. Delegated message sends need to keep a
+
+234
+
+T. Van Cutsem et al.
+
+[[x]]o = x
+[[self]]o = o
+[[nil]]o = nil
+[[e ; e(cid:2)]]o = [[e]]o; [[e(cid:2)]]o
+
+[[e.f]]o = [[e]]o.f
+[[e.f := e(cid:2)]]o = [[e]]o.f := [[e(cid:2)]]o
+i )]]o = [[e]]o.m([[ei]]∗
+[[e.m(e∗
+o)
+i )]]o = [[e]]o(cid:1)o(cid:2)ˆm([[ei]]∗
+[[eˆm(e∗
+o)
+∗}]]o = object{ﬁeld
+∗
+∗
+meth
+meth
+
+∗}
+
+[[object{ﬁeld
+
+Fig. 4. Annotating PROTOLITE expressions
+
+reference to the object that performs the delegation. To this end, they are replaced by
+a run-time expression that is annotated with the value of self. This reference is used to
+replace the self variable when the delegated send is executed.
+Figure 5 shows the reduction rules of PROTOLITE. Each of these is an elementary
+reduction, mapping an evaluation context E and a store S onto a reduced evaluation
+context and an updated store. Objects are represented as tuples (cid:1)F,M(cid:2) of a map of
+ﬁelds F and methods M. In the [object] reduction rule, ﬁelds are initialized to nil when
+the object is created. Their initial values are subsequently assigned by evaluating the
+initialization expressions before the object is returned. References to self within a ﬁeld
+initialization expression are ﬁrst substituted for the new object.
+
+In the [delegate] reduction rule, note that o(cid:2)
+
+(the delegator) rather than o (the re-
+ceiver) substitutes self in the invoked method. In the [send] and [delegate] rules, before
+evaluating a method body e[v∗/x
+for the argument values
+v∗
+
+. In the method body, a ﬁeld f of the enclosing object is accessible via self.f .
+
+∗] substitutes parameters x
+
+∗
+
+∗}],S(cid:2) (cid:1)→ (cid:1)E[(o.f := [[e]]o)∗; o], S[o (cid:4)→ (cid:1)F, M(cid:2)](cid:2) [object]
+∗, e(cid:2)(cid:2) | ∀ m(x
+
+∗) = e(cid:2) ∈ meth
+
+∗}
+
+∗
+
+∗}
+
+(cid:1)E[object{ﬁeld
+meth
+where o (cid:5)∈ dom(S) and F = { f (cid:4)→ nil | ∀ f := e ∈ ﬁeld
+and M = { m (cid:4)→ (cid:1)x
+(cid:1)E[o.f ], S(cid:2) (cid:1)→ (cid:1)E[v],S(cid:2)
+where S(o) = (cid:1)F, M(cid:2) and F( f ) = v
+(cid:1)E[o.f :=v],S(cid:2) (cid:1)→ (cid:1)E[v], S[o (cid:4)→ (cid:1)F[f (cid:4)→ v], M(cid:2)](cid:2)
+where S(o) = (cid:1)F, M(cid:2) and f ∈ dom(F)
+(cid:1)E[o.m(v∗)],S(cid:2) (cid:1)→ (cid:1)E[[[e[v∗/x
+∗]]]o],S(cid:2)
+where S(o) = (cid:1)F, M(cid:2) and m (cid:4)→ (cid:1)x
+(cid:1)E[o(cid:1)o(cid:2)(cid:2)ˆm(v∗)], S(cid:2) (cid:1)→ (cid:1)E[[[e[v∗/x
+where S(o) = (cid:1)F, M(cid:2) and m (cid:4)→ (cid:1)x
+(cid:1)E[o ; e],S(cid:2) (cid:1)→ (cid:1)E[e],S(cid:2)
+
+∗, e(cid:2) ∈ M
+∗]]]o(cid:1) ], S(cid:2)
+∗, e(cid:2) ∈ M
+
+[get]
+
+[set]
+
+[send]
+
+[delegate]
+
+[seq]
+
+Fig. 5. Reductions for PROTOLITE
+
+5.2 LEXLITE
+
+PROTOLITE does not allow objects to access ﬁelds and methods of their enclosing objects.
+ LEXLITE extends PROTOLITE with a new syntax and semantics that allows objects 
+to access lexically visible ﬁelds and methods. Figure 6 shows the syntax extensions
+of LEXLITE with respect to PROTOLITE. The new expressions denote the invocation
+of a lexically visible method m and the access to a lexically visible ﬁeld f . LEXLITE
+
+Adding State and Visibility Control to Traits Using Lexical Nesting
+
+235
+
+e = . . .
+
+| m(e∗) | f | object{ ﬁeld
+∗
+
+∗}(cid:1)L(cid:2)
+
+meth
+
+Fig. 6. LEXLITE syntax extensions to PROTOLITE
+
+supports an additional run-time expression that annotates an object creation expression
+with a lexical environment L. This annotation is generated when closing over the lexical
+environment. This is explained in more detail below.
+
+In LEXLITE, receiverless (i.e., lexically resolved) method invocation and ﬁeld access
+are interpreted as if the method or ﬁeld was invoked on the lexically visible object in
+which the method or ﬁeld is deﬁned. Also, object deﬁnitions must now close over their
+lexical environment, such that expressions contained in their methods may correctly
+refer to methods and ﬁelds deﬁned in an enclosing lexical environment. We represent
+the lexical environment as a function L(n) = o mapping a method or ﬁeld name n to
+the object o in which that name is deﬁned. Figure 7 shows how each expression e closes
+over a lexical environment L by means of the transformation CL[[e]]. Following the
+convention previously introduced, code generated by this transformation is underlined.
+
+CL[[x]] = x
+CL[[self]] = self
+CL[[nil]] = nil
+CL[[e ; e(cid:2)]] = CL[[e]] ; CL[[e(cid:2)]]
+CL[[e.f]] = CL[[e]].f
+
+CL[[e.f := e(cid:2)]] = CL[[e]].f := CL[[e(cid:2)]]
+i )]] = CL[[e]].m(CL[[ei]]∗)
+CL[[e.m(e∗
+i )]] = CL[[e]]ˆm(CL[[ei]]∗)
+CL[[eˆm(e∗
+CL[[ f ]] = l.f where l = L(f )
+i )]] = l.m(CL[[ei]]∗) where l = L(m)
+CL[[m(e∗
+∗}]] = object{ﬁeld
+∗
+meth
+
+∗}(cid:1)L(cid:2)
+
+CL[[object{ﬁeld
+
+∗
+
+meth
+
+Fig. 7. LEXLITE expressions closing over a lexical scope L
+
+Because lexically scoped method invocations and ﬁeld accesses are transformed into
+regular method invocations and ﬁeld accesses when expressions close over their deﬁning 
+lexical environment, no special reduction semantics must be added for these expressions.
+ However, the reduction semantics for [object] must be reﬁned such that method
+bodies now close over the lexical environment in which the object has been deﬁned.
+This new reduction rule is shown in Figure 8. The other reduction rules for LEXLITE
+are the same as those deﬁned in Figure 5.
+
+Note that a lexical closure is not deﬁned as a “snapshot” of the lexical environment
+at the time the object is created. This would work for a functional language, but since
+LEXLITE is stateful, the closure must refer to the actual enclosing objects such that
+state changes in those objects remain visible to the nested object. Finally, note that by
+transforming a receiverless method invocation m() into a receiverful method invocation
+l.m() on the enclosing object l, within m the binding of self will correctly refer to the
+enclosing object (i.e., l) rather than to the nested object that performed the invocation.
+In LEXLITE, lexical lookup proceeds via a chain of L functions. In order to be welldeﬁned,
+ this lookup must eventually end. Therefore, the top-level expression of a LEXLITE 
+program must close over an empty top-level environment T (n) =⊥ before it can
+be reduced. If one wants to bootstrap the lexical environment with top-level methods
+and ﬁelds, these can be encoded as follows. If e is the top-level expression encoding a
+
+236
+
+T. Van Cutsem et al.
+
+∗
+
+(cid:1)(cid:1)
+(cid:2)(cid:2)
+(cid:1)E[object{ﬁeld
+[[e]]o
+meth
+∗}
+where o (cid:5)∈ dom(S) and F = { f (cid:4)→ nil | ∀ f := e ∈ ﬁeld
+∗) = e(cid:2) ∈ meth
+∗}
+and M = { m (cid:4)→ (cid:1)x
+and L(cid:2)(n) =
+
+∗}(cid:1)L(cid:2)], S(cid:2) (cid:1)→ (cid:1)E[(o.f := CL(cid:1)
+∗, CL(cid:1) [[e(cid:2)]](cid:2) | ∀ m(x
+if n ∈ dom(F) ∪ dom(M)
+
+(cid:3)
+
+o
+L(n) otherwise
+
+)∗; o],S[o (cid:4)→ (cid:1)F,M(cid:2)](cid:2) [object]
+
+Fig. 8. Redeﬁned reduction rule for LEXLITE
+
+program and m is a fresh name then the expression object{...m() = e...}.m() introduces 
+an explicit top-level environment. All ﬁelds and methods declared in this outer
+object expression can be regarded as top-level in e.
+
+5.3 AMBIENTTALKLITE
+
+AMBIENTTALKLITE extends LEXLITE with explicit support for trait composition. It
+exhibits the properties of AmbientTalk regarding state and visibility control (cf. Section
+3.2) and describes trait composition in terms of generating delegate methods (cf. Section 
+3.3). Figure 9 shows the syntax extensions of AMBIENTTALKLITE with respect to
+LEXLITE. An object creation expression may contain import declarations to acquire
+the ﬁelds and methods of trait objects. The expression e in the import declaration is
+eagerly reduced to the trait object. A run-time import declaration is introduced which
+is annotated with a mapping A that maps names to their aliases and a set E of ﬁeld or
+method names to be excluded. Figure 10 shows how these annotations are generated
+based on the alias and exclude clauses of the original import declaration.
+
+∗
+
+e = . . .
+
+| object{ﬁeld
+∗
+import = import e alias alias
+import e (cid:1)A,E(cid:2)
+alias = n ← n
+
+|
+
+∗
+meth
+import
+exclude n∗
+
+∗}
+
+n = a method or ﬁeld name
+
+E = . . .
+
+| object{ﬁeld
+
+∗
+
+∗
+
+import v (cid:1)A,E(cid:2)∗
+
+import E (cid:1)A, E(cid:2) import e (cid:1)A,E(cid:2)∗}
+
+meth
+
+Fig. 9. AMBIENTTALKLITE syntax and evaluation context extensions to LEXLITE
+
+∗
+
+[[object{ﬁeld
+∗ [[import
+∗
+meth
+meth
+import
+exclude n∗]]o = import [[e]]o(cid:1)A, E(cid:2)
+∗
+[[import e alias alias
+(cid:3)
+if n(cid:2) ← n ∈ alias
+n(cid:2)
+n otherwise
+
+∗}]]o = object{ﬁeld
+
+∗]]o}
+
+∗
+
+where A(n) =
+and E = {n | n ∈ n∗}
+
+∗
+
+Fig. 10. Annotating AMBIENTTALKLITE expressions
+
+The [import] reduction rule in Figure 11 shows how the import declarations are expanded 
+into a set of generated ﬁelds and delegating methods. Field deﬁnitions present in
+
+Adding State and Visibility Control to Traits Using Lexical Nesting
+
+237
+
+the value being imported, ti, are copied (as explained in Section 3.3). For each imported
+method m, a delegating method n is generated which delegates m to ti. Note that the
+use of Ai ensures a ﬁeld or method renaming if speciﬁed. The last two lines indicate
+the constraint that duplicate ﬁeld or method names are disallowed. Once the import
+declarations are reduced, a regular LEXLITE object creation expression remains.
+
+∗
+
+∗
+
+imeth
+
+∗
+meth
+
+(cid:1)E[object{ﬁeld
+import ti(cid:1)Ai,Ei(cid:2)∗}(cid:1)L(cid:2)], S(cid:2)
+meth
+∗}(cid:1)L(cid:2)], S(cid:2)
+(cid:1)→ (cid:1)E[object{ﬁeld
+∗
+∗
+iﬁeld
+where S(ti) = (cid:1)Fi,Mi(cid:2)
+and iﬁeldsi = { n := v | f (cid:4)→ v ∈ Fi, f /∈ Ei, n = Ai( f )}
+and imethsi = { n(x
+∗) = tiˆm(x
+and iﬁelds1 ∩ ··· ∩ iﬁeldsn ∩ ﬁeld
+and imeths1 ∩ · ·· ∩ imethsn ∩ meth
+
+∗) | m (cid:4)→ (cid:1)x
+∗ = ∅
+∗ = ∅
+
+∗, e(cid:2) ∈ Mi, m /∈ Ei, n = Ai(m)}
+
+[import]
+
+Fig. 11. Additional reduction rule for AMBIENTTALKLITE
+
+The following example illustrates how trait composition is expressed in terms of
+delegation. The code on the left summarizes the essence of the animation trait example 
+from Section 3.2. The resulting store is depicted on the right. Note the generated
+startMoving method of the morph object.
+
+
+
+
+
+animationtrait := object {
+
+start() = STARTCODE
+stop() = STOPCODE
+
+}
+
+morph := object {
+
+animate() = ANIMATECODE
+import animationtrait
+
+alias startMoving<-start exclude stop
+
+S ≡{
+animationtrait(cid:5)→(cid:1)∅,{
+start(cid:5)→(cid:1)[], STARTCODE(cid:2),
+stop(cid:5)→(cid:1)[], STOPCODE(cid:2)}(cid:2)
+morph(cid:5)→(cid:1)∅,{
+animate(cid:5)→(cid:1)[], ANIMATECODE(cid:2)
+startMoving (cid:5)→
+
+}
+
+
+(cid:1)[], animationtraitˆstart()(cid:2)}(cid:2)}
+This concludes our description of the operational semantics of trait composition in
+AmbientTalk. In the following Section, we discuss how state and visibility control for
+traits are expressed using this operational semantics.
+
+
+
+6 Properties and Discussion
+
+State and visibility control. From the operational semantics of AMBIENTTALKLITE
+we can derive how state and visibility control are expressed through lexical nesting:
+
+– Public state. Trait objects can be stateful by declaring public ﬁelds which are explicitly 
+copied into the composing object (cf. Figure 11).
+
+– Lexically hidden state. Trait objects can depend upon a ﬁeld of an object in which
+they are nested. These ﬁelds are not copied into the composing object. Rather, the
+ﬁeld remains accessible from the original trait method by lexically referring to it
+(cf. the syntax extension presented in Figure 6). This is possible because all trait
+methods close over their lexical scope when created (cf. Figure 8).
+
+238
+
+T. Van Cutsem et al.
+
+– Lexical visibility control. An object creation expression that is lexically nested
+within another object creation expression can refer to the ﬁelds and methods of
+the outer expression. However, an object that has a reference to the nested object
+cannot access these outer ﬁelds or methods via that nested object. As expressed in
+the [get] and [send] rules (Figure 5), the lexical scope of an object is not involved
+in external ﬁeld access or method invocation. As a consequence, outer ﬁelds and
+methods are inaccessible to clients of the inner object.
+
+– Shared visibility. When two object creation expressions are lexically nested within
+the same outer object creation expression, the two inner objects may refer to the
+same outer ﬁeld and method declaration. This allows for sharing state and behavior
+while keeping it private to external clients. In the operational semantics, sharing
+is expressed in terms of two lexical environments L1 and L2 that may both forward 
+to the same lexical environment L3 when a name n is not found locally (cf.
+Figure 8).
+
+Limitations. Traits do not by themselves support advanced resolution strategies required 
+to resolve any unanticipated name conﬂicts. If two traits are composed that intentionally 
+(rather than accidentally) provide a method with the same name, neither
+exclusion nor aliasing is an appropriate solution to resolve this conﬂict. One possible
+solution would be to completely rename one of the two methods (which, unlike aliasing,
+ requires changing the calls to that method in the method bodies of one of the traits).
+Another solution would be to change the visibility of one of the two methods, such that
+it effectively becomes private to its trait. Lexically nested traits by themselves support
+neither renaming nor changing the visibility of imported methods. Hence, dealing with
+unanticipated conﬂicts remains an open issue even with lexically nested traits.
+
+Because lexically nested traits can be stateful, they reintroduce the problem of duplicated 
+state in the case of “diamond inheritance”. For example, an object may import
+two traits A and B, and these two traits both import a third trait C which is stateful. The
+composite object will then acquire C’s state twice. To avoid such issues, one must revert
+to stateless traits that use accessor and mutator methods to manipulate their state, which
+is deferred to the composite, as in the original Traits model [13].
+
+In AmbientTalk, a delegated method invocation has the same runtime cost as
+Cost.
+a normal method invocation. Without additional optimizations, invoking an imported
+“delegate method” on a composite is about twice as expensive as a normal method call,
+because of the additional delegation to the trait. Caching techniques can be used to reduce 
+this overhead, by storing the imported method rather than the delegating method
+in the composite object’s method cache. Improving the performance of our implementation 
+is an area of future work.
+
+Summary. The Trait model supported by AmbientTalk adds both state and visibility
+control to traits via lexical nesting. Trait composition is made independent of lexical
+nesting by introducing delegate methods in the composite. Such methods explicitly
+delegate messages to the imported trait, leaving the lexical environment of the trait’s
+methods intact. Our model does not introduce any additional composition operators.
+
+Adding State and Visibility Control to Traits Using Lexical Nesting
+
+239
+
+7 Related Work
+
+Traits in Self. The term traits was introduced in the prototype-based language Self to
+refer to objects that factor out behavior common to objects of the same type [16]. Self
+traits are not a special kind of object: any object can be a trait and objects “use” a trait
+by delegating to it using Self’s support for object-based inheritance. Like AmbientTalk
+traits, Self traits exploit delegation to access the “composite” (e.g. for accessing state
+or invoking an overridden method) by means of late-bound self-sends. Self traits can
+be stateful, but state is shared by all objects using the trait (like class variables shared
+between all instances).
+
+When multiple inheritance was added to Self, an object was able to specify multiple
+parent objects, and could thus use traits as mixins. However, since Self relies on objectbased 
+(multiple) inheritance to enable the use of (multiple) traits, naming conﬂicts are
+not explicitly resolved by the composite object. Resolving such conﬂicts is instead done
+by the method lookup algorithm. Self later abandoned multiple inheritance due to its
+complexity in favor of a simpler “copy-down” approach [30].
+
+AmbientTalk combines the properties of Self traits and Squeak traits. This is illustrated 
+in Figure 12 by means of the example presented in Section 3.1. An Enumerable
+trait deﬁnes a collect: method and requires an each: method which is deﬁned by the
+composite, in this case a Range object that represents an interval.
+
+Enumerable Trait
+
+collect:
+
+...
+
+...
+
+...
+self each: [ :e | ... ]
+...
+
+Enumerable trait object
+
+collect:
+
+...
+
+...
+
+...
+self each: [ :e | ... ]
+...
+
+Enumerable trait object
+
+collect:
+
+...
+
+...
+
+t_
+
+...
+self.each: { |e| ... }
+...
+
+Range Class
+
+collect:
+
+each:
+
+...
+
+...
+
+Squeak
+
+Range
+
+prototype object
+
+parent*
+
+each:
+
+...
+
+...
+
+Self
+
+Range object
+
+t_^collect: block
+
+collect:
+
+each:
+
+...
+
+...
+
+AmbientTalk
+
+Fig. 12. Comparing trait composition in Squeak, Self and AmbientTalk
+
+Like Self traits, AmbientTalk traits are object-based: any object can be a trait and
+both languages use the mechanism of delegation to allow the trait to access the composite.
+ Note that in Self the composite delegates to the trait by means of object-based
+inheritance (via a so-called “parent slot”) while in AmbientTalk delegation to the trait
+happens by means of the ˆ operator in the delegating method.
+
+Like Squeak traits, AmbientTalk traits require an explicit composition operation
+(import) during which naming conﬂicts must be explicitly resolved by the composite.
+ Note how trait composition is compiled away in Squeak by means of the ﬂattening
+property: the collect: method is added to class Range. Similarly, in AmbientTalk the
+trait composition is transformed by adding a delegate method to the composite object.
+Note that contrary to Self, the trait is not directly accessible from the composite object.
+Rather, it is referred to by means of a variable private to the delegating method.
+
+Neither Self nor Smalltalk exploit lexical nesting of objects or classes. Similarly,
+neither language provides a means to hide the visibility of certain methods. Thus, traits
+
+240
+
+T. Van Cutsem et al.
+
+deﬁned in these languages have no standard means of controlling visibility. AmbientTalk 
+exploits an object’s lexical scope to restrict the visibility of state and behavior.
+Since a trait is a regular AmbientTalk object, it can continue to use this technique to
+restrict the visibility of the state or behavior that it needs, but does not want to provide
+to its clients.
+
+Jigsaw. In his PhD work, Bracha [36] deﬁned Jigsaw as a minimal programming language 
+in which packages and classes are uniﬁed under the notion of a module. A module
+in Jigsaw is a self-referential scope that binds names to values (i.e., constants and func-
+tions). By being an object generator, a module acts as a class and as a coarse-grained
+structural software unit. Modules can be nested, therefore a module can deﬁne a set of
+classes. A number of operators are provided to compose modules.
+
+In Jigsaw, modules may refer to each other, and functions deﬁned in one are invokable 
+by others according to some visibility rules. Behavior may be shared by merging
+two modules, or making one override another one. Using these operators, a mixin and
+its application are nicely modeled. It appears that the same set of operators is used to
+express both module specialization and mixin uses.
+
+Traits require a different composition operator than inheritance. Traits cannot be
+expressed in Jigsaw directly because it imposes an ordering on mixins, while one of the
+design principles of traits states that the composition order of traits is irrelevant.
+
+CHAI. Smith and Drossopoulou [6] designed the language Chai, which incorporates
+statically typed traits into a Java-like language. Three different roles for traits in Chai
+were explored in separate languages: Chai1 (traits may be used by classes), Chai2
+(a trait may be a type), and Chai3 (traits play a role at runtime). This third language
+allows traits to be added to objects at runtime, thus changing their behavior.
+
+The differences with AmbienTalk’s traits are signiﬁcant. AmbientTalk is dynamically 
+typed and its traits are ﬁrst class values. Any object can be used as a trait simply
+by importing it into another object. In Chai3 only a trait subtype can be applied to an
+object. Consequently, a more restricted set of traits may be applied to a given object but
+type safety is upheld.
+
+8 Conclusion
+
+Traits have originally been presented as groups of reusable methods, without state and
+a mechanism to control the visibility of provided methods. Extensions have been proposed 
+to add these properties (stateful and freezable traits, respectively) but these models 
+introduce many ad hoc operators that have not before been combined into a uniﬁed
+model supporting both properties. This paper demonstrates that state and visibility control 
+can be added to traits by means of just one linguistic mechanism: lexical nesting.
+
+We have shown that introducing trait composition in a host language that supports
+lexical nesting requires special attention. Whereas in the original model the ﬂattening
+property allows trait composition to be implemented by almost literally copying the
+methods provided by the trait into the composite, this approach fails to hold when traits
+can be lexically nested, because their methods may refer to lexically free variables.
+
+Adding State and Visibility Control to Traits Using Lexical Nesting
+
+241
+
+Our approach to solving this problem is based upon delegation of messages. Trait composition 
+is described in terms of generating delegating methods, whose purpose is to
+delegate a received message to the imported trait object. The actual method invocation
+is then performed in the proper lexical environment (i.e., that of the trait), but delegation
+ensures that the trait can still access its required methods via self sends. Because methods 
+are generated in the composite, trait composition remains explicit. Name clashes
+must still be resolved by the composing object, staying true to the original design principles 
+behind traits. Our proposed model has been validated by implementing it in a
+concrete host language, AmbientTalk, and by describing in detail its operational semantics 
+for a calculus, AMBIENTTALKLITE.
+
+This work started out as an investigation of how traits, a composition mechanism
+that has been very successfully applied to class-based languages, could be applied to
+our object-based AmbientTalk language. It became apparent that AmbientTalk’s ability
+to lexically nest objects lead to a simpler trait model since state and visibility control
+are supported without introducing any additional composition operators. We did need
+delegation as an additional mechanism to ensure that trait methods can both refer to
+names in their lexical scope as well as to names provided by the composite. However,
+our experience tells us that the basic model only relies on lexical nesting, not on the
+fact that our language is object-based. We think that our model of lexically nested traits
+can thus be applied more generally to class-based languages as well, provided that they
+allow classes to be nested and that they provide a solution to the problem of ﬂattening
+traits in the presence of lexical nesting.
+
+Acknowledgements
+
+We would like to thank Yves Vandriessche who designed and implemented the AmbientMorphic 
+framework. We also like to thank all reviewers and Erik Ernst in particular, for
+his valuable improvements to the formal semantics.
+
+References
+
+1. Slate, http://slate.tunes.org
+2. Ingalls, D., Kaehler, T., Maloney, J., Wallace, S., Kay, A.: Back to the future: The story of
+Squeak, a practical Smalltalk written in itself. In: Proceedings of the 12th ACM SIGPLAN
+conference on Object-oriented programming, systems, languages, and applications, pp. 318–
+326. ACM Press, New York (1997)
+
+3. Flatt, M., Finder, R.B., Felleisen, M.: Scheme with classes, mixins and traits. In: AAPLAS
+
+2006 (2006)
+
+4. The Fortress language speciﬁcation,
+
+http://research.sun.com/projects/plrg/fortress0866.pdf
+
+5. Fisher, K., Reppy, J.: Statically typed traits. Technical Report TR-2003-13, University of
+
+Chicago, Department of Computer Science (December 2003)
+
+6. Smith, C., Drossopoulou, S.: chai: Traits for java-like languages. In: Black, A.P. (ed.)
+
+ECOOP 2005. LNCS, vol. 3586, pp. 453–478. Springer, Heidelberg (2005)
+
+7. Liquori, L., Spiwack, A.: FeatherTrait: A modest extension of Featherweight Java. ACM
+
+Transactions on Programming Languages and Systems (TOPLAS) 30(2), 1–32 (2008)
+
+242
+
+T. Van Cutsem et al.
+
+8. Reppy, J., Turon, A.: Metaprogramming with traits. In: Ernst, E. (ed.) ECOOP 2007. LNCS,
+
+vol. 4609, pp. 373–398. Springer, Heidelberg (2007)
+
+9. Bergel, A., Ducasse, S., Nierstrasz, O., Wuyts, R.: Stateful traits and their formalization.
+
+Journal of Computer Languages, Systems and Structures 34(2-3), 83–108 (2007)
+
+10. Ducasse, S., Wuyts, R., Bergel, A., Nierstrasz, O.: User-changeable visibility: Resolving
+unanticipated name clashes in traits. In: Proceedings of 22nd International Conference on
+Object-Oriented Programming, Systems, Languages, and Applications, pp. 171–190. ACM
+Press, New York (2007)
+
+11. Bak, L., Bracha, G., Grarup, S., Griesemer, R., Griswold, D., H¨olzle, U.: Mixins in
+
+Strongtalk. In: ECOOP 2002 Workshop on Inheritance (2002)
+
+12. Ducasse, S., Nierstrasz, O., Sch¨arli, N., Wuyts, R., Black, A.: Traits: A mechanism
+for ﬁne-grained reuse. ACM Transactions on Programming Languages and Systems
+(TOPLAS) 28(2), 331–388 (2006)
+
+13. Sch¨arli, N., Ducasse, S., Nierstrasz, O., Black, A.: Traits: Composable units of behavior. In:
+Cardelli, L. (ed.) ECOOP 2003. LNCS, vol. 2743, pp. 248–274. Springer, Heidelberg (2003)
+14. Reppy, J., Turon, A.: A foundation for trait-based metaprogramming. In: International Workshop 
+on Foundations and Developments of Object-Oriented Languages (2006)
+
+15. Mens, T., van Limberghen, M.: Encapsulation and composition as orthogonal operators on
+mixins: A solution to multiple inheritance problems. Object Oriented Systems 3(1), 1–30
+(1996)
+
+16. Ungar, D., Chambers, C., Chang, B.W., H¨olzle, U.: Organizing programs without classes.
+
+LISP and Symbolic Computation 4(3) (1991)
+
+17. Reddy, U.: Objects as closures: abstract semantics of object-oriented languages. In: LFP
+1988: Proceedings of the ACM conference on LISP and functional programming, pp. 289–
+297. ACM, New York (1988)
+
+18. Abelson, H., Sussman, G.J., Sussman, J.: Structure and interpretation of computer programs.
+
+MIT electrical engineering and computer science series. McGraw-Hill, New York (1991)
+
+19. Dickey, K.: Scheming with objects. AI Expert 7(10), 24–33 (1992)
+20. Black, A., Hutchinson, N., Jul, E., Levy, H.: Object structure in the Emerald system. In:
+Proceedings OOPSLA 1986, ACM SIGPLAN Notices, vol. 21, pp. 78–86 (November 1986)
+21. International, E.C.M.A.: ECMA-262: ECMAScript Language Speciﬁcation, 3rd edn.
+ECMA (European Association for Standardizing Information and Communication Systems),
+Geneva, Switzerland (December 1999)
+
+22. Madsen, O.L., Moller-Pedersen, B., Nygaard, K.: Object-Oriented Programming in the Beta
+
+Programming Language. Addison Wesley, Reading (1993)
+
+23. Miller, M.S.: Robust Composition: Towards a Uniﬁed Approach to Access Control and Concurrency 
+Control. PhD thesis, Johns Hopkins University, Baltimore, Maryland, USA (May
+2006)
+
+24. Bracha, G.: On the interaction of method lookup and scope with inheritance and nesting. In:
+
+3rd ECOOP Workshop on Dynamic Languages and Applications (2007)
+
+25. Dedecker, J., Cutsem, T.V., Mostinckx, S., Theo D’Hondt, W.D.M.: Ambient-oriented programming 
+in ambienttalk. In: Thomas, D. (ed.) ECOOP 2006. LNCS, vol. 4067, pp. 230–
+254. Springer, Heidelberg (2006)
+
+26. Van Cutsem, T., Mostinckx, S., Boix, E., Dedecker, J., De Meuter, W.: Ambienttalk: Objectoriented 
+event-driven programming in mobile ad hoc networks. In: XXVI International Conference 
+of the Chilean Society of Computer Science, 2007. SCCC 2007, pp. 3–12 (November
+2007)
+
+27. Ungar, D., Smith, R.B.: Self: The power of simplicity. In: Proceedings OOPSLA 1987, ACM
+
+SIGPLAN Notices, vol. 22, pp. 227–242 (December 1987)
+
+Adding State and Visibility Control to Traits Using Lexical Nesting
+
+243
+
+28. Lieberman, H.: Using prototypical objects to implement shared behavior in object oriented
+systems. In: Proceedings OOPSLA 1986, ACM SIGPLAN Notices, vol. 21, pp. 214–223
+(December 1986)
+
+29. Maloney, J.H., Smith, R.B.: Directness and liveness in the morphic user interface construction 
+environment. In: UIST 1995: Proceedings of the 8th annual ACM symposium on User
+interface and software technology, pp. 21–28. ACM, New York (1995)
+
+30. Smith, R.B., Ungar, D.: Programming as an experience: The inspiration for self. In: Olthoff,
+
+W. (ed.) ECOOP 1995. LNCS, vol. 952, pp. 303–330. Springer, Heidelberg (1995)
+
+31. Anderson, C., Drossopoulou, S.: delta an imperative object based calculus. In: Proceedings
+
+of USE 2002 (2002)
+
+32. Bettini, L., Bono, V.: Type Safe Dynamic Object Delegation in Class-based Languages. In:
+Proc. of PPPJ, Principles and Practice of Programming in Java. ACM Press, New York (2008)
+33. Bono, V., Fisher, K.: An imperative, ﬁrst-order calculus with object extension. In: Proceedings 
+of the 12th European Conference on Object-Oriented Programming, London, UK, pp.
+462–497. Springer, Heidelberg (1998)
+
+34. Flatt, M., Krishnamurthi, S., Felleisen, M.: Classes and mixins. In: Proceedings of the 25th
+ACM SIGPLAN-SIGACT Symposium on Principles of Programming Languages, pp. 171–
+183. ACM Press, New York (1998)
+
+35. Felleisen, M., Hieb, R.: The revised report on the syntactic theories of sequential control and
+
+state. Theor. Comput. Sci. 103(2), 235–271 (1992)
+
+36. Bracha, G.: The Programming Language Jigsaw: Mixins, Modularity and Multiple Inheritance.
+ PhD thesis, Dept. of Computer Science, University of Utah (1992)
+
+

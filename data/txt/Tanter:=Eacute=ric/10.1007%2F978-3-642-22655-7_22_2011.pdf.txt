@@ -1,0 +1,1831 @@
+Gradual Typestate
+
+Roger Wolﬀ1, Ronald Garcia1,Æ, ´Eric Tanter2,ÆÆ, and Jonathan Aldrich1,Æ Æ Æ
+
+1 School of Computer Science – Carnegie Mellon University
+
+first.last@cs.cmu.edu
+2 PLEIAD Laboratory
+
+Computer Science Department (DCC) – University of Chile
+
+etanter@dcc.uchile.cl
+
+Abstract. Typestate reﬂects how the legal operations on imperative
+objects can change at runtime as their internal state changes. A typestate
+checker can statically ensure, for instance, that an object method is only
+called when the object is in a state for which the operation is welldeﬁned.
+ Prior work has shown how modular typestate checking can be
+achieved thanks to access permissions and state guarantees. However,
+static typestate checking is still too rigid for some applications.
+
+This paper formalizes a nominal object-oriented language with mutable 
+state that integrates typestate change and typestate checking as
+primitive concepts. In addition to augmenting the types of object references 
+with access permissions and state guarantees, the language extends
+the notion of gradual typing to account for typestate: gradual typestate 
+checking seamlessly combines static and dynamic checking by automatically 
+inserting runtime checks into programs. A novel ﬂow-sensitive
+permission-based type system allows programmers to write safe code
+even when the static type checker can only partly verify it.
+
+1 Introduction
+
+This paper investigates an approach to increasing the expressiveness and ﬂexibility 
+of object-oriented languages as a means to improve the reliability of software.
+By introducing typestate directly into the language and extending its type system 
+with support for gradual typing, useful abstractions can be implemented
+directly, stronger program properties can be enforced statically, and when necessary 
+dynamic checks can be introduced seamlessly.
+
+An object’s type speciﬁes the methods that can be called on it. In most programming 
+languages, this type is constant throughout the object’s lifetime, but
+in practice, the methods that it makes sense to call on an object change as its
+
+Æ Supported by the National Science Foundation under Grant #0937060 to the Computing 
+Research Association for the CIFellows Project.
+
+ÆÆ Partially funded by FONDECYT project 1110051.
+
+Æ Æ Æ Support from grants NSF #CCF-0811592, DARPA #HR00110710019, ARO
+and CMU(cid:0)Portugal Aeminium #CMUto 
+CyLab,
+
+#DAAD19-02-1-0389
+PT/SE/0038/2008.
+
+M. Mezini (Ed.): ECOOP 2011, LNCS 6813, pp. 459–483, 2011.
+c(cid:2) Springer-Verlag Berlin Heidelberg 2011
+
+460
+
+R. Wolﬀ et al.
+
+runtime state changes (e.g., an open ﬁle cannot be opened again). These constraints 
+typically lie outside the reach of standard type systems, and unintended
+uses of objects result, at best, in runtime exceptions.
+
+More broadly, types generally denote properties that hold without change,
+and in mainstream type systems, they fail to account for how changes to mutable 
+state can aﬀect the properties of an object. To address this shortcoming,
+Strom and Yemini [26] introduced the notion of typestate as an extension of
+the traditional notion of type. Typestate reﬂects how the legal operations on
+imperative objects can change at runtime as their internal state changes.
+
+The seminal work on typestate [26] focused primarily on whether variables
+were properly initialized, and presented a static typestate checker. A typestate
+checker must account for the ﬂow of data and control in a program to ensure
+that objects are used in accordance with their state at any given point in a computation.
+ Since that original work, typestate has been used to codify and check
+more sophisticated state-dependent properties of object-oriented programs. It
+has been used, for instance, to verify object invariants on .NET [10], to verify 
+that Java programs adhere to object protocols [12, 5, 7], and to check that
+groups of objects collaborate with each other according to an interaction speciﬁcation 
+[20].
+
+Most imperative languages cannot express typestates directly: rather, typestates 
+are encoded through a disciplined use of member variables. For instance,
+consider a typical object-oriented ﬁle abstraction. A closed ﬁle may have a null
+value in its ﬁle descriptor ﬁeld. Accordingly, the close method of the ﬁle object
+ﬁrst checks if the ﬁle descriptor is null, in which case it throws an exception to
+signal that the ﬁle is already closed. Such typestate encodings hinder program
+comprehension and correctness. Comprehension is hampered because the protocols 
+underlying the typestate properties, which reﬂect a programmer’s intent,
+are at best described in the documentation of the code. Also, typestate encodings 
+cannot guarantee by construction that a program does not perform illegal
+operations. Checking typestate encodings can be done through a whole-program
+analysis (e.g. [12]), or with a modular checker based on additional program annotations 
+(e.g. [4]). In either case, the lack of integration with the programming
+language hinders adoption by programmers.
+
+To overcome the shortcomings of typestate encodings, a typestate-oriented
+programming (TSOP) language directly supports expressing them [2]. For
+instance,
+in a class-based language that supports dynamically changing an
+object’s class (like Smalltalk and its become statement), typestates can be represented 
+as classes and be dynamically updated: objects can have typestatedependent 
+interfaces, behaviors, and representations. Protocol violations in a
+dynamically-typed TSOP language however result in “method not found” errors.
+To avoid such errors, it is crucial to regain the guarantees provided by static type
+checking. Static typestate checking is challenging, especially in the presence of
+aliasing. Some approaches sacriﬁce modularity and rely on whole program analyses 
+[12, 20, 7]; others retain modularity at the expense of sophisticated type
+systems, typically based on linear logic [27] and requiring many annotations.
+
+Gradual Typestate
+
+461
+
+One kind of annotations is access permissions, which specify certain aliasing
+patterns [8, 10, 4]. Unfortunately, these systems cannot always verify safe code,
+due to the conservative assumptions they must make. Advanced techniques like
+fractional permissions [8] increase the expressiveness of a type system, within
+limits, but increase its complexity.
+
+Many practical languages already provide a simple feature for overcoming the
+limitations of their type systems: dynamic coercions. Although these coercions
+(a.k.a. casts) may fail at runtime, they are often necessary in speciﬁc scenarios
+where the static machinery is insuﬃcient. Runtime assertions related to typestates 
+are not supported by any modular approach we know of; one primary
+objective of this work is to support them.
+
+In addition, once dynamic coercions on typestates are available, they can be
+used to ease the transition from dynamicallyto 
+statically-typed code. We therefore 
+extend gradual typing [25, 24] to account for typestates: we make typestate
+annotations optional, check as much as possible statically, and automatically
+insert runtime checks into programs where needed. This allows programmers to
+gradually annotate their code and get progressively more support from the type
+checker, while still being able to safely run a partially-annotated program.
+
+The primary contribution of this work is Gradual Featherweight Typestate
+(GFT), a core calculus for typestate-oriented programming inspired by Featherweight 
+Java [17], which supports dynamic permission checking and gradual
+typing. The proposed language addresses the most important issues of current
+typestate checkers. GFT directly integrates typestate as a ﬁrst-class language
+concept. Its analysis is modular and safe without imposing complex notions like
+fractional permissions onto programmers. It also supports recovery of precise
+typing using dynamically-checked assertions and supports the gradual addition
+of type annotations to a program.
+
+Section 2 introduces the key elements of typestate-oriented programming with
+access permissions and state guarantees. Section 3 describes the static subset of
+GFT, and Section 4 presents the extensions for dynamic permission checking and
+gradual typing. The semantics are presented using a type-safe internal language
+(Section 5) to which GFT translates (Section 6). The soundness proof is available
+in a companion technical report [28]. Section 7 concludes. A translator for the
+source language, type checker for the internal language, and executable runtime
+semantics are available at:
+http://www.cs.cmu.edu/˜rxg/gft.html.
+
+2 Typestate-Oriented Programming
+
+In order to avoid conditionals on ﬂag ﬁelds or other indirect mechanisms like the
+State pattern [13], typestate-oriented programming proposes to extend objectoriented 
+programming with an explicit notion of state (from here on we use state
+to mean typestate). In TSOP, objects are modeled not just in terms of classes,
+but in terms of changing states. Each state may have its own representation and
+methods, which may transition the object to new states.
+
+462
+
+R. Wolﬀ et al.
+
+File
+
+path
+getPath()
+
+OpenFile
+
+ﬁle_desc
+close()
+
+ClosedFile
+open()
+
+change state?
+owner
+
+others 
+
+full
+
+shared
+pure
+
+yes
+yes
+no
+
+no
+yes
+yes
+
+AtEOF
+
+NotEOF
+
+read()
+
+(a) (b)
+
+Fig. 1. (a) Hierarchy of ﬁles states. (b) Access permissions.
+
+To illustrate this concept in practice, consider a familiar example. A ﬁle object
+has methods such as open, close and read. However, these methods cannot be
+called at just any time. A ﬁle can only be read after it has been opened; even if
+open, if we have reached the end-of-ﬁle, then reading is not available anymore;
+an open ﬁle cannot be opened again, etc. Figure 1a depicts a model of the
+ﬁle example in terms of states, using distinct classes in a subclass hierarchy to
+represent them. File is an abstract state; a ﬁle object is either in the OpenFile
+or ClosedFile state. Note that the path ﬁeld is present in both states, but that
+the file desc ﬁeld, which refers to the low-level operating system resource, is
+only present in the OpenFile state. Any OpenFile can be closed; however, it is
+only possible to read from an open ﬁle if the end-of-ﬁle has not been reached.
+Therefore, the OpenFile state has two reﬁning substates, AtEOF and NotEOF.
+
+State change. A TSOP language supports a state change operation, denoted
+here by <-. For instance, the close method in OpenFile can be deﬁned as:
+void close() { this <- ClosedFile(this.path); }
+The expression form e <- S(...) transitions the object described by e into the
+state S; the arguments are used to initialize the ﬁelds of the object. In other
+words, <- behaves like a constructor, but updates the object in-place.
+
+Declaring state changes. A statically-typed TSOP language must track state
+changes in order to reject programs that invoke methods on objects in inappropriate 
+states. Consider the following:
+OpenFile f = ...; f.close(); f.close();
+The type of f before the ﬁrst call to close is OpenFile. However, the second call
+to close should be rejected by a typechecker. One way to do so is to analyze the
+body of the close method to deduce that it updates the state of its argument to
+ClosedFile. However, this approach sacriﬁces modularity. Therefore, a method’s
+signature should specify the output state of its arguments as well as that of
+its receiver. The calculi in this paper specify the state changes of methods by
+annotating each argument with its input and output state, separated by the >>
+symbol. The input and output states of the receiver object are placed in square
+brackets after the normal argument list, e.g.:
+void close() [OpenFile >> ClosedFile] {...}
+
+Access permissions. In a language with aliasing, tracking state changes is a
+subtle process. For instance, consider the following (where F, OF and CF are
+abbreviations for File, OpenFile and ClosedFile, respectively):
+
+Gradual Typestate
+
+463
+
+void m(OF >> CF f,OF >> OF g) {f.close(); print(g.file_desc.pos);}
+Because of possible aliasing, f and g may refer to the same object. In that case,
+the method body of m must not be well-typed, as g may refer to a closed ﬁle by
+the time it needs to access its (potentially non-existent) file desc ﬁeld.
+
+To track state changes in the presence of aliasing, Bierhoﬀ and Aldrich have
+proposed access permissions [4, 5]. An access permission speciﬁes whether a
+given reference to an object can be used to change its state or not, as well as
+the access permissions that other aliases to the same object might have. In this
+work we consider three kinds of access permissions (Figure 1b): full, shared and
+pure. We say a reference has write access if it has the ability to change the state
+of an object. full and shared have write access, where full implies exclusive write
+access.
+
+One ﬁx for the m method is to require that f and g have exclusive write
+access to an OF in order to ensure that they are not aliases, and therefore that
+f.close() cannot aﬀect g’s referent.
+
+void m(full OF >> full CF f, full OF >> full OF g){ ... }
+State guarantees. Requiring g to have exclusive write access seems like overkill
+here. Only a pure permission is required to read the ﬁeld file desc. But we
+must still ensure that the two parameters are not aliases.
+
+For more ﬂexible reasoning in the presence of aliasing, access permissions
+are augmented with state guarantees (proposed by Bierhoﬀ and Aldrich [4] but
+formalized and proven sound for the ﬁrst time here). A state guarantee puts
+an upper bound on the state change that may be performed by a reference
+with write access: it can only transition an object to some subclass of the state
+guarantee. A type speciﬁcation then has the form k(D) C where k is the access
+permission, D is the state guarantee, and C is the current state of the object. A
+permission, k(D), is the access permission coupled with the state guarantee1.
+
+Consider:
+
+full(Object) NotEOF x = new NotEOF(...);
+pure(OF) OF y = x;
+x.read();
+print(y.file_desc.pos);
+While x.read() may change the state of the ﬁle by transitioning it to AtEOF, it
+cannot invalidate the open ﬁle assumption held by y.
+
+State guarantees improve modular reasoning about typestates substantially.
+For instance, they recover the ability to express something similar to an ordinary
+object-oriented type: shared(C) C allows an object to be updated but guarantees 
+that it will always obey the interface C. Also, it turns out that we can use
+1 When it is clear from the context, we sometimes say ’permission’ when we really
+
+mean ’access permission’.
+
+464
+
+R. Wolﬀ et al.
+
+state guarantees to express an alternative solution to the previous example: restrict 
+g to the pure access permission it requires, but add a state guarantee of
+OF to ensure that no other reference can transition the object to ClosedFile:
+
+void m(full(F) OF >> full(F) CF f,
+
+pure(OF) OF >> pure(OF) OF g){ ... }
+
+In this case, we can still statically enforce that f and g are not aliases by carefully
+choosing exactly how references to objects can be created. In this way, we can
+allow the programmer more ﬂexibility than always demanding exclusive access
+to objects.
+
+Permission ﬂows. Permissions are split between all aliases and carefully restricted 
+to ensure safety. This includes aliases in local variables, as well as in
+object ﬁelds. Consider the following snippet:
+
+class FileContainer{ shared(OF) OF file; }
+
+full(Object) OF x = new OF(...);
+pure(OF) OF y = x;
+full(Object) FileContainer z = new FileContainer(x);
+After construction of the OF, the reference x has no aliases, so it is safe to give it
+full permission with an unrestricted update capability (Object state guarantee).
+Then, a local alias y is created, capturing a pure permission with OF guarantee.
+After this point, any state change done through x must respect this guarantee.
+Therefore, the permission of x must be downgraded to full(OF). Finally, a
+container object is created, passing x as argument to the constructor. The ﬁeld
+of z captures a shared(OF) permission. The permission of x is downgraded
+again, this time to shared(OF). At this point, there are three aliases to the
+same ﬁle object: x and z.file both hold a shared(OF) permission, and y holds
+a pure(OF). All aliases must be consistent, in that a state update through one
+alias must not break the invariants of other references.
+Temporarily holding permissions In general, as the program executes, permissions 
+to variables get split and are strictly weakened. There are many ways to
+reﬁne the static type system in order to increase expressiveness, such as parametric 
+polymorphism, fractional permissions and borrowing [8, 9]. Here we consider
+one such reﬁnement: a mechanism that can temporarily hold some permissions
+to a reference while a sub-computation is performed. Consider the following:
+
+void printPath(pure(F) F >> pure(F) F);
+
+full(Object) OF x = new OF(...);
+printPath(x);
+x.close();
+This program is ill-typed due to the downgrading of permissions. In order to
+invoke printPath, the permission to x is downgraded from full(Object) OF to
+pure(F) F. Therefore, close, which requires a full(F) OF, cannot be called,
+
+Gradual Typestate
+
+465
+
+although the call to close is safe: printPath requires a read-only alias to its
+argument, and there are no other writeable aliases to x. This is an unfortunate
+limitation due to the conservative nature of the type system.
+
+A workaround is to introduce a temporary alias to x with only a pure permission,
+ and use that alias to invoke printPath. This is however cumbersome and
+does not allow for permissions to be merged back later on. In order to properly
+support this pattern, we introduce a novel expression, hold, which reserves a
+permission to a variable for use within a lexical scope, and then merges that
+permission with that of the variable at the end of the scope. For instance:
+
+full(Object) OF x = new OF(...);
+hold[x:full(F) OF] { printPath(x); }
+x.close();
+Dynamic asserts. As sophisticated as the type system might be (supporting hold,
+borrowing, etc.), it is still necessarily conservative and therefore loses precision.
+Dynamic checks, like runtime casts, are often useful to recover such precision.
+For instance, consider the following extension of the FileContainer snippet seen
+previously in which both y and z are updated to release their aliases to x.
+...
+y = new OF(...);
+z <- Object();
+assert<full(F) OF> x;
+x.close();
+Assuming close requires a full(F) permission to its receiver, the type system
+is unable to determine that x can be closed, even though it is safe to do so (x
+is once again the sole reference to the object). A dynamic assert allows this
+permission to be recovered. Like casts, dynamic asserts may fail at runtime.
+Gradual typing. A statically typed TSOP program requires more annotations
+than a comparable OO program. This may be prohibitively burdensome for a
+programmer, especially during the initial stages of development. For this reason,
+we develop a gradually typed calculus that supports a dynamic type Dyn. Precise
+type annotations can then be omitted from an early draft of a program as in the
+following code:
+Dyn f = ...; f.read();
+A runtime check will verify that f refers to an object that has a read method2.
+Assume that read is annotated with a receiver type full(OF) NotEOF. In this
+case, we must ensure that we have an adequate permission to the receiver. Thus,
+a further runtime check will verify that f refers to an object that is currently in
+the NotEOF state, that no aliases have write access, and that all aliases have a
+state guarantee that is a superstate of OF. The last two conditions ensure that
+invariants of aliases to f cannot be broken. Gradual typing thus enables dynamically 
+and statically-typed parts of a program to coexist without compromising
+safety.
+
+2 Note that Dyn is diﬀerent from Object; if f had type Object the typechecker would
+
+check for a method read in Object, and would raise an error.
+
+466
+
+R. Wolﬀ et al.
+
+Putting it all together. Listing 1 exhibits the above capabilities in a small logging 
+example that generalizes to other shared resources3. The OpenFileLogger
+(OFL) state holds a reference to a ﬁle object (OF) and presents a log method for
+logging messages to it. When logging is complete, the close method acquires
+all permissions to the ﬁle by swapping in a sentinel value (with :=:, explained in
+the next section), closes the ﬁle, and transitions the logger to the FileLogger
+(FL) state, which has no ﬁle handle. The client code declares and uses two logging 
+interfaces, staticLog and dynamicLog. They are somewhat contrived, but
+are meant to represent APIs that utilize a ﬁle logger but do not store it. After
+creating logger (line 17), the file reference no longer has enough permission
+to close the ﬁle, so calls to logger.log are safe. Line 19 holds a shared permission 
+to logger during a dynamically-typed method call. By line 22, logger
+only has shared permission, though no other aliases exist. After asserting back
+full permission, logger can close the ﬁle log.
+
+class FileLogger { /∗ Loggingrelated Data and Methods ∗/ }
+class OpenFileLogger : FileLogger {
+
+full(OF) OF ﬁle;
+Void log(string s)[shared(OFL) OFL >> shared(OFL) OFL] {...}
+Void close()[full(FL) OFL >> full(FL) FL] {
+
+full(OF) ﬁleT = (this.ﬁle :=: new File(”/dev/null”));
+ﬁleT.close();
+this < FileLogger();
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+
+}
+
+}
+// Client Code
+
+13 Void staticLog(shared(OFL) logger >> shared(OFL) logger) { logger.log(”in staticLog”); }
+14 Dyn dynamicLog(Dyn logger) { logger.log(”in dynamicLog”); }
+
+15
+16
+17
+18
+19
+20
+21
+22
+23
+
+full(OF) OF ﬁle = new OF(...);
+full(OFL) OFL logger = new OFL(ﬁle);
+hold[logger:shared(OFL) OFL]{ dynamicLog(logger); }
+staticLog(logger);
+
+assert<full(FL) OFL>(logger);
+logger.close();
+
+Listing 1. Sample Typestate-Oriented code
+
+3 Static Featherweight Typestate
+
+We present a formal model for a language with integrated support for gradual
+typestate. The language is inspired by Featherweight Java (FJ) [17], so we call it
+Gradual Featherweight Typestate (GFT). Gradually-typed languages are typically 
+presented as two distinct languages: a fully static language and its gradual
+extension. We only describe the gradual language; this section focuses on its
+static aspects. Sections 4 and beyond present the extensions for gradual typing.
+Garcia et al. [14] formalizes a fully static variant of GFT, called Featherweight
+Typestate. The static subset of the language is novel in its own right: it is the
+
+3 A practical language would provide means to abbreviate our type annotations.
+
+Gradual Typestate
+
+467
+
+x, this  IdentifierNames
+
+m  MethodNames
+f  FieldNames
+C, D, E, Object  ClassNames
+
+PG ::= (cid:3)CL, e(cid:4)
+CL ::= class C extends D  F M 	
+F ::= T f
+M ::= T mT (cid:8) T x T (cid:8) T   return e; 	
+T ::= P C (cid:0) Void
+P ::= kD
+k ::= full (cid:0) shared (cid:0) pure
+e ::= x (cid:0) let x : T = e in e (cid:0) let x = e in e (cid:0) new Cx (expressions)
+
+(programs)
+(classes)
+(ﬁelds)
+(methods)
+(types)
+(permissions)
+(access permissions)
+
+(cid:0) x.f (cid:0) x.mx (cid:0) x.f :=: x (cid:0) x (cid:12) Cx
+
+Δ ::= x : T
+
+(type contexts)
+
+Fig. 2. Gradual Featherweight Typestate: Syntax (static subset)
+
+ﬁrst formalization of a nominal TSOP language, with support for representing
+typestates as classes, modular typestate-checking and state guarantees, and an
+algorithmic ﬂow-sensitive type system speciﬁcation.
+
+3.1 Syntax
+
+Figure 2 presents GFT’s syntax. Smallcaps (e.g. FieldNames) indicate syntactic
+categories, italics (e.g. C) indicate metavariables, and sans serif (e.g. Object)
+indicates particular elements of a category. Overbars (e.g. A) indicate possibly
+empty sequences (e.g. A1, ..., An). GFT assumes a number of primitive notions,
+such as identiﬁers (including this) and method, ﬁeld, and class names (including
+Object). A GFT program P G is a list of class declarations CL paired with an
+expression e. Class deﬁnitions are standard, except that a GFT class does not
+have an explicit constructor: instead, it has an implicit constructor that assigns
+an initial value to each ﬁeld. Fields F and methods M are standard. Each method
+parameter is annotated with its input and output types, and the method itself
+carries an annotation (in square brackets) for the receiver object. We use helper
+functions like f ields, method, etc., whose deﬁnitions are omitted for brevity.
+
+Types in GFT extend the Java notion of class names as types. As explained in
+Section 2, the type of a GFT object reference has two components, its permission
+and its class (or state). The permission can be broken down further into its access
+permission k and state guarantee D. We write these object reference types in
+the form kD C. The Void type classiﬁes expressions executed purely for their
+eﬀects. No source-level values have the Void type.
+
+To simplify the description of the type system, expressions in GFT are restricted 
+to A-normal form [22], so let expressions explicitly sequence all complex
+operations (we write e1; e2 as shorthand). An optional type ascription provides
+ﬁne-grained control over how permissions are distributed to the bound variable
+(Section 3.3).
+
+468
+
+R. Wolﬀ et al.
+
+k (cid:2) k(cid:3)k Access Permission Splitting
+
+k (cid:2) pure(cid:3)k
+
+full (cid:2) full(cid:3)pure
+
+k   full, shared 	
+k (cid:2) shared(cid:3)shared
+
+P : P
+
+Subpermission
+
+k1 (cid:2) k2
+
+k1D
+
+: k2D
+
+D (cid:8): E
+
+fullE
+
+: fullD
+
+E (cid:8): D
+
+pureE
+: P2
+P1
+P1
+
+: pureD
+
+: P3
+
+P2
+: P3
+
+P   P
+
+Compatible Permissions
+
+E (cid:8): D
+
+kE   pureD
+
+P1   P2
+P2   P1
+
+sharedD   sharedD
+(cid:11)i, j : i (cid:12) j.Pi   Pj
+
+P compatible
+
+P (cid:2) P (cid:3)P
+
+k1D1
+
+Permission Splitting
+k1 (cid:2) k2(cid:3)k3
+D2
+
+: k2D2
+D3 = D1 (cid:8)
+
+k1D1 (cid:2) k2D2(cid:3)k3D3
+
+:
+
+Type Splitting
+
+T (cid:2) T (cid:3)T
+P1 (cid:2) P2(cid:3)P3
+C1 (cid:8): C2
+P1 C1 (cid:2) P2 C2(cid:3)P3 C1
+Void (cid:2) Void(cid:3)Void
+
+T (cid:8): T
+
+Subtyping
+
+T1 (cid:2) T2
+T1 (cid:8): T2
+
+T (cid:13) T Max. Residual
+T1 (cid:2) T1(cid:3)T2
+
+T1 (cid:13) T2
+
+(cid:14) : T (cid:15) T
+
+Type Demotion
+
+sharedD C(cid:14) = sharedD D
+
+pureD C(cid:14) = pureD D
+
+T(cid:14) = T otherwise
+
+A type T (cid:16) kD C is well-formed iﬀ C (cid:8): D
+
+Fig. 3. Permission and Type Management Relations
+
+Apart from method invocation, ﬁeld reference and object creation (all stan-
+dard), GFT includes the update operation x0 (cid:3) Cx1 in support of typestate.
+It replaces the value of x0 with the new object of class C, which may not be
+the same as x0’s current class. Also non-standard is the swapping assignment
+x0.f :=: x1. It assigns the value of x1 to the ﬁeld f and returns the old value as
+its result. The need for this expression is detailed in Section 3.3.
+
+3.2 Managing Permissions
+
+Before we present typing judgments for GFT, we must explain how permissions
+are treated. Permissions to an object are a resource that is split among the variables 
+and ﬁelds that reference it. Figure 3 presents several auxiliary judgments
+that specify how permissions may be safely split, and their relation to typing.
+First, access permission splitting k1 (cid:2) k2(cid:4)k3 describes how given a k1 permission,
+ permission k2 can be acquired, leaving behind k3 as the residual. When we
+are only concerned that a permission k2 can be split from a permission k1 (i.e.
+the residual permission is irrelevant), we write k1 (cid:2) k2. For instance, given any
+permission k, full (cid:2) k and k (cid:2) k.
+
+Permissions partially determine what operations are possible, as well as when
+an object can be safely bound to an identiﬁer. The restrictions on permissions
+
+Gradual Typestate
+
+469
+
+are formalized as a partial order on permissions, analogous to subtyping. The
+notation P1 (cid:0): P2 says that P1 is a subpermission of P2, which means that a
+reference with P1 permission may be used wherever an object reference with P2
+permission is needed. As expected, the subpermission relation is reﬂexive and
+transitive. Splitting an access permission produces a lesser (or identical) permission.
+ The rules that mention pure and full capture how state guarantees aﬀect
+the strength of permissions. Pure permissions covary with their state guarantee
+because a pure reference with a superclass state guarantee assumes less reading
+capability. Full permissions contravary with their state guarantee because a full
+reference with a subclass state guarantee assumes less writing capability (it can
+update to fewer possible states).
+
+Permission splitting extends access permission splitting by accounting for
+state guarantees. First, if k1D1 (cid:0): k2D2, splitting is safe. The question then
+is to determine the proper residual permission k3D3. The k3 residual is obtained 
+by splitting k2 from k1. The resulting state guarantee D3 is the greatest
+lower bound of D1 and D2 in the subclass hierarchy, denoted D1(cid:5)
+Permission splitting in turn extends to type splitting T (cid:2) T (cid:4)T , taking subclasses 
+into account for object references; the Void type can be arbitrarily split.
+We use type splitting to deﬁne the notion of subtyping T (cid:5): T used in GFT. As
+with base permission splitting, we write P1 (cid:2) P2 or T1 (cid:2) T2 to express that P2
+or T2 can be split from P1 or T1 respectively.
+
+The maximum residual relation T1 (cid:6) T2 specializes type splitting for the case
+where all the permissions to an object are acquired. The result type T2 is what
+is leftover; for instance, fullD C (cid:6) pureD C and sharedD C (cid:6) sharedD C.
+The compatible permissions relation P1   P2 says that two distinct references 
+to the same object, one with permissions P1 and the other with P2 can
+soundly coexist at runtime. For instance, sharedC   sharedC, and fullC  
+pureObject. This notion is used to deﬁne the relation P compatible: that the
+outstanding permissions P of references to a particular object can all coexist.
+Finally, we defer the discussion of type demotion to the end of Section 3.3.
+
+D2
+
+4.
+
+:
+
+3.3 Static Semantics
+
+Armed with the permission management relations, we now discuss the salient features 
+of the static semantics of GFT: ﬂow-sensitive, deterministic typing through
+bidirectional type checking.
+Flow-sensitive typing As with FJ, the GFT type system relies upon type contexts
+Δ. Whereas Γ is the standard metavariable for type contexts, we use a diﬀerent
+metavariable Δ to emphasize that the typing contexts are not merely lexical: they
+are linear [16]. In GFT’s type system, the types of identiﬁers are ﬂow-sensitive
+in the sense that they vary over the course of a program. In part this reﬂects how
+the permissions to a particular object may be partitioned and shared between
+references as computation proceeds, but it also reﬂects how update operations
+may change the class of an object during execution.
+
+4 k1D1 (cid:0): k2D2 implies that D1 and D2 are related by subclassing
+
+470
+
+R. Wolﬀ et al.
+
+The GFT typing judgments are quaternary relations roughly of the form Δ1  
+e : T  Δ2: given the typing assumptions Δ1, the expression e can be assigned
+the type T and produces typing assumptions Δ2 as its output. The assumptions
+in question are the types of each reference. Threading typing contexts through
+the typing judgment captures the ﬂow-sensitivity of type assumptions.
+
+Deterministic type checking The type system speciﬁcation must be elaborated to
+both ensure determinism of our type system and also retain ﬂexibility. Consider
+a candidate typing judgment for variable references.
+
+T1 (cid:2) T2(cid:4)T3
+
+Δ, x : T1   x : T2  Δ, x : T3
+
+It states that if x is assumed to have type T1, and T1 can be split into T2 and
+T3, then the expression x can be typed at T2. Because T2 may not be unique, a
+source program may be well-typed according to multiple derivations, with each
+derivation representing a diﬀerent split of permissions between this particular
+variable reference and later references to x. Nondeterminism is incompatible
+with dynamic permission assertions5: a system could succeed sometimes and fail
+other times if permissions could ﬂow more than one way for the same code.
+
+Rather than requiring type annotations for all variable references, we use bidirectional 
+typing [21] to deﬁne a deterministic type system in which annotations
+are used only to tune how permissions are split.
+
+The type system is structured as two mutually recursive judgments. The type
+synthesis judgment Δ1   e (cid:10) T  Δ2 conceptually analyzes the expression e
+in the context Δ1 and synthesizes a type T for it; the type T is an output of
+the judgment, along with the output context Δ2. The type checking judgment
+Δ1   e (cid:11) T  Δ2 checks that the expression e under the type context Δ1
+can be given the type T . The type T is an input to the judgment, and the only
+output is the context Δ2.
+Typing rules Figure 4 presents some of the typing rules for GFT expressions6. A
+variable reference is typed diﬀerently depending on whether its type is synthesized 
+or checked. The synthesis rule (ctx(cid:10)) yields maximal permissions to the
+referenced object. Its output context associates the maximum residual permissions 
+to the variable. In contrast, the checking rule (ctx(cid:11)) just ensures that the
+desired type can be split from the starting type, and leaves the corresponding
+residual in the output context.
+
+Each of the typing rules for let represents both a checking and synthesis rule.
+Replacing the (cid:12) with (cid:11) or (cid:10) gives the checking or synthesis rule, respectively.
+The (let(cid:12)) and (letT(cid:12)) rules diﬀer only in how the bound expression is typed.
+When the bound variable has a type ascription, x : T1, the expression e1 is
+checked against that type. If there is no type ascription, e1’s type is synthesized.
+5 Determinism is not important for the fully static case: Featherweight Typestate
+
+uses non-deterministic typing rules [14].
+
+6 As with FJ, well-typing is extended to apply to whole programs. The details are
+
+covered in the technical report [28].
+
+(ctx(cid:17))
+
+T1 (cid:13) T2
+
+Δ, x : T1   x (cid:17) T1  Δ, x : T2
+
+(ctx(cid:20))
+
+T1 (cid:2) T2(cid:3)T3
+
+Δ, x : T1   x (cid:20) T2  Δ, x : T3
+
+Gradual Typestate
+
+471
+
+(ˆe (cid:20))
+
+Δ   ˆe (cid:17) T2  Δ1
+
+T2 (cid:8): T1
+
+Δ   ˆe (cid:20) T1  Δ1
+
+(let(cid:21))
+
+Δ   e1 (cid:17) T1  Δ1 Δ1, x : T1   e2 (cid:21) T2  Δ2, x : T
+
+Δ   let x = e1 in e2 (cid:21) T2  Δ2
+
+(letT(cid:21))
+
+Δ   e1 (cid:20) T1  Δ1 Δ1, x : T1   e2 (cid:21) T2  Δ2, x : T
+
+Δ   let x : T1 = e1 in e2 (cid:21) T2  Δ2
+
+(update(cid:17))
+
+ﬁeldsC2 = T2 f Δ   x2 (cid:20) T2  Δ(cid:0), x1 : kD C
+
+k   full, shared 	
+
+C2 (cid:8): D
+
+Δ   x1 (cid:22) C2x2 (cid:17) Void  Δ(cid:0)(cid:14), x1 : kD C2
+
+(ref(cid:17))
+
+T2 f  ﬁeldsC1
+
+T2 (cid:13) T (cid:0)
+2
+
+Δ, x : P1 C1   x.f (cid:17) T (cid:0)
+
+2  Δ, x : P1 C1
+
+(swap(cid:17))
+
+T2 f  ﬁeldsC1
+
+Δ, x1 : P1 C1   x2 (cid:20) T2  Δ(cid:0)
+
+Δ, x1 : P1 C1   x1.f :=: x2 (cid:17) T2  Δ(cid:0)
+
+Fig. 4. Select Expression Typing Rules
+
+The typing rules for let and variable references combine to determine how
+permissions transfer between references. When a variable reference is bound to
+another variable, the new variable by default acquires maximal permissions to
+the referenced object; A type annotation on the let-bound variable can tune
+how permissions are transferred to a binding. For instance, assume x has type
+fullD C and consider the two expressions:
+
+(1) let y = x in e
+(2) let y : sharedD C = x in e
+
+In expression (1) y has fullD C type and x has pureD C type in e, but in
+expression (2) both x and y have sharedD C type.
+
+Type checking is treated uniformly for all other expressions. The (ˆe (cid:11)) rule
+schematically expresses checking for those expressions, which we indicate with
+ˆe. For all of them, type checking can be characterized simply in terms of type
+synthesis: an expression checks at type T1 if its type synthesizes to some subtype
+T2 of T1. The rest of the expressions in the language only require type synthesis
+rules (see Section 6).
+
+A variable reference can only perform an update if it has write access. The
+arguments to the constructor—which can include the reference being updated—
+are type checked at the target class’s ﬁeld types. We use the shorthand notation
+Δ   x (cid:11) T  Δ(cid:23) to stand for iteratively checking the arguments:
+
+Δ = Δ0   x0 (cid:11) T0  Δ1;
+
+. . .
+
+; Δn   xn (cid:11) Tn  Δn 1 = Δ(cid:23).
+
+The target class of the update must respect the updated reference’s state guarantee,
+ taking into account any uses of that reference in the construction of the
+new object. The update operation is performed solely for its eﬀect on the heap,
+
+472
+
+R. Wolﬀ et al.
+
+so the type of the overall expression is Void. The output type of the updated
+object reﬂects its new class.
+Type demotion. Update operations can alter the state of any number of variable 
+references. To retain soundness in the face of these operations, it is sometimes 
+necessary to discard previously known information in case it has been
+invalidated. In these cases, an object reference’s class must revert to its state
+guarantee, which is a trusted state after an update. The type demotion function
+T(cid:13) (Figure 3) expresses this restricting of assumptions. Note that full references
+need not be demoted since no other reference could have changed their states.
+We write Δ(cid:13) for the compatible extension of demotion to typing contexts.
+
+The synthesis rule for the update operation in Figure 4 makes use of type
+demotion: type assumptions from the input context are demoted in the output
+context to ensure that any aliases to the updated object retain a conservative
+approximation of the object’s current class7.
+
+Note that type demotion does not imply any runtime overhead: it is a purely
+static process. Furthermore, types of class ﬁelds have the restriction that they
+must be invariant under demotion (i.e. T(cid:13) = T ). Since the types of ﬁelds do not
+change as a program runs, they must not be invalidated by update operations.
+This restriction ensures that ﬁeld types remain compatible with other aliases to
+their objects. Also, as a result only local variable types need ever be demoted.
+Field Operations. As was mentioned in Section 3.1, two operations operate directly 
+on the an object ﬁeld: ﬁeld reference and swapping assignment. Their type
+synthesis rules appear in Figure 4. Field reference operations do not relinquish
+any of the permissions held by a ﬁeld, so the result type is determined by taking
+2 of the ﬁeld type T2. This operation does not aﬀect the
+the maximal residual T (cid:23)
+permissions of the object reference used to access the ﬁeld.
+
+Swap operations cause an object to relinquish all permissions to a ﬁeld and
+replace it with a new reference. The swap expression has two purposes. The ﬁrst
+is to reassign a ﬁeld value in the heap. The second is to return the old ﬁeld value
+as the result of the expression. If a ﬁeld has shared or pure permissions to an
+object, then ﬁeld reference can yield the same amount of permission; however, if
+a ﬁeld has full permission to an object, only swapping can yield a full permission.
+
+3.4 Holding Permissions
+
+The static fragment of GFT described above captures the essence of a TSOP
+language, but the design can be usefully extended. For instance, Section 2 introduced 
+the hold expression holdx : T e, which captures the amount of x’s
+permissions denoted by T for the duration of the computation e. When e completes,
+ these permissions are merged back into x.
+
+e ::= ... (cid:16) holdx : T e
+
+7 The language could retains more precise types by demoting only objects with types
+related to the updated object. For simplicity of presentation, we demote uniformly.
+
+Gradual Typestate
+
+473
+
+The hold expression is a useful but orthogonal addition to the type system. A
+practical TSOP language would build hold’s capabilities directly into the method
+invocation mechanism so as to preserve permissions wherever possible. For simplicity 
+and exposition, we express holding as a distinct feature.
+
+T (cid:4)T (cid:2) T
+
+Type merging
+
+T1 (cid:2) T2(cid:4)T3
+(cid:2) T (cid:23)
+1
+Δ, x : T3   e (cid:10) T  Δ(cid:23), x : T (cid:23)
+3
+
+T2(cid:13) (cid:4)T (cid:23)
+3
+
+P = P1 (cid:0)
+C = C1(cid:5)
+
+P2
+C2
+
+:
+
+:
+
+(hold(cid:17))
+
+Δ, x : T1   holdx : T2e (cid:10) T  Δ(cid:23), x : T (cid:23)
+1
+
+P1 C1(cid:4)P2 C2 (cid:2) P C
+The typing rule for hold depends on a notion of type merging T (cid:4)T (cid:2) T ,
+which captures how two separate permissions to an object may be combined.
+: is the
+Type merging is deﬁned in terms of the (cid:0)
+analogue of (cid:5)
+:for subpermissions. For example, if we know that variable x has
+both type fullC C and pureObject C, then we can merge those types, and
+safely conclude that x can be typed at fullC C.
+
+: relations, where (cid:0)
+
+: and (cid:5)
+
+For space reasons, the rest of the technical development of hold (e.g. translation 
+and dynamic semantics) is omitted, but the details can be found in the
+technical report [28].
+
+4 Gradual Featherweight Typestate
+
+The previous section presents the essence of GFT: an FJ-like calculus where
+classes model states, with an update operation to dynamically change the state
+of objects; types encode states as well as permissions and state guarantees, and
+the type system is both ﬂow-sensitive and deterministic. Even if features like
+hold increase the expressiveness of the type system, there are still cases where
+it is necessary to resort to dynamic assertions about typestates. This section
+presents the support for such assertions, as well as gradual typing.
+Type assertions GFT supports an assert expression for explicitly changing the
+type assumptions of a variable.
+
+e ::=    (cid:16) assert(cid:18)T (cid:19)x
+
+Its type synthesis rule is as follows.
+
+(assert(cid:13)) Δ, x : T1   assert(cid:18)T2(cid:19)x (cid:10) Void  Δ, x : T2
+
+Assert is like a cast, but instead of returning a value of the given type it changes
+the type of the target variable8. When T1 (cid:5): T2, the assert is statically safe;
+otherwise, a runtime check is required (see Section 6).
+
+8 In fact, assertions are strictly more powerful than casts: casts can be implemented
+
+using assertions.
+
+474
+
+R. Wolﬀ et al.
+
+T (cid:2) T (cid:3)T
+
+Type Splitting
+
+T (cid:2) Dyn(cid:3)T
+
+T (cid:2):
+
+(cid:25) T
+T1 (cid:8): T2
+T1 (cid:2):
+(cid:25) T2
+
+Consistent Subtyping
+
+T (cid:12) Dyn
+Dyn (cid:2):
+(cid:25) T
+
+Fig. 5. Hybrid Permission Management Relations
+
+(ctxd (cid:20))
+
+T (cid:12) Dyn
+
+Δ, x : Dyn   x (cid:20) T  Δ, x : Dyn
+
+(updated (cid:17))
+
+ﬁeldsC2 = T2 f Δ   x2 (cid:20) T2  Δ(cid:0), x1 : Dyn
+
+Δ   x1 (cid:22) C2x2 (cid:17) Void  Δ(cid:0)(cid:14), x1 : Dyn
+
+Fig. 6. Select Dynamic Typing Rules
+
+Gradual typing To support gradual typing, GFT provides a type for dynamically
+checked values.
+
+T ::=    (cid:16) Dyn
+
+The type system treats the Dyn type with greater leniency: type checks on Dyn
+objects are deferred to runtime.
+
+To account for these dynamic features, Figure 5 presents several adjustments
+to the type system from the last section. First, type splitting is extended to
+account for Dyn. In particular, any reference can split oﬀ a Dyn without aﬀecting
+its original type or permissions. Type consistency is extended analogously.
+
+Following Siek and Taha [24], consistent subtyping T (cid:8):
+
+(cid:20) T extends subtyping
+to support using Dyn-typed values wherever another type is expected and viceversa.
+ Consistent subtyping explicitly states that Dyn (cid:8):
+(cid:20) Dyn
+because type splitting now forces T (cid:5): Dyn. In accordance, the ˆe (cid:11) type
+checking rule from the last section now uses (cid:8):
+
+(cid:20) T , but also T (cid:8):
+
+(cid:20) in place of (cid:5):.
+
+Figure 6 presents some extra typing rules that are needed to account for uses
+of Dyn-typed references. The (ctxd (cid:11)) rule says that a Dyn-typed variable can
+be checked at any type. Note that x : Dyn can be synthesized and checked at Dyn
+by the (ctx(cid:10)) and (ctx(cid:11)) rules respectively. The (updated (cid:10)) rule accounts
+for updating a dynamically typed variable. The type system checks that the
+arguments to the constructor are suitable, but the checks on the target of the
+update are deferred to runtime (see Section 6).
+
+5 Internal Language
+
+GFT’s semantics are deﬁned by type-directed translation to GFTIL, an internal
+language that makes the details of dynamic permission management explicit.
+
+5.1 Syntax
+GFTIL is structured much like GFT but elaborates several concepts (Figure 7).
+First, the internal language introduces explicitly dynamic variants ed of some
+
+o  ObjectRefs
+l  IndirectRefs
+s ::= x (cid:0) l
+b ::= x (cid:0) l (cid:0) o
+e ::= es (cid:0) ed
+es ::= b (cid:0) void (cid:0) sT (cid:2) T (cid:14)T  (cid:0) new Cs
+
+let x = e in e (cid:0) releaseT s (cid:0) s.f (cid:0) s.ms
+(cid:0)
+(cid:0) s.f :=: s (cid:0) s (cid:12) Cs (cid:0) assert(cid:3)T (cid:8) T (cid:4)s
+
+ed ::= s.df (cid:0) s.dms (cid:0) s.f :=:d s
+
+(cid:0) s (cid:12)d Cs (cid:0) assertd(cid:3)T (cid:8) T (cid:4)s
+
+Δ ::= b : T
+
+Gradual Typestate
+
+475
+
+(simple exprs)
+(bare expr)
+(expressions)
+(static exprs)
+
+(dynamic exprs)
+
+(type context)
+
+Fig. 7. Internal Language Syntax
+
+operations from the source language. Static variants are ensured to be safe by the
+type system; dynamic variants require runtime checks. Second, many expressions
+in the language carry explicit type information. This information is used to
+dynamically account for the ﬂow of permissions as the program runs. These type
+annotations play a role in both the type system and the dynamic semantics.
+
+Finally, GFTIL adds several constructs that only occur at runtime. Object
+references and indirect references point to runtime objects9. GFTIL is also in
+A-normal form, though at runtime the arguments to expressions are generalized
+to simple expressions s: variable names or indirect references. Reference expressions 
+come in two forms. A bare reference b signiﬁes a variable or reference that
+is never used again. In contrast, a splitting reference sT (cid:2) T (cid:4)T  explicitly speciﬁes 
+the starting type, result type, and the residual type of the reference. The
+releaseT s expression explicitly releases a reference and its permissions, after
+which it can no longer be used.
+
+5.2 Static Semantics
+
+Because of GFTIL’s explicit form, its typing judgment Δ   e : T  Δ does not
+need to be bidirectional. Furthermore, its typing rules use the same permission
+and type management relations as the source language. GFTIL’s typing rules
+explicitly and strictly encode permission ﬂow by checking the input context Δ
+to force their arguments s to have exactly the type required. GFTIL’s dynamic
+semantics uses this encoding to track permissions.
+
+Figure 8 presents some of GFTIL’s typing rules. For space reasons, we only
+present the rules for invoke, update and assert, together with their dynamicallytyped 
+variants. The (invoke) rule matches a method’s arguments exactly against
+the method signature. Each argument’s output type is dictated by the method’s
+output states. The (update) rule almost mirrors GFT’s update rule except that
+its argument types must exactly match the class ﬁeld speciﬁcations. The (assert)
+
+9 Object references correspond to heap pointers; indirect references are an artifact
+
+that facilitates the type safety proof (see Section 5.4).
+
+476
+
+R. Wolﬀ et al.
+
+(invoke)
+
+mdeclm, C1 = Tr mT2 (cid:26) T (cid:0)2P1 C1 (cid:26) T (cid:0)
+1
+Δ, s1 : P1 C1, s2 : T2   s1.ms2 : Tr  Δ(cid:14), s1 : T (cid:0)
+1, s2 : T (cid:0)2
+
+(invoked)
+
+(update)
+
+(updated)
+
+(assert)
+
+Δ, s1 : Dyn, s2 : Dyn   s1.dms2 : Dyn  Δ(cid:14), s1 : Dyn, s2 : Dyn
+
+k   full, shared 	
+
+C2 (cid:8): D ﬁeldsC2 = T f
+
+Δ, s1 : kD C1, s2 : T   s1 (cid:22) C2s2 : Void  Δ(cid:14), s1 : kD C2
+
+ﬁeldsC2 = T f
+
+Δ, s1 : Dyn, s2 : T   s1 (cid:22)d C2s2 : Void  Δ(cid:14), s1 : Dyn
+
+T1 (cid:2) T2
+
+Δ, s : T1   assert(cid:29)T1 (cid:26) T2(cid:30)s : Void  Δ, s : T2
+
+(assertd)
+
+T1 (cid:31)(cid:2) T2
+
+Δ, s : T1   assertd(cid:29)T1 (cid:26) T2(cid:30)s : Void  Δ, s : T2
+
+Fig. 8. Select Internal Language Typing Rules
+
+rule is the safe subset of GFT’s rule, though GFTIL’s assert is explicitly annotated 
+with its argument’s source type. The dynamic variants of these expressions
+enforce very little statically: the (updated) rule only checks that the arguments
+match the constructor, and the (assertd) rule applies when the destination type
+cannot be split from the source type.
+
+5.3 Dynamic Semantics
+
+GFTIL’s dynamic semantics, presented in Figure 9, requires several additional
+syntactic notions, deﬁned below:
+
+Co P  Objects
+
+v ::= void (cid:0) o
+(values)
+μ  ObjectRefs 	 Objects (stores)
+ρ  IndirectRefs 	 Values (environments)
+E ::=  (cid:0) let x = E in e
+
+(evaluation contexts)
+
+Expressions in the language evaluate to values, including void and object references 
+o. Stores μ associate object references to objects. The novelty of GFTIL
+is that an object in the store Co is annotated with the set of outstanding
+permissions for references to that object, P .
+
+In addition to the store, the dynamic semantics uses a second heap, which
+we call the environment ρ, that mediates between variable references and the
+object store. In the source language, two variables could refer to the same object 
+in the store, but each can have diﬀerent permissions to that object. The
+environment tracks these diﬀerences at runtime. It maps indirect references l
+
+μ, ρ, e (cid:15) μ, ρ, e Dynamic Semantics
+
+Gradual Typestate
+
+477
+
+(invoke)
+
+methodm, C = Tr mTx (cid:26) T (cid:0)
+x
+
+x Tt (cid:26) T (cid:0)
+
+t  return e; 	
+
+μ, ρ, l1.ml2 (cid:15) μ, ρ, l1, l2(cid:3)this, xe
+
+μρl1 = Co P
+
+μρl1 = Co P mdeclm, C = Tr mTx (cid:26) T (cid:0)
+
+x Tt (cid:26) T (cid:0)
+t
+
+  Tx  =  l2  
+
+μ, ρ, l1.dml2 (cid:15) μ, ρ, assertd(cid:29)Dyn (cid:26) Tt(cid:30)l1; assertd(cid:29)Dyn (cid:26) Tx(cid:30)l2;
+
+let ret = l1.ml2 in assert(cid:29)T (cid:0)
+
+t (cid:26) Dyn(cid:30)l1;
+
+x (cid:26) Dyn(cid:30)l2; assert(cid:29)Tr (cid:26) Dyn(cid:30)ret;
+
+assert(cid:29)T (cid:0)
+ret
+
+(invoked)
+
+μρl1 = Co P
+
+ﬁeldsC = T f
+
+μ(cid:0) = μρl1 (cid:15) C (cid:0)ρl2 P   o : T
+
+(update)
+
+μ, ρ, l1 (cid:22) C (cid:0)l2 (cid:15) μ(cid:0), ρ, void
+
+(updated)
+
+μρl1 = Cof  P
+
+C (cid:0) (cid:8): Dg
+μ, ρ, l1 (cid:22)d C (cid:0)l2 (cid:15) μ, ρ, assertd(cid:29)Dyn (cid:26) sharedDg  C(cid:30)l1;
+
+:  D   kD  P 	
+
+Dg = (cid:8)
+
+l1 (cid:22) C (cid:0)l2;
+assert(cid:29)sharedDg  C (cid:0) (cid:26) Dyn(cid:30)l1
+
+(assert)
+
+μ(cid:0) = μ  ρl : T   ρl : T (cid:0)
+
+μ, ρ, assert(cid:29)T (cid:26) T (cid:0)(cid:30)l (cid:15) μ(cid:0), ρ, void
+
+(assertdv)
+
+ρl = void
+
+μ, ρ, assertd(cid:29)Dyn (cid:26) Void(cid:30)l (cid:15) μ, ρ, void
+
+(assertdo)
+
+ρl = o
+
+μ(cid:0) = μ  o : T   o : P (cid:0) C (cid:0)
+
+μ(cid:0)o = Cof  P
+
+C (cid:8): C (cid:0)
+
+P compatible
+
+μ, ρ, assertd(cid:29)T (cid:26) P (cid:0) C (cid:0)(cid:30)l (cid:15) μ(cid:0), ρ, void
+
+Fig. 9. Select Internal Language Dynamic Semantics Rules
+
+to values v. The dynamic semantics of GFTIL is deﬁned as transitions between
+store/environment/expression triples10.
+
+Figure 9 presents some select dynamic semantics rules of GFTIL. Certain
+rules use two helper functions for tracking permissions in the heap, whose deﬁnitions 
+are straightforward and as such omitted for brevity. Permission addition
+  augments the permission set for a particular object in the heap. Conversely,
+permission subtraction  removes a permission from the set of tracked permissions 
+for an object. The (invoke) rule is standard. The (update) rule looks up the
+object references for the target reference and the arguments to the class constructor,
+ replaces the store object for the target reference with the newly constructed
+object, and releases the permissions held by the ﬁelds of the old object. The
+(assert) rule uses permission addition and subtraction to track permissions, and
+returns void. Rules for dynamic operators, like (invoked) and (updated), dynamically 
+assert the necessary permissions (using assertd), defer to the corresponding
+static operation, and then release the acquired permission (using assert). Finally,
+the (assertd) rule conﬁrms dynamically that its type assertion is safe.
+
+10 The environment serves a purely formal purpose: it supports the proof of type
+safety by keeping precise track of the outstanding permissions associated with
+diﬀerent references to objects at runtime, and is not needed in a practical implementation.
+
+
+478
+
+R. Wolﬀ et al.
+
+Helper Functions
+
+objTypesμ, Δ, ρ, o = T   o : T  typesμ, Δ, ρ, T (cid:12) Dyn
+
+typesμ, Δ, ρ = ﬁeldTypesμ    envTypesΔ, ρ    ctxTypesΔ
+ﬁeldTypesμ =
+
+oi : Ti   μo(cid:0) = Co P , ﬁeldsC = T f 
+
+o(cid:0)domµ
+
+envTypesΔ, ρ = o : T   ρl = o, l : T  Δ
+
+ctxTypesΔ = o : T   o : T  Δ
+
+μ, Δ, ρ   o ok Reference Consistency
+
+μ, Δ, ρ ok Global Consistency
+
+μo = Co(cid:0) P
+
+(cid:2)
+(cid:2)
+(cid:2)o(cid:0)
+
+(cid:2)
+(cid:2)
+
+(cid:2) = |ﬁeldsC|
+
+objTypesμ, Δ, ρ, o = kE D
+C (cid:8): D
+kE compatible
+
+kE = P
+
+μ, Δ, ρ   o ok
+
+ranρ " domμ #  void 	
+
+domΔ " domρ # domμ
+
+ l   l : Void  Δ 	 "  l   ρl = void 	
+ l   l : kD C  Δ 	 "  l   ρl = o 	
+
+μ, Δ, ρ   domμ ok
+
+μ, Δ, ρ ok
+
+Fig. 10. Permission-Consistency Relations
+
+5.4 Type safety
+
+GFTIL’s type safety proof must account for the outstanding permissions for
+each object o and verify that they are mutually compatible. Figure 10 presents
+the deﬁnitions used for this. The ﬁeldTypes, ctxTypes, and envTypes functions
+accumulate outstanding type information for objects in the store from the ﬁelds
+of objects, the type context, and the environment respectively. The objTypes
+function selects just the permission-carrying types for a particular object reference 
+o. These deﬁnitions use square brackets to express list comprehensions, and
+   to express list concatenation.
+
+The objTypes function is used to deﬁne reference consistency, the judgment
+that an object in the store and all references to it are sensible. A consistent
+object reference points to an object that has the proper number of ﬁelds, and all
+references to it are well-formed, mutually compatible, and tracked in the store.
+Reference consistency is used in turn to deﬁne global consistency, which establishes 
+the mutual compatibility of a store-environment-context triple. Global
+consistency implies that every object reference in the store satisﬁes reference
+consistency, that every reference in the type context is accounted for in the store
+and environment, and that Void and object-typed indirect references ultimately
+point to void values and object references respectively11. Note that global consistency 
+and permission tracking take into account even objects that are no longer
+reachable in the program. To recover permissions, a program must explicitly
+release the ﬁelds of an object before it becomes unreachable.
+
+These concepts contribute to the statement (and proof) of type safety.
+
+Theorem 1 (Progress). If e is a closed expression, μ, Δ, ρ ok, and
+Δ   e : T  Δ(cid:23), then only one of the following holds:
+
+11 Dyn references may point to either Void or object references.
+
+Gradual Typestate
+
+479
+
+(invoke(cid:17))
+
+coercex1, P1 C1 (cid:2):
+
+(cid:25) Tt = eT
+1
+
+Δ, x1 : P1 C1, x2 : T2   x1.mx2 (cid:17) T (cid:3) eT
+
+mdeclm, C1 = T mTx (cid:26) T (cid:0)
+
+xTt (cid:26) T (cid:0)
+t
+coercex2, T2 (cid:2):
+(cid:25) Tx = eT2
+1 ; eT2 ; x1.mx2  Δ(cid:14), x1 : T (cid:0)
+
+t
+
+, x2 : T (cid:0)
+x
+
+(invoked (cid:17))
+
+(update(cid:17))
+
+Δ, x1 : Dyn, x2 : T2   x1.mx2 (cid:17) Dyn (cid:3) eT2 ; x1.dmx2  Δ(cid:14), x1 : Dyn, x2 : Dyn
+
+coercex2, T2 (cid:2):
+
+(cid:25) Dyn = eT2
+
+(ˆe (cid:20))
+
+Δ   ˆe (cid:17) T1 (cid:3) eT
+
+1  Δ(cid:0)
+
+coerceret, T1 (cid:2):
+
+(cid:25) T2 = eT
+2
+
+Δ   ˆe (cid:20) T2 (cid:3) let ret = eT
+
+1 in eT
+
+2 ; ret  Δ(cid:0)
+
+ﬁeldsC2 = T2 f Δ   x2 (cid:20) T2 (cid:3) eT2  Δ(cid:0), x1 : kD C
+
+k  full, shared	
+
+C2 (cid:8): D
+
+Δ   x1 (cid:22) C2x2 (cid:17) Void (cid:3) let x(cid:0)2 = eT2 in x1 (cid:22) C2x(cid:0)2  Δ(cid:0)(cid:14), x1 : kD C2
+
+(updated (cid:17))
+
+ﬁeldsC2 = T2 f Δ   x2 (cid:20) T2 (cid:3) eT2  Δ(cid:0), x1 : Dyn
+
+Δ   x1 (cid:22) C2x2 (cid:17) Void (cid:3) let x(cid:0)2 = eT2 in x1 (cid:22)d C2x(cid:0)2  Δ(cid:0)(cid:14), x1 : Dyn
+
+(assert(cid:17))
+
+Δ, x : T   assert(cid:29)T (cid:0)(cid:30)x (cid:17) Void (cid:3) assert(cid:29)T (cid:26) T (cid:0)(cid:30)x  Δ, x : T (cid:0)
+
+T (cid:2) T (cid:0)
+
+(assertd (cid:17))
+
+Δ, x : T   assert(cid:29)T (cid:0)(cid:30)x (cid:17) Void (cid:3) assertd(cid:29)T (cid:26) T (cid:0)(cid:30)x  Δ, x : T (cid:0)
+
+T (cid:31)(cid:2) T (cid:0)
+
+Fig. 11. Select Translation Rules from GFT to GFTIL
+
+– e is a value;
+– μ, ρ, e (cid:23) μ(cid:23), ρ(cid:23), e(cid:23) for some μ(cid:23), ρ(cid:23), e(cid:23);
+– e = Eed and μ, ρ, e is stuck.
+
+The last case of the progress theorem holds when a program is stuck on a
+failed dynamically checked expression. All statically checked expressions make
+progress.
+
+Theorem 2 (Preservation). If Δ   e : T  Δ(cid:23), and μ, Δ, ρ ok, and
+μ, ρ, e (cid:23) μ(cid:23), ρ(cid:23), e(cid:23), then Δ$   e(cid:23) : T  Δ(cid:23) and μ(cid:23), Δ$, ρ(cid:23) ok for some Δ$.
+
+6 Source to Target Translation
+
+The dynamic semantics of GFT are deﬁned by augmenting its type system to
+generate GFTIL expressions. The type checking and synthesis judgments become 
+Δ   e1 (cid:11) T (cid:3) eT
+2  Δ(cid:23) respectively,
+where e1 is a GFT expression and eT
+2 is its corresponding GFTIL expression.
+Figure 11 presents some of these rules. We use the T superscript to disambiguate
+GFTIL expressions as needed. Several rules use the coerce partial function, which
+translates consistent subtyping assertions T (cid:8):
+
+2  Δ(cid:23) and Δ   e1 (cid:10) T (cid:3) eT
+
+(cid:20) T into variable assertions:
+
+coercex, T1
+coercex, Dyn (cid:8):
+
+(cid:20) T2 = assert(cid:18)T1 (cid:24) T2(cid:19)x
+(cid:8):
+(cid:20) T  = assertd(cid:18)Dyn (cid:24) T (cid:19)x
+
+if T1 (cid:5): T2
+
+if T (cid:25) Dyn
+
+480
+
+R. Wolﬀ et al.
+
+Most of the translations are straightforward, and follow similar patterns. For
+instance, the (update(cid:10)) rule, which applies when the target of the update is
+statically typed, let-binds all of the arguments to the object constructor so as
+to extract the exact permissions that it needs before calling GFTIL’s static update.
+ The (updated (cid:10)) rule, in contrast, applies when the target of the update is
+dynamically typed. It translates to a dynamic update operation (cid:3)d, but is otherwise 
+the same. Operations on dynamically typed objects translate to dynamic
+operations. Other rules like (assert(cid:10)) simply use the typing rule to ascertain
+the intended type annotations for the corresponding GFTIL expression.
+
+As intended, the translation rules preserve well-typing:
+
+Theorem 3 (Translation Soundness).
+If Δ   e (cid:12) T (cid:3) eT  Δ(cid:23) then Δ   eT : T  Δ(cid:23).
+This theorem extends straightforwardly to whole programs.
+
+7 Discussion
+
+Related Work. A lot of research has been done on typestates since they were
+ﬁrst introduced by Strom and Yemini [26]. Most typestate analyses are wholeprogram 
+analyses, which makes them very ﬂexible in handling aliasing. Approaches 
+based on abstract interpretation (e.g. [12]) rely on a global alias analysis
+and generally assume that the protocol implementation is correct and only verify
+client conformance. Naeem and Lhot´ak [20] developed an analysis for checking
+typestate properties over multiple interacting objects. These global analyses typically 
+run on the complete code base, only once a system is fully implemented,
+and are time consuming.
+
+Fugue [10] was the ﬁrst modular typestate veriﬁcation system for objectoriented 
+software. It tracks objects as “not aliased” or “maybe aliased”; only
+“not aliased” objects can change state. Bierhoﬀ and Aldrich [4] extended this
+approach by supporting more expressive method speciﬁcations based on linear
+logic [16]. They introduce the notion of access permissions in order to allow state
+changes even in the presence of aliasing. They also use fractions, ﬁrst proposed
+by Boyland [8], to support patterns like borrowing and adoption [9]. The Plural
+tool supports modular typestate checking with access permissions for Java. It
+has been used in a number of practical studies [5]. Although Plural introduced
+state guarantees, this paper provides their ﬁrst formalization.
+
+Recent work on distributed session types [15] provides essentially the same
+expressiveness as Plural, but with protocols expressed in the structural setting
+of a process algebra instead of the setting of nominal typestates. It considers
+communication over distributed channels as well as object protocols, but does
+not allow aliasing for objects with protocols.
+
+The above approaches do not address typestate-oriented programming, as
+they are not integrating typestates within the programming model, but rather
+overlay static typestate analysis on top of an existing language. TSOP has been
+recently proposed by Aldrich et al. [2]; its deﬁning characteristic is supporting
+
+Gradual Typestate
+
+481
+
+run-time changes to the representation of objects in the dynamic semantics and
+type system. The programming language Plaid12 is the ﬁrst language to integrate
+typestates in the core programming model. Saini et al. [23] recently developed
+the ﬁrst core calculus for a TSOP language; their language is object-based and
+relies on structural types. Gradual Featherweight Typestate builds on this work
+but adapts it to a class-based, nominal approach with shared permissions and
+state guarantees for reasoning about typestate in the presence of aliasing. Earlier
+work related to TSOP includes the Fickle system [11], which can change the class
+of an object at runtime, but has limited ability to reason about the states of an
+object’s ﬁelds.
+
+This work also builds upon existing techniques for partial typing, like hybrid
+typing [18] and gradual typing [25, 24, 6]. Gradual Featherweight Typestate is
+a considerable advance in this sense, by showing how to gradually check ﬂowsensitive 
+resources in a modular fashion. Recently, Bodden [7] presented a hybrid
+approach to typestate checking. A static typestate analysis is performed to avoid
+unnecessary instrumentation of programs for monitoring typestates at runtime.
+While the hybrid perspective is shared with this work, the proposed analysis is
+global.
+
+Ahmed et al. [1] deﬁne a core functional programming language that supports
+strong updates, i.e. changing the type of an object in a reference cell. Similarly
+to our approach, it uses linear typing. They present two languages, L3, and
+extended L3. L3 allows aliasing, but only has exclusive access, through a capa-
+bility: only one reference can read/write to an object. In contrast, full, shared
+and pure permissions allow for more varied aliasing patterns. Extended L3 allows
+recovering a capability, but the programmer must provide a proof that no other
+capabilities exist to the reference cell.
+
+Future Work. Gradual Featherweight Typestate is at the core of the Plaid language 
+design project at CMU. We are integrating other access permissions from
+Bierhoﬀ and Aldrich [4]. Most importantly, we are exploring ways to extend the
+power of the static type system in order to avoid resorting to dynamic asserts.
+An example of such an extension is permission borrowing [9], which, if speciﬁed
+in method signatures, avoids having to dynamically reassert permissions after
+“lending” them to a sub-computation. The language we present here already
+includes one such reﬁnement, namely hold, used to hold some permissions to
+a reference while a sub-computation is performed. Importantly, it remains an
+outstanding research question if the cost of dynamic permission checking can
+be amortized over the number of permission checks. As it now stands, enabling
+dynamic permission checking mandates a fully-instrumented runtime semantics
+to keep track of permissions. In Plaid, we intend to address this with reference
+counting. Standard optimization techniques like deferred increments [3] and update 
+coalescing [19] will be applied. We believe these techniques will reduce
+reference count overhead to a small percentage of runtime, as it does for garbage
+collection, and will study this empirically in future. The formalism presented
+
+12 Under development at CMU: http://plaid-lang.org
+
+482
+
+R. Wolﬀ et al.
+
+here establishes a baseline from which to explore this capability and develop
+new models for permission tracking.
+
+Conclusion. Gradual Featherweight Typestate (GFT) is a nominal core calculus 
+for typestate-oriented programming. By introducing typestate directly into
+the language and extending its type system with support for gradual typing,
+state abstractions can be implemented directly, stronger program properties can
+be enforced statically, and when necessary dynamic checks can be introduced
+seamlessly. In particular GFT supports a rich set of access permissions together
+with state guarantees for substantial reasoning about typestate in the presence
+of aliasing. This work paves the way for further gradual approaches by showing
+how to modularly and gradually check ﬂow-sensitive resources.
+
+Acknowledgments. We thank the members of the Plaid research group at
+Carnegie Mellon University, especially Darpan Saini and Nels Beckman, as well
+as the anonymous reviewers, for feedback on this work.
+
+References
+
+1. Ahmed, A., Fluet, M., Morrisett, G.: L3: A linear language with locations.
+
+Fundamenta Informaticae 77(4), 397–449 (2007)
+
+2. Aldrich, J., Sunshine, J., Saini, D., Sparks, Z.: Typestate-oriented programming.
+ In: Proc. Onward! 2009, pp. 1015–1022. ACM, New York (2009)
+
+3. Baker, H.G.: Minimizing reference count updating with deferred and anchored 
+pointers for functional data structures. SIGPLAN Not. 29, 38–43
+(1994)
+
+4. Bierhoﬀ, K., Aldrich, J.: Modular typestate checking of aliased objects. In:
+Proc. Conference on Object-oriented Programming Systems and Applications,
+ pp. 301–320. ACM, New York (2007)
+
+5. Bierhoﬀ, K., Beckman, N.E., Aldrich, J.: Practical API protocol checking
+with access permissions. In: Drossopoulou, S. (ed.) ECOOP 2009. LNCS,
+vol. 5653, pp. 195–219. Springer, Heidelberg (2009)
+
+6. Bierman, G., Meijer, E., Torgersen, M.: Adding dynamic types to c%. In:
+D’Hondt, T. (ed.) ECOOP 2010. LNCS, vol. 6183, pp. 76–100. Springer,
+Heidelberg (2010)
+
+7. Bodden, E.: Eﬃcient hybrid typestate analysis by determining continuationequivalent 
+states. In: Proc. International Conference on Software Engineering,
+ pp. 5–14. ACM, New York (2010)
+
+8. Boyland, J.: Checking interference with fractional permissions. In: Cousot,
+R. (ed.) SAS 2003. LNCS, vol. 2694, pp. 55–72. Springer, Heidelberg (2003)
+9. Boyland, J., Retert, W.: Connecting eﬀects and uniqueness with adoption.
+ In: Symposium on Principles of Programming Languages, pp. 283–295.
+ACM, New York (2005)
+
+10. DeLine, R., F¨ahndrich, M.: Typestates for objects. In: Vetta, A. (ed.)
+
+ECOOP 2004. LNCS, vol. 3086, pp. 465–490. Springer, Heidelberg (2004)
+
+Gradual Typestate
+
+483
+
+11. Drossopoulou, S., Damiani, F., Dezani-Ciancaglini, M., Giannini, P.: Fickle:
+Dynamic object re-classiﬁcation. In: Lee, S.H. (ed.) ECOOP 2001. LNCS,
+vol. 2072, Springer, Heidelberg (2001)
+
+12. Fink, S.J., Yahav, E., Dor, N., Ramalingam, G., Geay, E.: Eﬀective typestate 
+veriﬁcation in the presence of aliasing. ACM Trans. Softw. Eng.
+Methodol. 17(2), 1–34 (2008)
+
+13. Gamma, E., Helm, R., Johnson, R., Vlissides, J.: Design Patterns: Elements 
+of Reusable Object-Oriented Software. Professional Computing Series.
+ Addison-Wesley, Reading (1994)
+
+14. Garcia, R., Wolﬀ, R., Tanter, ´E., Aldrich, J.: Featherweight Typestate. Technical 
+Report CMU-ISR-10-115, Carnegie Mellon University (July 2010)
+
+15. Gay, S., Vasconcelos, V., Ravara, A., Gesbert, N., Caldeira, A.: Modular session 
+types for distributed object-oriented programming. In: Symposium on
+Principles of programming languages, pp. 299–312. ACM, New York (2010)
+
+16. Girard, J.-Y.: Linear logic. Theor. Comput. Sci. 50(1), 1–102 (1987)
+17. Igarashi, A., Pierce, B.C., Wadler, P.: Featherweight Java: a minimal core
+calculus for Java and GJ. ACM Trans. Program. Lang. Syst. 23(3), 396–450
+(2001)
+
+18. Knowles, K., Flanagan, C.: Hybrid type checking. ACM Trans. Program.
+
+Lang. Syst. 32(2), 6:1–6:34 (2010)
+
+19. Levanoni, Y., Petrank, E.: An on-the-ﬂy reference-counting garbage collector
+
+for Java. ACM Trans. Program. Lang. Syst. 28, 1–69 (2006)
+
+20. Naeem, N.A., Lhot´ak, O.: Typestate-like analysis of multiple interacting
+objects. In: Proc. Conference on Object-oriented programming systems languages 
+and applications, pp. 347–366. ACM, New York (2008)
+
+21. Pierce, B.C., Turner, D.N.: Local type inference. ACM Trans. Program.
+
+Lang. Syst. 22(1), 1–44 (2000)
+
+22. Sabry, A., Felleisen, M.: Reasoning about programs in continuation-passing
+
+style. Lisp Symb. Comput. 6(3-4), 289–360 (1993)
+
+23. Saini, D., Sunshine, J., Aldrich, J.: A theory of typestate-oriented programming.
+ In: Formal Techniques for Java-like Programs (2010)
+
+24. Siek, J.G., Taha, W.: Gradual typing for objects. In: Bateni, M. (ed.)
+
+ECOOP 2007. LNCS, vol. 4609, pp. 2–27. Springer, Heidelberg (2007)
+
+25. Siek, J., Taha, W.: Gradual typing for functional languages. In: Proc. Scheme
+
+and Functional Programming Workshop (September 2006)
+
+26. Strom, R.E., Yemini, S.: Typestate: A programming language concept for enhancing 
+software reliability. IEEE Trans. Softw. Eng. 12(1), 157–171 (1986)
+27. Walker, D.: Substructural type systems. In: Pierce, B. (ed.) Advanced Topch.
+ 1, pp. 3–43. MIT Press,
+
+ics in Types and Programming Languages,
+Cambridge (2005)
+
+28. Wolﬀ, R., Garcia, R., Tanter, ´E., Aldrich, J.: Gradual Featherweight Typestate.
+ Technical Report CMU-ISR-10-116R, Carnegie Mellon University (July
+2010)
+
+

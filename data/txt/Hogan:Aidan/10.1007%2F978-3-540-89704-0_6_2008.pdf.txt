@@ -1,0 +1,1113 @@
+SAOR: Authoritative Reasoning for the Web(cid:2)
+
+Aidan Hogan, Andreas Harth, and Axel Polleres
+
+Digital Enterprise Research Institute, National University of Ireland, Galway
+
+Abstract. In this paper we discuss the challenges of performing reasoning 
+on large scale RDF datasets from the Web. We discuss issues and
+practical solutions relating to reasoning over web data using a rule-based
+approach to forward-chaining; in particular, we identify the problem of
+ontology hijacking: new ontologies published on the Web re-deﬁning the
+semantics of existing concepts resident in other ontologies. Our solution
+introduces consideration of authoritative sources. Our system is designed
+to scale, comprising of ﬁle-scans and selected lightweight on-disk indices.
+We evaluate our methods on a dataset in the order of a hundred million
+statements collected from real-world Web sources.
+
+1 Introduction
+
+Data attainable through the Web is unique in terms of scale and diversity. Millions 
+of data sources contribute billions of statements to a giant data graph. The
+Semantic Web technology stack includes means to supplement instance data
+being published using the Resource Description Framework (RDF) with ontologies 
+described in RDF Schema (RDFS) [1] and the Web Ontology Language
+(OWL) [16], allowing people to formally specify a domain of discourse, and providing 
+machines a more sapient understanding of the data. While there exists a
+large body of work in the area of reasoning algorithms and systems that work
+and scale well in conﬁned environments, the distributed and loosely coordinated
+creation of a world-wide knowledge base creates new challenges.
+
+Reasoning over aggregated Web data is useful, for example: to infer new assertions 
+using terminological knowledge from ontologies and therefore provide a
+more complete dataset; to unite fractured knowledge about individuals collected
+from disparate sources; and to execute mappings between domain descriptions
+and therefore provide translations from one conceptual model to another. Our
+work on reasoning is motivated by the requirements of the Semantic Web Search
+Engine (SWSE) project1, within which we strive to oﬀer search, querying and
+browsing over the Semantic Web.
+
+Reasoning on Web data poses a number of requirements:
+
+– the system has to perform on web-scale, with implications on the completeness 
+of the reasoning procedure, algorithms and optimisations
+
+(cid:2) This work has been supported by Science Foundation Ireland (SFI/02/CE1/I131),
+European FP6 project inContext (IST-034718) and COST Action “Agreement Tech-
+nologies” (IC0801).
+
+1 http://swse.deri.org/
+
+J. Domingue and C. Anutariya (Eds.): ASWC 2008, LNCS 5367, pp. 76–90, 2008.
+c(cid:2) Springer-Verlag Berlin Heidelberg 2008
+
+SAOR: Authoritative Reasoning for the Web
+
+77
+
+– the method has to perform on collaboratively created knowledge bases, which
+
+has implications on trust and the privileges of data publishers
+
+– the web search scenario requires sub-second response times, which has implications 
+on the reasoning and query processing strategy
+
+We present SAOR – Scalable Authoritative OWL Reasoner – which focuses
+on performing best-eﬀort RDFS and OWL reasoning on Web data. SAOR is
+designed to accept as input a web knowledge-base in the form of a body of
+statements as produced by a web-crawl and to output by forward-chaining a
+knowledge-base enhanced by a given fragment of OWL reasoning. Discussion of
+the end consumption of such a reasoned knowledge-base is outside of the scope
+of this paper.
+
+Speciﬁcally, we make the following contributions in this paper:
+
+– We apply only a selected subset of OWL reasoning, to i) avoid an explosion
+of inferred statements and ii) to protect existing speciﬁcations from undesirable 
+contributions made in independent locations. Our system implements a
+positive fragment of OWL Full which has roots in ter Horst’s pD* [17] entailment.
+ We describe an analysis of the authority of sources to counter-act
+the highlighted problem of ontology hijacking in web data (Section 2).
+
+– We describe a scalable, optimised method for performing rule-based forward
+chaining reasoning through means of ﬁle-scan and lightweight dynamic data
+structures. In particular, our algorithm capitalises on the low volume of
+structural T-Box data relative to A-Box instance data (Section 3).
+
+– We show experimentally that a forward-chaining materialisation approach
+is feasible on Web data from 315k sources and in the order of 100m triples:
+with our conﬁned reasoning strategy we found that the knowledge base only
+roughly doubles in size (Section 4) by cautious materialisation.
+
+We discuss related work in Section 5 and conclude with Section 6.
+
+2 Pragmatic Inferencing for the Web
+
+We begin by stating a couple of observations regarding the feasibility of reasoning 
+on the Web. Firstly, most OWL data crawlable on the Web is OWL
+Full. Idealised assumptions made in OWL DL, such as disallowing subclassing
+or deﬁning subproperties of the OWL and RDF(S) vocabularies, are violated by
+even very commonly used ontologies2. Secondly, consistency cannot be expected
+on the Web. For instance, a past web-crawl of ours revealed the following:3
+
+<timbl> a foaf:Person; foaf:homepage <http://w3.org/> .
+<w3c> a foaf:Organization; foaf:homepage <http://w3.org/> .
+foaf:homepage a :InverseFunctionalProperty.
+foaf:Organization :disjointWith foaf:Person .
+
+2 E.g., one of the reasons why the commonly used FOAF vocabulary falls into OWL
+
+Full is that foaf:name is deﬁned as a subproperty of rdfs:label [19].
+
+3 Throughout this paper, we assume that http://www.w3.org/2002/07/owl# is the
+
+default namespace and use well understood preﬁxes for other namespaces.
+
+78
+
+A. Hogan, A. Harth, and A. Polleres
+
+These triples together infer that Tim Berners-Lee is the same as the W3C and
+cause an inconsistency. However, despite such examples which arise from misunderstanding 
+of the FOAF vocabulary, there might be cases where diﬀerent
+parties deliberately make contradictive statements.
+
+These two points already suggest that complete inference at the instance level
+is neither feasible nor desirable: ﬁrstly, for the computational infeasibility of
+complete OWL Full reasoning, and secondly, since we do not deem the explosive
+nature of contradiction in classical logics desirable in a Web reasoning scenario.
+Thus, rather than striving for complete inference, we adopt a “best eﬀort”
+
+reasoning strategy, optimising inference based on the following principles:
+
+1. We assume a separation of T-Box from A-Box.
+2. We trade completeness for implementational feasibility following a rulebased,
+ ﬁnite, forward-chaining approach to OWL inference.
+
+3. We trade completeness for producing a much smaller subset of inferred
+statements; i.e, we deliberately ignore (i) the explosive behaviour of classical 
+inconsistency, (ii) arguably “void” statements in terms of non-standard
+use of the RDF(S) and OWL vocabularies, (iii) non-authoritative T-Box
+statements.
+
+2.1 Separating A-Box from T-Box
+
+In SAOR, we separate terminological knowledge from assertional data according
+to their use of the RDF(S) and OWL vocabulary; we call these the “A-Box” and
+the “T-Box” respectively (loosely borrowing Description Logics terminology).
+
+Table 1 provides a list of graph patterns in RDF graphs we consider to be
+part of the T-Box. Note that when retrieving graphs from the Web, the instances
+of these patterns are all of the T-Box statements we consider in our reasoning
+process: triples that do not match one of these patterns are not considered being
+part of the T-Box, but are treated purely as assertional “data” triples.
+
+The materialisation of axiomatic statements and completing the entire TBox 
+may create a bulk of statements with little practical utility. In fact, we
+deliberately accept the omission of T-Box inference rather as an optimisation:
+we focus on answering queries over A-Box data rather than, e.g., inferring all
+members of :Class.
+
+SAOR does not support metamodelling, except by conceptually separating the
+instance- classor 
+property-meanings of a resource: by separating the T-Box and
+A-Box segment of the knowledge base, we do not support all possible entailments
+from the simultaneous description of both a class and an instance. Particularly,
+we treat URIs in the context they appear, in the spirit of “punning”4. We do
+subject the T-Box data to reasoning analogously to the A-Box, but only store
+results in the A-Box. For example, we do not carry over :sameAs inferences to
+the T-Box – this is in-line with ﬁrst-order-logic point of view, where equalities
+do not aﬀect predicates.
+
+We ﬁlter out further triples when extracting the T-Box; namely, we ignore
+nonstandard use of RDF in our reasoning eﬀorts. Non-standard use of RDF
+
+4
+
+http://www.w3.org/2007/OWL/wiki/Punning
+
+SAOR: Authoritative Reasoning for the Web
+
+79
+
+Table 1. Allowed T-Box constructs for each rule. Bold type indicates that the element
+must be authoritatively spoken for. Where they appear, at least one of the italic type
+elements must be authoritatively spoken for (see 2.3).
+
+No DL Syntax
+Corresponding RDF graph pattern
+01 C (cid:3) D
+?C rdfs:subClassOf ?D .
+02a C ≡ D
+?C :equivalentClass ?D .
+?C :equivalentClass ?D .
+02b
+03 P (cid:3) Q
+?P rdfs:subPropertyOf ?Q .
+04a P ≡ Q
+?P :equivalentProperty ?Q .
+?P :equivalentProperty ?Q .
+04b
+05a P ≡ Q−
+?P :inverseOf ?Q .
+?P :inverseOf ?Q .
+05b
+06 (cid:5) (cid:3) ∀P −.C ?P rdfs:domain ?C .
+07 (cid:5) (cid:3) ∀P.C
+?P rdfs:range ?C .
+08 P ≡ P −
+?P a :SymmetricProperty .
+09a ∃P.x
+?C :hasValue ?x; :onProperty ?P .
+?C :hasValue ?x; :onProperty ?P .
+09b
+10 C1 (cid:8) ... (cid:8) Cn ?C :unionOf (?C1 ... ?Ci ... ?Cn) .
+11a C1 (cid:9) ... (cid:9) Cn ?C :intersectionOf (?C1 ... ?Cn) .
+?C :intersectionOf (?C1 ... ?Cn) .
+11b
+12 (cid:5) (cid:3) ∀ ≤ 1P ?P a :FunctionalProperty .
+13 (cid:5) (cid:3) ∀ ≤ 1P − ?P a :InverseFunctionalProperty .
+14 P + (cid:3) P
+15 ∃P.D
+16 ∀P.D
+17a (≤ 1P )
+17b (= 1P )
+18 {xi....xn}
+
+?P a :TransitiveProperty .
+?C :someValuesFrom ?D; :onProperty ?P .
+?C :allValuesFrom ?D; :onProperty ?P .
+?C :maxCardinality 1; :onProperty ?P .
+?C :cardinality 1; :onProperty ?P .
+?C :oneOf (?x1 ... ?xN) .
+
+brieﬂy equates to the use of properties and classes which make up the RDF(S)
+vocabulary in locations where they have not been intended, cf.
+[2,13]. We
+adapt the deﬁnition of non-standard use for our purposes and only restrict
+the usage of the vocabulary for the T-Box: let P = { rdf:type, rdf:domain,
+
+:someValuesFrom,
+
+rdf:range, rdfs:subClassOf, rdfs:subPropertyOf, :equivalentClass, :equivalentProperty,
+ :inverseOf, :onProperty, :hasValue,
+:allValuesFrom, :intersectionOf, :unionOf, :maxCardinality, :cardinality,
+:oneOf
+:TransitiveProperty, :SymmetricProperty
+
+}, and C = { :FunctionalProperty, :InverseFunctionalProperty,
+}. We omit from the T-Box any
+triples with non-standard use of the properties and classes in P ∪ C, that is,
+triples where properties in P appear in a position other than the predicate
+position or where classes in C appear in a position other than the object of an
+rdf:type triple.
+In summary, our view of a web knowledge base KB consists of the RDF merge
+of a set of source graphs. KB is separated into a T-Box T mentioning classes
+and properties CKB and PKB and an A-Box A consisting of class and property
+membership assertions possibly using identiﬁers in CKB ∪ PKB.
+
+2.2 Rule-Based OWL Reasoning
+
+Reasoning in SAOR is inspired by previous approaches, particularly the pD*
+fragment deﬁned by ter Horst [17], to cover large parts of OWL by positive
+inference rules which can be implemented in a forward-chaining engine.
+
+Table 2 lists all of the currently supported rules. Although certain triples
+matched in the antecedents come from the T-Box and others come from the
+
+80
+
+A. Hogan, A. Harth, and A. Polleres
+
+Table 2. Supported rules with N3-style syntax used for triple patterns with T-Box
+statements italicised and A-Box in plain font
+
+DL Syntax
+
+Rule
+?C rdfs:subClassOf ?D . ?s a ?C . ⇒ ?s a ?D .
+01 C (cid:3) D
+?C :equivalentClass ?D . ?s a ?C .⇒ ?s a ?D .
+02a C ≡ D
+?C :equivalentClass ?D . ?s a ?D .⇒ ?s a ?C .
+02b
+?P rdfs:subPropertyOf ?Q . ?s ?P ?o . ⇒ ?s ?Q ?o .
+03 P (cid:3) Q
+?P :equivalentProperty ?Q . ?s ?P ?o . ⇒ ?s ?Q ?o .
+04a P ≡ Q
+?P :equivalentProperty ?Q . ?s ?Q ?o . ⇒ ?s ?P ?o .
+04b
+?P :inverseOf ?Q . ?s ?P ?o . ⇒ ?o ?Q ?s .
+05a P ≡ Q−
+?P :inverseOf ?Q . ?s ?Q ?o . ⇒ ?o ?P ?s .
+05b
+06 (cid:5) (cid:3) ∀P −.C ?P rdfs:domain ?C . ?s ?P ?o . ⇒ ?s a ?C .
+?P rdfs:range ?C . ?s ?P ?o . ⇒ ?o a ?C .
+07 (cid:5) (cid:3) ∀P.C
+?P a :SymmetricProperty . ?s ?P ?o . ⇒ ?o ?P ?s .
+08 P ≡ P −
+09a ∃P.x
+?C :hasValue ?x; :onProperty ?P . ?y ?P ?x . ⇒ ?y a ?C .
+?C :hasValue ?x; :onProperty ?P . ?y a ?C . ⇒ ?y ?P ?x .
+09b
+10 C1 (cid:8) ... (cid:8) Cn ?C :unionOf (?C1 ... ?Ci ... ?Cn) . ?x a ?Ci
+11a C1 (cid:9) ... (cid:9) Cn ?C :intersectionOf (?C1 ... ?Cn) . ?y a ?C . ⇒ ?y a ?C1, ..., ?Cn .
+?C :intersectionOf (?C1 ... ?Cn) . ?y a ?C1, ..., ?Cn . ⇒ ?y a ?C .
+11b
+12 (cid:5) (cid:3) ∀ ≤ 1P ?P a :FunctionalProperty . ?s ?P ?x , ?y . ⇒ ?x :sameAs ?y .
+?P a :InverseFunctionalProperty . ?x ?P ?o . ?y ?P ?o . ⇒ ?x :sameAs ?y .
+13 (cid:5) (cid:3) ∀ ≤ 1P −
+14 P + (cid:3) P
+?P a :TransitiveProperty . ?x ?P ?y . ?y ?P ?z . ⇒ ?x ?P ?z .
+15 ∃P.D
+?C :someValuesFrom ?D; :onProperty ?P . ?x ?P ?y . ?y a ?D . ⇒ ?x a ?C .
+16 ∀P.D
+?C :allValuesFrom ?D; :onProperty ?P . ?x ?P ?y; a ?C . ⇒ ?y a ?D .
+?C :maxCardinality 1; :onProperty ?P . ?x a ?C; ?P ?y, ?z . ⇒ ?y :sameAs ?z .
+17a (≤ 1P )
+?C :cardinality 1; :onProperty ?P . ?x a ?C; ?P ?y, ?z . ⇒ ?y :sameAs ?z .
+17b (= 1P )
+?C :oneOf (?o1 ... ?on) . ⇒ ?o1 ... ?on a ?C .
+18 {oi....on}
+?x :sameAs ?y . ?x ?p ?o .⇒ ?y ?p ?o .
+19a x = y
+?x :sameAs ?y . ?s ?p ?x .⇒ ?s ?p ?y .
+19b
+?x :sameAs ?y . ⇒ ?y :sameAs ?x .
+19c
+?x :sameAs ?y . ?y :sameAs ?z . ⇒ ?x :sameAs ?z .
+19d
+
+. ⇒ ?x a ?C .
+
+5
+
+A-Box, in contrast to ter Horst’s original rules, inferences are stored in the
+A-Box only. Thus, on exhaustive application of the rules, the T-Box remains
+unchanged.
+
+Next, we only support inferences in one direction for :someValuesFrom and
+:allValuesFrom, as we do not apply any inference rules that involve invention of
+new blank nodes. Like ter Horst, we do not support inequalities or disjointness;
+i.e., SAOR operates monotonically without “explosive” reaction in inconsistency.
+In addition to pD* we support functional cardinality constraints, as well as
+limited support for enumerated classes (:oneOf).
+
+Some of the rules in SAOR diﬀer from their versions in pD*, e.g. (05a,b),
+(19a,b). The alert reader may also miss rules to infer transitivity of rdfs:subClassOf,
+ rdfs:subPropertyOf, :equivalentClass, :equivalentProperty as
+well as symmetry of the equivalence and inverse-of properties. Whereas symmetry 
+is covered by symmetric rules (02a,b), (04a,b), (05a,b), transitivity is handled 
+by SAOR via path traversals over internal data structures representing
+the subclass and subproperty hierarchies, following the RDF ground entailment
+algorithm outlined in [13].
+
+Note that SAOR does not materialise any axiomatic triples [8]. Axiomatic
+A-Box statements are not produced by SAOR so as to avoid a bulk of syntactic 
+statements (for example, rdf:type rdf:Resource statements and reﬂexive
+:sameAs statements). Axiomatic T-Box statements are not considered as we
+5 ?Ci ∈ {?C1, ..., ?Cn}
+
+SAOR: Authoritative Reasoning for the Web
+
+81
+
+have a concretely deﬁned T-Box which is extracted by means of a single scan
+and does not support updates.
+
+Finally, let us point out that there is good reason for excluding non-standard
+usage of the ontology vocabulary: non-standard RDF could have unpredictable
+results even under our simple rule-based entailment. One may consider a ﬁnite
+combination of only four non-standard triples that, upon naive reasoning, would
+explode all web resources R by inferring |R|3 triples, namely:
+
+rdfs:subClassOf rdfs:subPropertyOf rdfs:Resource.
+rdfs:subClassOf rdfs:subPropertyOf rdfs:subPropertyOf.
+rdf:type rdfs:subPropertyOf rdfs:subClassOf.
+rdfs:subClassOf rdf:type :SymmetricProperty.
+
+The exhaustive application of standard RDFS inference rules plus standard inference 
+rule for property symmetry together with the typical inference for class
+membership in rdfs:Resource for all collected resources in typical rulesets lead
+to inference of any possible triple (r1 r2 r3) for arbitrary r1, r2, r3 ∈ R.
+
+Having introduced our rule set, we are able to deﬁne our notion of closure.
+Deﬁnition 1 (Closure). We denote by ClT (A) the closure of A, i.e., the union
+of A with the set of statements inferred by exhaustive application of rules (01)-
+(19) from Table 2 with respect to T-Box T .
+
+2.3 Authoritative Reasoning against Ontology Hijacking
+
+SAOR is designed to counter-act a behaviour we discovered from initial evaluation 
+which we term ontology hijacking. We counter such non-authoritative extensions 
+of ontologies by ignoring problematic statements during T-Box generation.
+Before deﬁning ontology hijacking, let us give some preliminary deﬁnitions:
+
+Deﬁnition 2 (Authoritative Source)
+
+A graph s ∈ KB speaks authoritatively about a concept c ∈ CKB ∪ PKB if c
+
+appears in a triple of s and one of the following holds true:
+
+1. c is not identiﬁed by a URI (i.e., identiﬁed by a blank node)
+2. s is retrievable from a URI which coincides with (or redirects to) the namespace6 
+of the URI identifying c.
+
+Let s ∈ KB = (T ,A) and KB(cid:12)
+
+Firstly, all sources are authoritative for anonymous classes or properties deﬁned
+in that source. The second condition is designed to support best practices as
+currently adopted by web ontology publishers7.
+= (T (cid:12),A(cid:12)) = KB \ {s} be the knowledge base
+constructed from all graphs in KB except s. By Ontology Hijacking we now mean
+that a source s speaks non-authoritatively about a concept c ∈ CKB ∪ PKB (i.e.,
+where c appears in T (cid:12)), in such a way that ClT (A(cid:12)) (cid:4)= ClT (cid:2)(A(cid:12)).
+
+Ontology hijacking is the re-deﬁnition or extension of a deﬁnition of a legacy
+concept (class or property) in a non-authoritative source such that performing
+
+6 Here, slightly abusing XML terminology by “namespace” of a URI we mean the
+
+preﬁx of the URI obtained from stripping oﬀ the ﬁnal NCname.
+7 See Appendix A&B of http://www.w3.org/TR/swbp-vocab-pub/
+
+82
+
+A. Hogan, A. Harth, and A. Polleres
+
+reasoning on legacy A-Box data results in a change in inferencing. One particular
+method of ontology hijacking is deﬁning new super-concepts of legacy concepts.
+As a concrete example, if one were to publish today a property in an ontology
+(in a non-authoritative location for FOAF), my:name, within which the following
+was stated: foaf:name rdfs:subClassOf my:name ., that person would be hijacking 
+the foaf:name property and eﬀecting the translation of all foaf:name
+statements in the web knowledge base into my:name statements as well.
+
+Ontology hijacking is problematic in that it vastly increases the amount of
+statements that are materialised and can potentially harm inferencing on data
+contributed by other parties. With respect to materialisation, the former issue
+becomes prominent: instance data published using concepts from popular/core
+ontologies get translated into a plethora of conceptual models described in obscure 
+ontologies; we quantify the problem in Section 4. However, taking precautions 
+against harmful ontology hijacking is growing more and more important as
+the Semantic Web features more and more attention; motivation for spamming
+and other malicious activity propagates amongst certain parties with ontology
+hijacking being a prospective avenue. With this in mind, we assign sole responsibility 
+for the concepts and thus the semantics of their instances of the concepts
+to those who maintain the authoritative speciﬁcation.
+
+Related to the idea of ontology highjacking is the idea of “non-conservative
+extension” described in the Description Logics literature: cf.
+[11]. However, the
+notion of a conservative extension was deﬁned with a slightly diﬀerent objective
+in mind: according to the notion of deductively conservative extensions, an ontology 
+OB is only considered malicious towards OA if it causes additional inferences
+with respect to the intersection of the signature of the original OA with the newly
+inferred statements. Returning to the ex:myName example from above, the superclassing 
+of foaf:Name alone would still constitute a conservative extension. However,
+ further stating that ex:myName a :InversefunctionalProperty. would
+indeed violate the conservative extension property, since instances of ex:myName
+might then cause equalities in other remote ontologies as side-eﬀects, independent 
+from the newly deﬁned signature. Summarising, we can state that every
+non-conservative extension (with respect to our notion of deductive closure)
+constitutes a case of ontology highjacking, but not vice versa.
+
+In SAOR, we avoid the eﬀects of ontology hijacking and non-conservative
+extensions by disregarding possibly harmful nonauthoritative use of concepts
+directly during T-Box construction. Table 1 shows how non-authoritative statements 
+are disregarded upon T-Box construction. The source containing the concept 
+description must be authoritative for the elements highlighted in boldface.
+Where multiple elements are italicised, at least one such element must be authoritatively 
+spoken for. One can verify from Table 1 and Table 2 that, in the
+antecedent of each rule, the T-Box axioms must be authoritative for at least one
+of the class/property names appearing in the A-Box. Thereby, we protect ABox 
+reasoning from the inﬂuence of non-authoritative T-Box axioms. For Rules
+02, 04, 05, 09 & 11 if the given source of data is only authoritative for one
+element, inferencing will only be executed in the direction “away” from that element.
+ For example, for the statements foaf:Person :equivalentClass ex:NewClass 
+. ex:NewClass :equivalentClass foaf:Person . described in a source only
+
+SAOR: Authoritative Reasoning for the Web
+
+83
+
+authoritative for the ex: namespace, inferencing will only translate ex:NewClass
+instances into foaf:Person and not in the other direction.
+
+When publishing OWL or RDFS descriptions on the Web, we recommend
+that people avoid ontology-hijacking as deﬁned in this section. We encourage
+extension of existing concepts where possible so that instance data in the newly
+published domain get translated into existing domains. Indeed, from brief analysis 
+of some prominent speciﬁcations (speciﬁcally FOAF, DC, SIOC, SKOS), we
+found that they were entirely compliant with our restrictive reasoning.
+
+3 Reasoning Algorithm
+
+In the following we ﬁrstly present observations on web data that inﬂuenced the
+design of the algorithm, then give an overview of the algorithm, and next discuss
+details of how we handle T-Box information, perform statement-wise reasoning,
+and deal with ground equality.
+
+3.1 Characteristics of Web Data
+
+The design of our algorithm is motivated by observations on our Web dataset:
+
+1. Reasoning accesses a large slice of data in the index: around 41% of statements 
+produced uniquely inferred statements.
+
+2. Relative to A-Box data, the volume of T-Box data on the Web is small: only
+
+around 2.5% of statements were classiﬁable as T-Box statements8.
+
+3. The T-Box is the most frequently accessed segment of data for reasoning:
+
+all but Rules 19a−d (:sameAs) require access to T-Box information.
+
+Following from the ﬁrst observation, we employ a ﬁle-scan approach which
+is more eﬃcient in this scenario than query processing lookups. Thus, we avoid
+the overhead of indexing the data and running full query processing; also we
+avoid probing the same statements repeatedly for diﬀerent rules at the low cost
+of scanning a given percentage of statements not useful for reasoning.
+
+Following from the second and third observations, we optimise by placing
+T-Box data in a separate data structure accessible by the reasoning engine. Currently,
+ we hold the T-Box data in-memory, but the algorithm can be generalised
+to provide for an on-disk structure or a distributed in-memory structure as needs
+require.
+
+3.2 Algorithm Overview
+
+The algorithm involves three scans over the data as illustrated in Figure 1:
+
+1. SCAN 1: separate T-Box information and build in-memory representation
+2. PRE SCAN 2: execute rules with only T-Box patterns in the antecedent
+
+(Rule 18)
+
+3. SCAN 2: perform reasoning in a statement-wise manner:
+
+8 Includes RDF collection fragments which may not be part of a class description.
+
+84
+
+A. Hogan, A. Harth, and A. Polleres
+
+Source
+
+Statements
+
+SCAN 1
+
+Separate
+
+TBox
+
+SCAN 2
+
+SCAN 3
+
+SCAN 3
+
+Consolidate
+
+Statementwise
+
+
+Reasoning
+
+Inferred
+
+Statements
+
+Final
+Output
+
+TBox
+
+Join
+
+Hashtables
+
+Equality
+Index
+
+Fig. 1. High-level architecture
+
+– Execute rules with only a single A-Box pattern in the antecedent (Rules
+1-11a); join A-Box statement with in-memory T-Box; write inferred
+statements immediately.
+
+– Execute rules with two or more A-Box patterns in the antecedent (Rules
+11b-17); join indices are maintained for such A-Box patterns. When a
+statement matches one of the A-Box patterns for these rules and the
+necessary T-Box join exists, the statement is written to the join index
+and the join index is checked to see if all other A-Box patterns have been
+previously satisﬁed; if they have, the rule is ﬁred.
+
+– Execute rules which involve equality reasoning (Rules 19a−d); lists of
+equivalent individuals are maintained in a hashtable structure (equality
+index). Newly identiﬁed equivalences are immediately reﬂected in the
+join indices for Rules 11b-17 whereby new A-Box joins may form and ﬁre
+rules.
+
+4. SCAN 3: consolidate source data along with inferred statements according
+
+to the equality index and write to ﬁnal output.
+
+3.3 Handling Structural Data
+
+In the following, we describe how to separate the T-Box data and how to create
+the data structures for representing the T-Box.
+
+T-Box data from RDFS and OWL speciﬁcations can be acquired either from
+conventional crawling techniques, or by accessing the locations indicated by the
+dereferenced URIs of classes and properties in the instance data. We assume
+for brevity that all T-Box data are already present in the input data. If T-Box
+data are sourced via diﬀerent means we can build an in-memory representation
+directly, without requiring the ﬁrst scan of the input data.
+
+During the scan, all statements relating to the supported T-Box constructs are
+identiﬁed and stored in an in-memory representation of classes and properties.
+The data structure holds the necessary information to infer new statements
+given a class or role membership assertion from the A-Box. We employ separate
+hashtables with URIs as keys and values containing a Java representation of the
+classes or properties, as follows:
+
+SAOR: Authoritative Reasoning for the Web
+
+85
+
+– Property objects contain the property URI and references to objects representing 
+equivalent properties, super properties, inverse properties, domain
+classes and range classes. Pointers are also kept to restrictions where the
+property in question is the object of an :onProperty statement.
+
+– Class objects contain the class URI and references to objects representing
+equivalent classes, super classes and classes for which this class is a component 
+of a union or intersection. On top of these core elements, diﬀerent types
+of objects are created for diﬀerent types of class description:
+• union and intersection classes store references to their constituent class
+• enumerated classes store references to constituent individuals
+• restriction classes store a reference to the property the restriction applies
+
+objects
+
+to and also, as applicable to the type of restriction:
+∗ the :cardinality or :maxCardinality value
+∗ the class identiﬁed by :allValuesFrom or :someValuesFrom
+∗ the value of a :hasValue restriction
+
+Some class descriptions rely on the rdf:Collection construct, namely:
+unions,
+intersections and enumerations. To construct in-memory representations 
+of these descriptions, the algorithm performs in-memory joining of
+rdf:Collection segments as the data are scanned according to rdf:first and
+rdf:rest properties. Any collections not relevant to the T-Box segment of the
+knowledge base are discarded at the end of loading the input data.
+
+For each statement, the authority of the source for the given subject and
+object are inspected. If the statement is allowed as enumerated in Table 1, the
+statement is added to the T-Box.
+
+3.4 Reasoning by Statement-Wise Scan
+
+Having loaded the structural data, the SAOR engine is now prepared for reasoning 
+by statement-wise scan of the data.
+
+We ﬁrstly analyse rules which do not require A-Box joins to compute. There
+are two distinct types of statements which require diﬀerent handling, namely
+rdf:type statements and general non-rdf:type statements. The rdf:type
+statements are subject to class-based entailment reasoning (Rules 1-2 & 9b-11a :
+rules with a single rdf:type A-Box pattern), and require joins with class descriptions 
+in the T-Box. The non-rdf:type statements are subject to property-based
+entailments (Rules 3-9a : rules with a single non-rdf:type A-Box pattern) and
+thus require joins with T-Box property descriptions.
+
+We assume disjointness between the statement categories: we know that the
+deﬁned semantics of rdf:type do not require any property-based entailment and
+we further do not allow any external extension of the core rdf:type semantics
+(non-standard use). Thus, we do not subject rdf:type statements to entailment
+of Rules 3-9a.
+
+The reasoning scan process can be described as recursive depth-ﬁrst reasoning
+whereby each unique statement produced is input immediately for reasoning.
+Statements produced thus far for the original input statement are kept in a set
+to provide uniqueness testing and avoid cycles; a uniquing function is maintained
+
+86
+
+A. Hogan, A. Harth, and A. Polleres
+
+on a resource level ensuring that statements are only produced once for a given
+common subject group. Once all of the statements produced by a rule have
+been themselves recursively analysed, the reasoner moves on to analysing the
+proceeding rule.
+
+Rules 11b-17 cannot be computed solely on a statement-wise basis. Instead, for
+each rule, we assign an on-disk persistent data structure with an in-memory MRU
+cache. Each index stores a representation of statements which may contribute
+to satisfying the antecedent of its pertinent rule. During the scan, if a statement
+satisﬁes the necessary T-Box join for a rule, it is written to the index for that
+rule. When a statement is added which completes the pattern of an antecedent
+for that rule, the rule is ﬁred.
+
+3.5 Equality Reasoning
+In the following we discussed :sameAs entailment as encoded in Rules 19a−d of
+Table 2. For Rules 19a,b, we employ an in-memory index for storing equivalence
+of individuals. We store the identiﬁers for equivalent individuals in lists and also
+store the lists which individuals are in using a hashtable. Thus, we can perform
+a lookup for an individual in the hashtable to get a reference to a list of equivalent 
+individuals. The list structure maintains the transitivity and symmetric
+properties of equivalence. Usually, :sameAs entailment on individuals results in
+multiple individuals with the same data attached; however, we select a “pivot
+element” to reduce the number of inferred statements. The pivot element of each
+list is used to keep a consistent identiﬁer for the set of equivalent individuals:
+the ﬁrst one encountered is chosen. For alternative choices of pivot identiﬁers on
+web data see [9]. We use the pivot identiﬁer to consolidate data by rewriting all
+occurrences of equivalent identiﬁers to the pivot identiﬁer (eﬀectively merging
+the equivalent set into one individual).
+
+The in-memory equivalence index is ﬁlled from raw input :sameAs statements
+and also from inferencing performed on Rules 12, 13 and 17. For the purposes of
+the A-Box scan, we need not be immediately concerned about equality reasoning
+for closure: no joins are present on the individual level. However, for the join index 
+reasoning, equality reasoning is paramount for closure. The join indices are
+immediately updated to reﬂect new equality knowledge; identiﬁers for equivalent
+individuals are rewritten to their pivot identiﬁers are soon as equivalence is determined.
+ Rewriting of indices can lead to new inferences whereby the rewritten
+identiﬁers align under the pivot identiﬁer to form a new join, thus ﬁring a rule.
+Based on the equivalence knowledge attained during the second scan, the inferred 
+output and input data are ﬁnally scanned once more to ensure proper
+consolidation. All statements are rewritten so that they only contain pivot identiﬁers,
+ producing the ﬁnal output.
+
+4 Evaluation and Discussion
+
+We now provide evaluation of the SAOR methodology, ﬁrstly with quantitative
+analysis of the importance of authoritative reasoning, and secondly we provide
+some performance measurements, discussion and some insights into the fecundity
+
+SAOR: Authoritative Reasoning for the Web
+
+87
+
+of each rule wrt. reasoning over web data. Throughout, we use a 106M statement
+web-crawl dataset from mid-April 2008, taken from 315k sources.
+
+To show the eﬀects of ontology hijacking we constructed two T-Boxes with and
+without authoritative analysis. We then ran reasoning on single membership assertions 
+for the top ﬁve classes and properties found natively in our dataset. Table
+3 summarises the results. Taking foaf:Person as an example, with an authoritative 
+T-Box, six statements are output for every input rdf:type foaf:Person
+statement. With the non-authoritative T-Box, 362 statements are output for every 
+such input statement. Considering that there are 2.4M such statements in
+the input dataset, overall output for rdf:type foaf:Person input statements
+alone approach 1 billion statements for non-authoritative reasoning. With authoritative 
+reasoning, we only produce 14M output statements: a 64.8x savings
+on materialised statements.
+
+Table 3. Comparison of authoritative and non-authoritative reasoning for the number
+of inferred statements produced w.r.t. the ﬁve most frequently occurring classes and
+properties in the input data
+
+A NA
+n ∗ NA
+Class URI
+0
+908,036,384
+http://purl.org/rss/1.0/item
+6
+937,618,759
+http://xmlns.com/foaf/0.1/Person
+1
+531,481,860
+http://xmlns.com/foaf/0.1/Document
+0
+258,989,940
+http://xmlns.com/wordnet/1.6/Person
+0
+0
+http://xmlns.com/foaf/0.1/chatEvent
+7 1,336 8,652,807 15,959,118 2,636,126,943
+TOTAL
+A NA
+n ∗ NA
+Property URI
+250 4,222,957
+0
+0 1,055,739,250
+http://purl.org/dc/elements/1.1/title
+664 3,753,791 18,768,955 2,492,517,224
+5
+http://xmlns.com/foaf/0.1/name
+0
+625 3,677,251
+0 2,298,281,875
+http://purl.org/dc/elements/1.1/date
+0 1,975,166,921
+637 3,100,733
+http://xmlns.com/foaf/0.1/nick
+0
+http://purl.org/dc/elements/1.1/description 0
+631 30,138,087
+0 19,017,132,897
+5 2,807 44,892,819 18,768,955 26,838,838,167
+TOTAL
+
+n ∗ A
+356 2,550,664
+0
+389 2,410,331 14,461,986
+355 1,497,132 1,497,132
+0
+236 1,097,415
+0
+0 1,097,265
+n ∗ A
+
+n
+
+n
+
+We measured the performance of applying only the rules which do not require
+A-Box joins (1-11a) and for applying all rules. The results of the evaluation on a
+2.2 GhZ AMD Opteron machine with 3G of Java heap-space is shown in Figure
+2. Please note that the trend with respect to statements read/input statements
+processed is very similar to that presented for written statements/statements
+output. Also, please observe that applying rules without A-Box joins exhibits
+perfectly linear scaling behaviour, while using all rules slows down the algorithm
+after inferring about 120m output statements. For implementing the on-disk
+A-Box join indices we employ BerkeleyDB9, which slows down considerably if
+the index size exceeds a certain limit (depending on caching policy and main
+memory available to the JVM). We are currently investigating alternatives to
+dynamic data structures for Rules 11b-17.
+
+Table 4 lists the number of times the rules for a given primitive were ﬁred
+during reasoning over all rules. Interestingly, from Figure 2 and Table 4 we can
+deduce that the bulk of current web reasoning is covered by those rules (1-12a)
+which exhibit linear scale.
+9 http://www.oracle.com/database/berkeley-db/je/
+
+88
+
+A. Hogan, A. Harth, and A. Polleres
+
+all rules
+single A-Box pattern rules
+
+ 1000
+
+ 900
+
+ 800
+
+ 700
+
+ 600
+
+ 500
+
+ 400
+
+ 300
+
+ 200
+
+ 100
+
+d
+e
+s
+p
+a
+e
+
+l
+
+t
+
+ 
+s
+e
+u
+n
+m
+
+i
+
+ 0
+
+ 0
+
+ 20
+
+ 40
+
+ 60
+
+ 80
+
+ 100
+
+ 120
+
+ 140
+
+ 160
+
+million statements written
+
+Fig. 2. Performance of the inferencing algorithm
+
+Table 4. Count of number of statements inferred for each primitive
+
+No Primitive
+01 rdfs:subClassOf
+02 :equivalentClass
+03 rdfs:subPropertyOf
+04 :equivalentProperty
+05 :inverseOf
+06 rdfs:domain
+07 rdfs:range
+08 :SymmetricProperty
+09 :hasValue
+10 :unionOf
+11 :intersectionOf
+12 :FunctionalProperty
+13 :InverseFunctionalProperty
+14 :TransitiveProperty
+15 :someValuesFrom
+16 :allValuesFrom
+17 :cardinality
+18 :oneOf
+
+Inferred Count
+66,283,568
+7,325,048
+7,314,815
+6,943,803
+8,485,414
+29,850,430
+19,466,468
+458,467
+9,938
+5,676,861
+13,239
+15,218
+1,379,003
+2,862,631
+51,403
+460,031
+265
+5,898
+
+5 Related Work
+
+OWL reasoning, speciﬁcally Query Answering over OWL Full, is not tackled by
+typical DL Reasoners; such as FaCT++ [18], RACER [7] or Pellet [15]; which
+focus on complex reasoning tasks such as subsumption checking and provable
+completeness of reasoning. Likewise, KAON2 [12], which reports better results
+on query answering, is limited to OWL-DL expressivity due to completeness
+requirements. Despite being able to deal with complex ontologies in a complete
+manner, these systems are not tailored for the particular challenges of processing
+large amounts of RDF data.
+
+Conversely, incomplete (wrt. OWL Full) rule-based inference, as we advocate
+it in this paper, may be considered to have greater potential for scale. Several
+rule expressible non-standard OWL fragments; namely OWL-DLP [6], OWL− [5]
+(which is a slight extension of OWL DLP), OWLPrime [20], pD* [17], or
+intentional OWL [4, Section 9.3]; have been deﬁned in the literature and enable
+
+SAOR: Authoritative Reasoning for the Web
+
+89
+
+incomplete but sound RDFS and OWL inferences. Amongst those fragments,
+the fragment we support here is most closest to [17].
+
+Systems such as Triple [14], JESS10, or Jena11 support rule representable
+RDFS or OWL fragments as we do, but only work in-memory whereas our
+framework is focused on conducting scalable reasoning using persistent storage.
+Analogous to our approach, [3] introduce certain restrictions for axioms accepted 
+by a reasoning engine, however, lacking a rigorous treatment of acceptable
+axioms.
+
+The OWLIM [10] family of systems allows reasoning over a number of rulerepresentable 
+OWL fragments using the TRREE: Triple Reasoning and Rule
+Entailment Engine. Besides the in-memory version SwiftOWLIM, which uses
+TRREE, there is also a version oﬀering query-processing over a persistent image
+of the repository, BigOWLIM, which comes closest technically to our approach
+despite focusing on diﬀerent fragments of OWL, including those inferring inconsistencies.
+ Whereas similarly to BigOWLIM, we employ persistent materialisation 
+of inferred triples, our reasoning approach strictly focuses on sensible
+reasoning for web data; we only consider a positive fragment of OWL-Horst and
+analyse the authority of T-Box statements. We deliberately sacriﬁce logical completeness 
+for what we believe to be a more cautious, but still sound approach
+for the web data use-case.
+
+6 Conclusion and Future Work
+
+We have presented SAOR: a reasoning methodology for performing reasoning
+over Web data based on primitives known to scale. To keep the resulting knowledge 
+base manageable, both in size and quality, we made the following modiﬁcations 
+to traditional reasoning procedures:
+
+– allow only standard use of RDF and disallow metamodelling
+– allow extension of classes and properties only from authoritative sources (no
+
+ontology hijacking)
+
+– use pivot identiﬁers instead of full materialisation of equality
+We envision extensions to our system along two lines: scalability enhancements
+by replacing the dynamic on-disk data structure with a more scalable scans/sort
+approach and distributing the system using a hash-based placement or T-Box
+replication strategy.
+
+References
+
+1. Brickley, D., Guha, R.: Rdf vocabulary description language 1.0: Rdf schema. W3C
+
+Recommendation (February 2004), http://www.w3.org/TR/rdf-schema/
+
+2. de Bruijn, J., Heymans, S.: Logical foundations of (e)RDF(S): Complexity and
+reasoning. In: Aberer, K., Choi, K.-S., Noy, N., Allemang, D., Lee, K.-I., Nixon, L.,
+Golbeck, J., Mika, P., Maynard, D., Mizoguchi, R., Schreiber, G., Cudr´e-Mauroux,
+P. (eds.) ASWC 2007 and ISWC 2007. LNCS, vol. 4825, pp. 86–99. Springer,
+Heidelberg (2007)
+
+http://herzberg.ca.sandia.gov/
+
+10
+11 http://jena.sourceforge.net/
+
+90
+
+A. Hogan, A. Harth, and A. Polleres
+
+3. Cheng, G., Ge, W., Wu, H., Qu, Y.: Searching semantic web objects based on class
+
+hierarchies. In: Proceedings of Linked Data on the Web Workshop (2008)
+
+4. de Bruijn, J.: Semantic Web Language Layering with Ontologies, Rules, and MetaModeling.
+ PhD thesis, University of Innsbruck (2008)
+
+5. de Bruijn, J., Polleres, A., Lara, R., Fensel, D.: OWL
+
+−
+
+. Final draft d20.1v0.2,
+
+WSML (2005)
+
+6. Grosof, B., Horrocks, I., Volz, R., Decker, S.: Description logic programs: Combining 
+logic programs with description logic. In: 13th International Conference on
+World Wide Web (2004)
+
+7. Haarslev, V., M¨oller, R.: Racer: A core inference engine for the semantic web. In:
+
+International Workshop on Evaluation of Ontology-based Tools (2003)
+
+8. Hayes, P.: RDF Semantics. W3C Recommendation (February 2004),
+
+http://www.w3.org/TR/rdf-mt/
+
+9. Hogan, A., Harth, A., Decker, S.: Performing object consolidation on the semantic
+web data graph. In: 1st I3 Workshop: Identity, Identiﬁers, Identiﬁcation Workshop
+(2007)
+
+10. Kiryakov, A., Ognyanov, D., Manov, D.: Owlim - a pragmatic semantic repository
+for owl. In: Web Information Systems Engineering Workshops, New York, USA,
+November 2005. LNCS, pp. 182–192 (2005)
+
+11. Lutz, C., Walther, D., Wolter, F.: Conservative extensions in expressive description
+
+logics. In: Proc. of IJCAI-2007, pp. 453–459 (2007)
+
+12. Motik, B.: Reasoning in Description Logics using Resolution and Deductive
+Databases. PhD thesis, Forschungszentrum Informatik, Karlsruhe, Germany (2006)
+13. Mu˜noz, S., P´erez, J., Guti´errez, C.: Minimal deductive systems for rdf. In: Franconi,
+E., Kifer, M., May, W. (eds.) ESWC 2007. LNCS, vol. 4519, pp. 53–67. Springer,
+Heidelberg (2007)
+
+14. Sintek, M., Decker, S.: Triple - a query, inference, and transformation language
+for the semantic web. In: 1st International Semantic Web Conference, pp. 364–378
+(2002)
+
+15. Sirin, E., Parsia, B., Grau, B.C., Kalyanpur, A., Katz, Y.: Pellet: A practical owl-dl
+
+reasoner. Journal of Web Semantics 5(2), 51–53 (2007)
+
+16. Smith, M.K., Welty, C., McGuinness, D.L.: Owl web ontology language guide. In:
+
+W3C Recommendation (February 2004),
+http://www.w3.org/TR/owl-guide/
+
+17. ter Horst, H.J.: Combining RDF and part of owl with rules: Semantics, decidability,
+
+complexity. In: 4th International Semantic Web Conference, pp. 668–684 (2005)
+
+18. Tsarkov, D., Horrocks, I.: Fact++ description logic reasoner: System description.
+
+In: International Joint Conf. on Automated Reasoning, pp. 292–297 (2006)
+
+19. Wang, T.D., Parsia, B., Hendler, J.: A survey of the web ontology landscape. In:
+Cruz, I., Decker, S., Allemang, D., Preist, C., Schwabe, D., Mika, P., Uschold, M.,
+Aroyo, L.M. (eds.) ISWC 2006. LNCS, vol. 4273, pp. 682–694. Springer, Heidelberg
+(2006)
+
+20. Wu, Z., Eadon, G., Das, S., Chong, E.I., Kolovski, V., Annamalai, M., Srinivasan,
+ J.: Implementing an Inference Engine for RDFS/OWL Constructs and UserDeﬁned 
+Rules in Oracle. In: 24th International Conference on Data Engineering.
+IEEE, Los Alamitos (to appear, 2008)
+
+

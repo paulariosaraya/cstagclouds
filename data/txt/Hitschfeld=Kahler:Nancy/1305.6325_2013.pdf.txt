@@ -1,0 +1,1653 @@
+Multi-core computation of transfer matrices for strip
+
+lattices in the Potts model
+
+3
+1
+0
+2
+
+ 
+
+g
+u
+A
+4
+1
+
+ 
+
+ 
+ 
+]
+h
+p
+-
+p
+m
+o
+c
+.
+s
+c
+i
+s
+y
+h
+p
+[
+ 
+ 
+
+2
+v
+5
+2
+3
+6
+
+.
+
+5
+0
+3
+1
+:
+v
+i
+X
+r
+a
+
+Cristobal A. Navarro
+
+Fabrizio Canfora
+
+Nancy Hitschfeld
+
+Department of Computer Science
+
+Centro de Estudios cient´ıﬁcos (CECS)
+
+Department of Computer Science
+
+Universidad de Chile
+
+Santiago, Chile
+
+Email: crinavar@dcc.uchile.cl
+
+Valdivia, Chile
+
+Email: canfora@cecs.cl
+
+Universidad de Chile
+
+Santiago, Chile
+
+Email: nancy@dcc.uchile.cl
+
+Abstract—The transfer-matrix technique is a convenient way
+for studying strip lattices in the Potts model since the computational 
+costs depend just on the periodic part of the lattice
+and not on the whole. However, even when the cost is reduced,
+the transfer-matrix technique is still an NP-hard problem since
+the time T (|V |, |E|) needed to compute the matrix grows exponentially 
+as a function of the graph width. In this work,
+we present a parallel transfer-matrix implementation that scales
+performance under multi-core architectures. The construction
+of the matrix is based on several repetitions of the deletioncontraction 
+technique, allowing parallelism suitable to multi-core
+machines. Our experimental results show that the multi-core
+implementation achieves speedups of 3.7X with p = 4 processors
+and 5.7X with p = 8. The efﬁciency of the implementation lies
+between 60% and 95%, achieving the best balance of speedup and
+efﬁciency at p = 4 processors for actual multi-core architectures.
+The algorithm also takes advantage of the lattice symmetry,
+making the transfer matrix computation to run up to 2X faster
+than its non-symmetric counterpart and use up to a quarter of
+the original space.
+
+I.
+
+INTRODUCTION
+
+The Potts model [1] has been widely used to study physical
+phenomena of spin lattices such as phase transitions in the
+thermo-dynamical equilibrium. Topologies such as triangular,
+honeycomb, square, kagome among others are of high interest
+and are being studied frequently (see [2], [3], [4], [5]). When
+the number of possible spin states is set to q = 2, the Potts
+model becomes the classic Ising model [6] which has been
+solved analytically for the whole plane by Onsager [7]. Unfortunately,
+ for higher values of q no full-plane solution has been
+found yet. Therefore, studying strip lattices becomes a natural
+approach for achieving an exact but ﬁnite representation of
+the bidimensional plane. The wider the strip, the better the
+representation. Hopefully, by increasing the width enough,
+some properties of the full plane would emerge.
+
+One known technique for obtaining the partition function
+of a strip lattice is to compute a transfer matrix based on
+the periodic information of the system. One should be aware
+however that building the transfer matrix is not free of combinatorial 
+computations and exponential cost algorithms. In fact,
+the problem requires the computation of partition functions
+which are NP-hard problems [8].
+
+With the evolution of multi-core CPUs towards a higher
+amount of cores, parallel computing is not anymore limited
+to clusters or super-computing; workstations can also provide
+
+high performance computing. It is in this last category where
+most of the scientiﬁc community lies, therefore parallel implementations 
+for multi-core machines are the ones to have
+the biggest impact. Latest work in the ﬁeld of the Potts model
+has been focused on parallel probabilistic simulations [9], [10]
+and new sequential methods for computing the exact partition
+function of a lattice [11], [12], [13]. To the best of our knowledge,
+ there has not been published research regarding parallel
+multi-core performance of exact transfer-matrix algorithms in
+the Potts model. The closest related research regarding this
+subject has been the massive parallel GPU implementations
+of the Monte Carlo algorithms [9], [14], which is out of the
+scope of this research since they are not exact. Even when the
+exact methods have much higher cost than probabilistic ones,
+they are still important because one can obtain exact behavior
+of the thermo-dynamical properties of the system such as the
+free energy, magnetization and speciﬁc heat. Once the matrix
+is computed, it can be evaluated and operated as many times as
+needed. It is important then to provide a fast way for computing
+the matrix in its symbolic form and not numerically, since
+the latter would imply a whole re-computation of the transfer
+matrix each time a parameter is modiﬁed. In this work, we
+have achieved an implementation that computes the symbolic
+transfer matrix and scales performance as more processors are
+available. The implementation can also solve problems larger
+than the system’s available memory since it uses a secondary
+memory strategy, never storing the full matrix in memory.
+
+The paper is organized as follows: section (II) covers
+preliminary concepts as well as related work, sections (III)
+and (IV) explain the details of the algorithm and the additional
+optimizations to the implementation. In section (VI) we present
+experimental results such as run time, speedup, efﬁciency
+and knee, using different amount of processors. Section (VII)
+discusses our main results and concludes the impact of the
+work for practical usage.
+
+II. PRELIMINARIES AND RELATED WORK
+
+Let G = (V, E) be a lattice with |V | vertices, |E| edges
+and si be the state of a spin of G with i ∈ [1..q]. The Potts
+partition function Z(G, q, β) is deﬁned as
+
+Z(G, q, β) =Xr
+
+e−βh(Gr)
+
+(1)
+
+where β = 1
+KB T , KB is the Boltzmann constant and h(Gr)
+1. The Potts
+is the energy of the lattice at a given state Gr
+model deﬁnes the energy of a state Gr with the following
+Hamiltonian:
+
+h(Gr) = −J Xhi,ji∈Gr
+
+δsi,sj
+
+(2)
+
+Where hi, ji corresponds to the edge from vertex vi to vj,
+r ∈ [1..q|V |], J is the interaction energy (J < 0 for
+anti-ferromagnetic and J > 0 for ferromagnetic) and δsi,sj
+corresponds to the Kronecker delta evaluated at the pair of
+spins hi, ji with states si, sj and expressed as
+
+δsi,sj =(cid:26) 1
+
+0
+
+if si = sj
+if si 6= sj
+
+The free energy of the system is computed as:
+
+(3)
+
+(4)
+
+F = −T loge(Z)
+
+As the lattice becomes bigger in the number of vertices
+and edges, the computation of equation (1) becomes rapidly
+intractable with an exponential cost of Θ(q|V |). In practice,
+an equivalent recursive method is more convenient than the
+original deﬁnition.
+
+The deletion-contraction method, or DC method, was initially 
+used to compute the Tutte polynomial [15] and was then
+extended to the Potts model after the relation found between
+the two (see [16], [17]). DC re-deﬁnes Z(..) as the following
+recursive equation
+
+Z(G, q, v) = Z(G − e, q, v) + vZ(G/e, q, v)
+
+(5)
+G − e is the deletion operation, G/e is the contraction
+operation and the auxiliary variable v = e−βJ − 1 makes
+Z(..) a polynomial. There are three special cases when DC
+can perform a recursive step with linear cost:
+
+Z(G, q, v) =
+
+
+(q + v)Z(G/e, q, v);
+(1 + v)Z(G − e, q, v);
+q|V |;
+
+if {e} is a spike.
+if {e} is a loop.
+if E = {∅}.
+
+(6)
+The computational complexity of DC has a direct upper
+bound of O(2|E|). When |E| >> |V | a tighter bound is
+known based on the Fibonacci sequence complexity [18];
+O(( 1+√5
+)|V |+|E|). In general, the time complexity of DC can
+be written as
+
+2
+
+T (G) = min O(2|E|), O(cid:16) 1 + √5
+
+2
+
+(cid:17)|V |+|E|!
+
+(7)
+
+Haggard’s et al. [19] work is considered the best implementation 
+of DC for computing the Tutte polynomial for any given
+graph. Their algorithm, even when it is exponential in time,
+reduces the computation tree in the presence of loops, multiedges,
+ cycles and biconnected graphs (as one-step reductions).
+An important contribution by the authors is that by using a
+cache, some computations can be reused (i.e sub-graphs that
+are isomorphic to the ones stored in the cache do not need
+to be computed again). An alternative algorithm was proposed
+by Bj¨orklund et al.[20] which accomplishes exponential time
+
+1A state Gr is a distribution of spin values on the lattice. It can be seen as
+
+a graph with an speciﬁc combination of values on the vertices.
+
+only on the number of vertices; O(2nnO(1)) with n = |V |.
+Asymptotically their method is better than DC considering
+that many interesting lattices have more edges than vertices.
+However, Haggard et. al. [19] have stated that the memory
+usage of Bj¨orklund’s method is too high for practical usage.
+For the case of strip lattices, a full application of DC is not
+practicable since the exponential cost would grow as a function
+of the total amount of edges, making the computation rapidly
+intractable. The transfer matrix technique, mixed with DC is
+a better choice since the exponential cost will not depend on
+the total length of the strip, but instead just on the size of the
+period.
+
+As soon as the matrix is built, the remaining computations
+become numerical and less expensive; i.e., matrix multiplications 
+(for ﬁnite length) or eigenvalue computations (for inﬁnite
+length). Bedini et. al. [12] proposed a method for computing 
+the partition function of arbitrary graphs using a treedecomposed 
+transfer matrix. In their work, the authors obtain
+a sub-exponential algorithm based on arbitrary heuristics for
+ﬁnding a good tree decomposition of the graph. This method
+is the best known so far for arbitrary graphs, but when applied
+to strip lattices, it costs just as the traditional methods, i.e.,
+the tree-width becomes the width of the strip and the cost is
+proportional to the Catalan number of the width. Therefore,
+it is of interest to use parallelism in order to improve the
+performance of the transfer matrix problem when dealing with
+strip lattices.
+
+A strip lattice is by default a bidimensional graph G =
+(V, E) that is periodic at least along one dimension. It can be
+perceived as a concatenation of n subgraphs K sharing their
+boundary vertices and edges. Let P be the set of all possible
+strip lattices, then we formally deﬁne G:
+
+n
+
+G{V, E} ∈ P ⇔ ∃K = {V ′, E′} : G =
+
+K (8)
+
+O1
+
+N is the special operator for concatenating the periods deﬁned
+as Ki = (Ei, Vi) of height m. Each period connects to the
+other periods Ki−1 and Ki+1, except for K1 and Kn which
+are the external ones and connect to K2 and Kn−1 respectively
+(see Figure 1).
+
+Fig. 1: Strip lattice model with length n and width m.
+
+The main computational challenge when using a matrix
+transfer based algorithm is the cost of building it because
+its size increases exponentially as a function of the width of
+the strip. The problem of the matrix size has been improved
+by analytic techniques [21]. However, the authors specify that
+these techniques are only applicable to square and triangular
+lattices using values of q = 2 and q = 3 (Ising and three-state
+Potts respectively). For this reason, we prefer to use a more
+general transfer matrix based on its combinatorial aspects, with
+
+the advantage of being useful to any lattice topology, and
+allowing any value of q ∈ R.
+To the best of our knowledge, there is no mention on
+the effectiveness on parallelizing transfer matrix algorithms
+for strip lattices in the Potts model. The core of our work is
+to focus on the multi-core parallel capabilities of a practical
+transfer matrix method and conﬁrm or deny the factibility
+of such computation to run in parallel. In order to achieve
+parallelism, we use a transfer matrix algorithm based on a
+modiﬁed deletion-contraction (DC) scheme. It is in fact a
+partial DC that stops its recursion when the edges to be
+processed connect a pair of vertices of the next period. As a
+result, the partial DC generates many partial partition functions
+associated to combinatorial labels located at the leaves of the
+recursion tree. These partial partition functions, when grouped
+by their combinatorial label, make a row of the transfer matrix.
+A hash table is a good choice for searching and grouping terms
+in the combinatorial space of the problem.
+
+III. ALGORITHM OVERVIEW
+
+A. Data structure
+
+Our deﬁnition of K from section (II) (Figure 1) will be
+used to model our input data structure. Given any strip lattice
+G, only the right-most part of the strip lattice is needed, that
+is, Kn. We will refer to the data structure of Kn as Kσ1 to
+denote the basic case where the structure is equal to the original
+Kn, not having any additional modiﬁcation. For simplicity
+and consistency, we will use a top-down enumeration of the
+vertices, such that
+the left boundary contains the ﬁrst m
+vertices and the right boundary the last m ones. We will
+introduce the following naming scheme for left and right
+boundary vertices, this will be shared and external vertices,
+respectively. Shared vertices correspond to the left-most ones,
+i.e. the vertices that are shared with Kn−1 (see Figure 2) and
+are indexed top-down from 0 to m − 1. External vertices are
+the ones of the right side (i.e., the right end of the whole strip
+lattice) of Kσ1 and are indexed top-down from |V | − m − 1
+to |V | − 1.
+
+Fig. 2: Example data structure for a square lattice of width m = 3.
+
+B. Computing the transfer matrix M .
+
+Computing the transfer matrix M is a repetitive process
+that involves combinatorial operations over Kσ1. For a better
+explanation of the algorithm, we introduce two terminologies;
+initial conﬁgurations and terminal conﬁgurations. These conﬁgurations 
+deﬁne a combinatorial sequence of identiﬁcations
+for external and shared vertices, respectively, and correspond to
+the set of all non-crossing partitions. Given the lattice width
+m, the number of initial and terminal conﬁgurations is the
+sequence of the Catalan numbers:
+
+Cm =
+
+1
+
+m + 1(cid:18)2m
+
+m(cid:19) =
+
+(2m)!
+
+(m + 1)!m!
+
+=
+
+m
+
+Yk=2
+
+m + k
+
+k
+
+(9)
+
+Initial conﬁgurations, denoted σi with i ∈ [0..Cm − 1],
+deﬁne a combinatorial sequence of identiﬁcations just on the
+external vertices. The terminal conﬁgurations, denoted ϕj
+with j ∈ [0..Cm − 1], deﬁne a combinatorial sequence of
+identiﬁcations just on the shared vertices. Initial conﬁgurations
+generate terminal ones (using the DC method) but not vice
+versa. As stated before, Kσ1 is the basic case and matches Kn.
+That is, σ1 is the initial conﬁguration where no identiﬁcations
+are applied to the external vertices. It is equivalent as saying
+that σ1 is the empty partition of the Catalan set. Similarly,
+ϕ1 corresponds to the base case where no shared vertices are
+identiﬁed. In other words, ϕ1 is the empty conﬁguration for
+the Catalan set on the shared vertices. Additionally, initial and
+terminal conﬁgurations have a maximum of m vertices, and
+eventually will contain less vertices as more identiﬁcations are
+performed.
+
+The idea of the algorithm is to compute the transfer
+matrix M in rows, by repeatedly applying the partial DC,
+each time to a different initial conﬁguration Kσi, a total of
+Cm times. Each repetition contributes to a row of M . By
+default, the algorithm cannot know the Cm different sequences
+of terminal and initial conﬁgurations except for Kσ1 which
+is given as part of the input of the strip lattice and is the
+one that triggers the computation. This is indeed a problem
+for parallelization. To solve it, we use a recursive generator
+], s, H, S) that, with the help of a hash table H,
+g(A[
+generates all the Cm conﬁgurations and stores them in an array
+S. A[ ][ ] is an auxiliary array that stores the intermediate
+auxiliary subsequences and s is the accumulated sequence
+of identiﬁcations. Before the ﬁrst call of g(A[ ][ ], s, H, S),
+A = [[0, 1, 2, ..., m − 1]], s is null and H as well as S are
+empty. g(A[ ][ ], s, H, S) is deﬁned as:
+g (A [ ] [ ] , s , H, S ){
+r e t u r n
+
+i f ( ! a d d s e q u e n c e ( s , H, S ) )
+
+][
+
+f o r ( i n t k = 0 ; k<A. s i z e ( ) ; k ++){
+f o r ( i n t
+f o r ( i n t
+
+j <A[ k ] . s i z e ( ) ;
+i <j ;
+
+j = 1 ;
+i = 0 ;
+
+j ++){
+
+i ++){
+
+i f ( c a n i d e n t i f y (A[ k ] , i , j ) ){
+
+cA : = copy (A)
+c s
+: = copy ( s )
+i d e n t i f y ( cA , i , j , k , c s )
+d i v i d e ( cA , i , j , k )
+g ( cA , cs , H, S )
+
+}
+
+}}}
+
+}
+
+Basically, g(..) performs a three-way recursive division of the
+domain A. For each identiﬁcation pair i, j, the domain is
+partitioned into three sets; (1) the top vertices above i, (2) the
+middle vertices between i, j and (3) the vertices below j. If
+|j − i| < 3 then no set can be created in the middle. The same
+applies to the top and bottom sets if the distance from i or j
+to the boundary of the actual domain is less than 1. Each time
+a new identiﬁcation i, j is added, the resulting conﬁguration
+is checked in the hash table. If it is a new one, then it is
+added, otherwise it is discarded as well as further recursion
+computations starting from that conﬁguration. Thanks to the
+hash table, repetitive recursion branches are never computed.
+
+Once g(..) has ﬁnished, S becomes the array of all possible
+conﬁgurations and H is the hash that maps conﬁgurations to
+indices. At this point one is ready to start computing the matrix
+in parallel. We start dividing the total amount of rows by the
+amount of processors. Each processor will be computing a
+total of Cm/p rows. The initial conﬁguration sequence needed
+by each processor pi is obtained in parallel by reading from
+S[pi]. Once the conﬁguration is read, it is applied to the
+external vertices of its own local copy of the base case Kσ1.
+After each processor builds their corresponding Kσ′
+graph,
+each one performs a DC procedure in parallel, without any
+communication cost. This DC procedure is only partial because
+edges that connect two shared vertices must never be deleted
+neither contracted, otherwise one would be processing vertices
+and edges of the next period of the lattice, breaking the idea
+of a transfer matrix. An example of a partial DC is illustrated
+in Figure 3 for the case when computing the ﬁrst row.
+
+i
+
+If we apply a lexicographical order to each sequence, we can
+avoid checking properties (10) and (11).
+
+Each processor must group its partial expressions that share
+a common terminal conﬁguration, so that in the end there is
+only one ﬁnal expression zi,j(q, v) per terminal conﬁguration.
+The list of ﬁnal expressions associated to terminal conﬁgurations 
+represents one row of the transfer matrix. The ﬁnal
+expressions become the elements of the row and the terminal
+conﬁgurations are the keys for getting their respective column
+indices. The terminal conﬁguration sequence is necessary, but
+not sufﬁcient for knowing its index j in M . This is where H
+becomes useful for knowing with average O(1) cost what is the
+actual index j of a given terminal conﬁguration sequence. As a
+result, each thread ti can write their ﬁnal expressions zi,j(q, v)
+correctly into M . The main idea of the parallelization scheme
+can be illustrated by using Foster’s [22] four-step strategy
+for building parallel algorithms; partitioning, communication,
+agglomeration, mapping. Figure 4 shows an example using
+p = 2.
+
+Fig. 3: An example of how terminal conﬁgurations are generated
+
+from the basic one.
+
+When the DC procedure ends, there will be partial expressions
+associated to a remanent of the graph at each leaf of the
+recursion tree. Each remanent corresponds to the part of the
+graph that was not computed (i.e, edges connecting shared
+vertices) and it
+is identiﬁed by its terminal conﬁguration.
+Each one of these remanents speciﬁes one of the Cm possible
+terminal conﬁgurations that can exist. For some problems, not
+all terminal conﬁgurations are generated from a single DC, but
+only a subset of them. That is why the generator function is
+so much needed in order for the algorithm to work in parallel,
+otherwise there would be a time dependency among the DC
+repetitions.
+
+For each terminal conﬁguration ϕj, its key sequence is
+computed dynamically along the branch taken on the DC
+recursion tree; each contraction contributes with a pair of
+indices from the vertices. Consistent terminal conﬁgurations
+sequences are achieved by using a small algebra that combines
+the identiﬁcations from contractions, made on the shared
+vertices. An identiﬁcation of two shared vertices [vi, vj] will
+be denoted as πi,j. Each additional identiﬁcation adds up to
+the previous ones to ﬁnally form a sequence of a terminal
+conﬁguration πx1,y2 + πx2,y2 + ... + πxn,yn. The following
+properties hold true for sequences:
+
+πa,b = πb,a
+
+πa,b + πc,d = πc,d + πa,b
+πa,b + πb,c = πa,b,c
+
+(10)
+(11)
+(12)
+
+Fig. 4: The parallelism scheme under Foster’s four step design strategy 
+using two cores.
+
+Basically, the idea is to give a small amount of B consecutive
+rows to each processor (for example B = 2, 4, 8 or 16) with
+an offset of k = pB rows per processor. If the work per row
+is unbalanced, then processing is better to be asynchronous,
+handling the work by a master process. The asymptotic complexity 
+for computing M under the PRAM model using the
+CREW variation is upper-bounded by:
+
+T ( ~Z) = O(
+
+Cm
+p
+
+(min(2|E ′|, 1.6182|V ′|+|E ′|))
+
+(13)
+
+The complexity equals the cost of applying DC times Cm in
+parallel with p processors.
+When all processors end, the ﬁnal transfer matrix M is size
+Cm x Cm:
+
+M =(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)
+
+(14)
+
+(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)
+
+z1,1(q, v)
+z2,1(q, v)
+
+...
+
+zCm,1(q, v)
+
+z1,2(q, v)
+z2,2(q, v)
+
+...
+
+zCm,2(q, v)
+
+...
+...
+...
+...
+
+z1,Cm(q, v)
+z2,Cm(q, v)
+
+...
+
+zCm,Cm(q, v)
+
+If the strip lattice represents an inﬁnite band, then the next
+step is to make a numerical evaluation on q, v and study the
+eigenvalues of M . If the strip lattice is ﬁnite, then a initial
+condition vector ~Z1 is needed. In that case, M and ~Z1 together
+form a partition function vector ~Z based on the following
+recursion:
+
+~Z(n) = M ~Z(n − 1)
+By solving the recurrence, ~Z becomes:
+~Z = M n−1 ~Z1
+
+(15)
+
+(16)
+
+~Z1 is computed by applying DC to each one of the Cm
+terminal conﬁgurations:
+
+two terminal conﬁgurations ϕa and ϕb with keys πa1,...,an and
+πb1,...,bn respectively in the following way:
+
+~Z1 = (DC(Kϕ1), DC(Kϕ2 ), ..., DC(KϕCm ))
+
+(17)
+
+The computation of ~Z1 has very little impact on the overall
+cost of the algorithm. In fact the cost is practically O(m)
+because a terminal conﬁguration contains mostly spikes and/or
+loops, which are linear in cost. Moreover, terminal states
+can be computed even faster by using the serial and parallel
+optimizations, but it
+is often not required. Computing the
+powers of M n−1 should be done in a numerical context,
+otherwise memory usage will become intractable.
+
+Finally, the ﬁrst element of ~Z is the partition function of
+studied the strip lattice. After this point, ~Z is used to study a
+wide range of physical phenomena. ´Alvarez and Canfora et.
+al. [23] have reported new exact results for strip lattices such
+as the kagome of width m = 5 using the sequential version of
+this transfer matrix algorithm.
+
+IV. ALGORITHM IMPROVEMENTS
+
+A. Serial and Parallel paths
+
+The DC contraction procedure can be further optimized
+for graphs that present serial or parallel paths along their
+computation (see Figure 5).
+
+Fig. 5: Serial and parallel paths.
+
+Let va and vb be the ﬁrst and last vertices of a path, respectively.
+ A serial path s is a set of edges e1, e2, ..., en that
+connect sequentially n − 1 vertices between va and vb. It is
+possible to process a serial path of n edges in one recursion
+step by using the following expression;
+
+Z(K, q, v) =" (q + v)n − vn
+
+q
+
+#Z(K−s, q, v)+vnZ(K/s, q, v)
+
+(18)
+On the other hand, a parallel path p is a set of edges
+e1, e2, ..., en where each one connects redundantly va and vb,
+forming n possible paths between va and vb. It is also possible
+to process a parallel path of n edges in one recursion step by
+using the following expression;
+
+Z(K, q, v) = Z(K−p, q, v)+(cid:2)(1+v)n−1(cid:3)Z(K/p, q, v) (19)
+
+B. Lattice Symmetry
+
+A very important optimization is to detect the lattice’s
+symmetry when building the matrix. By detecting symmetry,
+the matrix size is signiﬁcantly lower because all symmetric
+pair of terminal states are grouped as one terminal state. As the
+width of the strip lattice increases, the number of symmetric
+states increases too, leading to matrices almost a half the
+dimension of the original M . We establish symmetry between
+
+πa1,...,an = πb1,...,bn ⇔ ai = (m − 1) − bn−i+1
+
+(20)
+
+Under symmetry, the resulting matrix has a different numerical
+sequence of sizes than the original M which obeyed the
+Calatan numbers. In this case, we denote the size of the matrix
+as D(m) and it is equal to:
+
+D(m) =
+
+Cm
+2
+
++
+
+m!
+2⌊ m
+2 ⌋!
+
+(21)
+
+As m grows, the Cm
+term increases faster than the second
+2
+term. For big values of m, D(m) ≈ Cm
+2 . Table (I) shows the
+rate at which a non-symmetric and symmetric matrix grows as
+m increases.
+
+TABLE I: Growth rate of the size of M under non-symmetric and
+
+symmetric cases.
+
+m
+2
+3
+4
+5
+6
+7
+8
+9
+10
+
+non-sym
+
+2
+5
+14
+42
+132
+429
+1430
+4862
+16796
+
+sym
+2
+4
+10
+26
+76
+232
+750
+2494
+8524
+
+V.
+
+IMPLEMENTATION
+
+We made two implementations of the parallel algorithm.
+One using OpenMP [24] and the other one using MPI [25]. We
+observed that the MPI implementation achieved better performance 
+than the OpenMP one and scaled better as the number
+of processors increased. For this, we decided to continue the
+research with the MPI implementation and have discarded the
+OpenMP one. We chose a value of B = 4 for the block-size
+(the amount of consecutive rows per process). The value was
+obtained experimentally by testing different values as powers
+of 2, in the range 1 − 64. As long as the parallelization is
+balanced a value of B > 1 is beneﬁcial. An important aspect
+of our implementation is that we make each process generate
+its own H table and S array. This small sacriﬁce in memory
+leads to better performance than if H and M were shared
+among all processes. There are mainly three reasons why the
+replication approach is better than the sharing approach: (1)
+caches will not have to deal with consistency of shared data,
+(2) the cost of communicating the data structures is saved
+and (3) the allocation of the replicated data will be correctly
+placed on memory when working under a NUMA architecture.
+The last claim is true because on NUMA systems memory
+allocations on a given process are automatically placed in its
+fastest location according to the processor of the CPU. It is
+responsibility of the OS (or make manual mapping) to stick the
+process to the same processor through the entire computation.
+
+The implementation saves each row to secondary memory
+as soon as it is computed. Each processor does this with its
+own ﬁle, therefore the matrix is fragmented into p ﬁles. This
+secondary memory strategy is not a problem because practical
+case shows that numerical evaluation is needed before using
+
+the matrix in its non-fragmented form. In fact, fragmented ﬁles
+allow parallel evaluation of the matrix easier. We will not cover
+numerical evaluation in our experiments because it is out of
+the scope of this work.
+
+VI. EXPERIMENTAL RESULTS
+
+We performed experimental tests for the parallel transfer
+matrix method implemented with MPI. The computer used for
+all tests is listed in table II.
+
+TABLE II: Hardware and tools used for experiments.
+
+Hardware
+CPU
+Mem
+MPI implementation
+
+Detail
+AMD FX-8350 8-core 4.0GHz
+8GB RAM DDR3 1333Mhz
+open-mpi
+
+Our experimental design consists of measuring the parallel
+performance of the implementation at computing the transfer
+matrix of two types of strip lattices (see Figure 6); (1) square
+and (2) kagome.
+
+Fig. 6: The two tests to be used for the experiments. The red part is
+
+the input for the program.
+
+A. Results on the square test
+
+For the test of the square lattice, we test 9 different strip
+widths in the range m ∈ [2, 10]. For each width, we measure
+8 average execution times, one for each value of p ∈ [1, 8].
+As a whole, we perform a total of 72 measurements for the
+square test. The standard error for the average execution times
+is below 5%. We also compute other performance measures
+such as speedup, efﬁciency and the knee [26]. In this tests, we
+made use of the lattice symmetry for all sizes of m.
+
+Figure 7 shows all four performance measures for the
+square lattice. From the results, we observe that
+there is
+speedup for every value of p as long as m > 4. For m ≤ 4, the
+problem is not large enough to justify parallel computation,
+hence the overhead from MPI makes the implementation
+perform worse than the sequential version. The plot of the
+execution times conﬁrms this behavior since the curves cross
+each other for m < 4. The maximum speedup obtained was
+5.7 when using p = 8 processors. From the lower left graphic
+we can see that efﬁciency decreases as p increases, which is
+expected in every parallel implementation. What is important
+is that for large enough problems (i.e., m > 6), efﬁciency is
+over 65% for all p. For the case of p = 4, we report 94% of
+efﬁciency, which is close to perfect linear speedup. For m ≤ 6,
+the implementation is not so efﬁcient because the amount of
+computation involved is not enough to keep all cores working
+
+at full capacity. The knee is useful for ﬁnding the optimal value
+of p for a balance between efﬁciency and computing time. It
+is called knee because the hint for the optimal value of p is
+located in the knee of the curve (thought as a leg), that is, its
+lower right part. In order to know the value of p suggested
+by the knee, one has to count the position of the closest point
+to the knee region, in reverse order. Our results of the knee
+for m > 6 show that the best balance of performance and
+efﬁciency is achieved with p = 4 (for m ≤ 6, the knee is
+not effective since there was no speedup in the ﬁrst place). In
+other words, while p = 8 is faster, it is not as efﬁcient as with
+p = 4.
+
+B. Results on the kagome test
+
+For the test of the kagome lattice, we used 5 different strip
+widths in the range m ∈ [2, 6]. For each width, we measured
+8 average execution times, one for each value of p ∈ [1, 8].
+As a whole, we performed a total of 40 measurements for
+the kagome test. The standard error for the average execution
+times is below 5%. Additional performance measures such as
+speedup, efﬁciency and knee have also been computed. In
+this test, we found that the block-size of B = 4 was a bad
+choice because the work per row was unbalanced. Instead,
+we found by experimentation that B = 1 makes the work
+assignation much more balanced. In this test we can only use
+lattice symmetry for m = 3, 5. We decided to run the whole
+benchmark without symmetry in order to maintain a consistent
+behavior for all values of m (but we will still report how it
+performs when using symmetry).
+
+Figure 8 shows the performance results for the kagome
+strip test. We observe that the performance of the kagome
+test is similar to that of the square test, but just a little lower
+because the deletion-contraction repetitions on the graph are
+not as balanced in computational cost as in the square test.
+Nevertheless, performance is still signiﬁcantly beneﬁcial and
+the maximum speedup is still 5.1X when p = 8 on the
+largest problems. When m > 5, the efﬁciency of the parallel
+implementation is over 60% for all values of p. In this test,
+the knee is harder to identify, but by looking into detail on the
+largest problems one can see a small curve that suggests p = 4
+which is in fact 90% efﬁcient when solving large problems.
+For the case of m = 4, the knee suggests p = 2 processors
+which is also 90% efﬁcient.
+
+When using symmetry on both tests, we observed an extra
+improvement in performance of up to 2X for the largest values
+of m. This improvement applies to both sequential and parallel
+execution. The size of the matrix transfer matrix is also improved 
+under symmetry, in the best cases we achieved almost
+half the dimension of the original matrix, which in practice
+traduces to 1/4 the space of the original non-symmetric matrix.
+Lattices as the kagome will only have certain values of m
+where it is symmetric. In the other cases, there is no other
+option but to do non-symmetric computation. For lattices such
+as the square lattice, symmetry is always present.
+
+C. Static vs dynamic scheduler
+
+The implementation used for all tests used a static scheduler,
+ hence the block-size B. We also implemented an alternative 
+version used a dynamic scheduler. The dynamic scheduler
+
+]
+s
+[
+ 
+
+e
+m
+
+i
+t
+
+y
+c
+n
+e
+c
+i
+f
+f
+
+i
+
+e
+
+ 10000
+
+ 1000
+
+ 100
+
+ 10
+
+ 1
+
+ 0.1
+
+ 0.01
+
+ 0.001
+
+ 0.0001
+
+ 1
+
+ 0.9
+
+ 0.8
+
+ 0.7
+
+ 0.6
+
+ 0.5
+
+ 0.4
+
+ 0.3
+
+ 0.2
+
+p=1
+p=2
+p=4
+p=8
+
+ 2
+
+ 3
+
+ 4
+
+ 5
+
+ 6
+
+m
+
+Efficiency (square)
+
+m=4
+m=6
+m=8
+m=10
+
+Runtime (square)
+
+Speedup (square)
+
+m=4
+m=6
+m=8
+m=10
+
+p
+u
+d
+e
+e
+p
+s
+
+ 6
+ 5.5
+ 5
+ 4.5
+ 4
+ 3.5
+ 3
+ 2.5
+ 2
+ 1.5
+ 1
+
+ 7
+
+ 8
+
+ 9
+
+ 10
+
+ 1
+
+ 2
+
+ 3
+
+ 4
+
+ 5
+
+ 6
+
+ 7
+
+ 8
+
+p
+
+Knee (square)
+
+m=4
+m=6
+m=8
+m=10
+
+]
+s
+[
+ 
+
+e
+m
+
+i
+t
+
+ 10000
+
+ 1000
+
+ 100
+
+ 10
+
+ 1
+
+ 0.1
+
+ 0.01
+
+ 0.001
+
+ 1
+
+ 2
+
+ 3
+
+ 4
+
+ 5
+
+ 6
+
+ 7
+
+ 8
+
+ 0.2
+
+ 0.3
+
+ 0.4
+
+ 0.5
+
+ 0.6
+
+ 0.7
+
+ 0.8
+
+ 0.9
+
+ 1
+
+p
+
+efficiency
+
+Fig. 7: Runtime, speedup, efﬁciency and knee for different sizes of the square strip lattice.
+
+was implemented by using a master process that handled
+the jobs to the worker processes. For all of our tests, the
+dynamic scheduler performed slower than the static scheduler.
+For extreme unbalanced problems, we think that the dynamic
+scheduler will play a more important role. For the moment,
+static scheduling is the best option as long as problems stay
+within a moderate range of work balance.
+
+with a higher amount of edges, such as the kagome lattice. In
+the kagome tests, the results were very similar to the ones of
+the square, but slightly lower because the problem becomes
+more unbalanced. A natural extrapolation of this behavior
+would suggest that very complex lattices will be even more
+unbalanced. We propose to use dynamic scheduling for such
+complex cases and static scheduling for simpler ones.
+
+VII. CONCLUSIONS
+
+In this work we presented a parallel implementation for
+computing the transfer matrix of strip lattices in the Potts
+model. The implementation beneﬁts from multi-core parallelism 
+achieving up to 5.7X of speedup with p = 8 processors.
+Our most important result is the efﬁciency obtained for all
+speedup values, being the most remarkable one the 3.7X
+speedup with 95% of efﬁciency when using p = 4 processors.
+In the presence of symmetric strip lattices, the implementation
+achieved an extra 2X of performance and used almost a quarter
+of the space used in a non-symmetric computation.
+
+The main difﬁculty of this work was not the parallelization
+itself, but to make the problem become highly parallelizable,
+which is not the same. For this, we introduced a preprocessing
+step that generates all possible terminal conﬁgurations, which
+are critical for building the matrix. This step takes an insignificant 
+amount of time compared to the whole problem, making
+it useful in practice. We also introduced smaller algorithmic
+improvements to the implementation; (1) fast computation of
+serial and parallel paths, (2) the exploit of lattice symmetry
+for matrix size reduction, (3) a set of algebra rules for making
+consistent keys in all leaf nodes and (4) a hash table for
+accessing column values of the transfer matrix.
+
+Our experimental results serve as an empirical proof that
+multi-core implementations indeed help the computation of
+such a complex problem as the transfer matrix for the Potts
+model. It was important to conﬁrm such results not only for
+the classic square lattice, but also for more complex lattices
+
+In order to achieve a scalable parallel implementation,
+some small data structures were replicated among processors
+while some other data structures per processor were created 
+within the corresponding worker process context, not in
+any master process. This allocation strategy results in faster
+
+]
+s
+[
+ 
+
+e
+m
+
+i
+t
+
+y
+c
+n
+e
+c
+i
+f
+f
+
+i
+
+e
+
+ 1000
+
+ 100
+
+ 10
+
+ 1
+
+ 0.1
+
+ 0.01
+
+ 0.001
+
+ 1
+
+ 0.9
+
+ 0.8
+
+ 0.7
+
+ 0.6
+
+ 0.5
+
+ 0.4
+
+ 0.3
+
+ 0.2
+
+Runtime (kagome)
+
+Speedup (kagome)
+
+p=1
+p=2
+p=4
+p=8
+
+m=3
+m=4
+m=5
+m=6
+
+p
+u
+d
+e
+e
+p
+s
+
+ 5.5
+ 5
+ 4.5
+ 4
+ 3.5
+ 3
+ 2.5
+ 2
+ 1.5
+ 1
+
+ 2
+
+ 3
+
+ 4
+
+m
+
+Efficiency (kagome)
+
+ 5
+
+ 6
+
+ 1
+
+ 2
+
+ 3
+
+ 4
+
+ 5
+
+ 6
+
+ 7
+
+ 8
+
+p
+
+Knee (kagome)
+
+]
+s
+[
+ 
+
+e
+m
+
+i
+t
+
+ 1000
+
+ 100
+
+ 10
+
+ 1
+
+ 0.1
+
+ 0.01
+
+ 0.001
+
+m=3
+m=4
+m=5
+m=6
+
+m=3
+m=4
+m=5
+m=6
+
+ 1
+
+ 2
+
+ 3
+
+ 4
+
+ 5
+
+ 6
+
+ 7
+
+ 8
+
+ 0.1
+
+ 0.2
+
+ 0.3
+
+ 0.4
+
+ 0.5
+
+ 0.6
+
+ 0.7
+
+ 0.8
+
+ 0.9
+
+ 1
+
+p
+
+efficiency
+
+Fig. 8: Runtime, speedup, efﬁciency and knee for different sizes of the kagome strip lattice.
+
+cache performance and brings up the possibility for exploiting
+NUMA architectures.
+
+Even when this work was aimed at multi-core architectures,
+we are aware that a distributed environment can become very
+useful to achieve even higher parallelism. Since rows are fully
+independent, sets of rows can be computed on different nodes.
+In the case of static scheduling (i.e., no master process), there
+will be no communication overhead because all processes
+will know their corresponding work based on their rank and
+the block value B. In the case of dynamic scheduling (i.e.,
+master process), nodes will communicate sending single byte
+messages, and not matrix data, resulting in a small overhead
+which should not become a problem if the block value B is
+well chosen.
+
+It is not a problem to store the matrix fragmented into many
+ﬁles as long as the matrix is in its symbolic form. Practical
+case shows that it is ﬁrst necessary to evaluate the matrix on q
+and v before doing any further computation. The full matrix is
+needed only after numerical evaluation has been performed on
+every row. Again, this evaluation can be done in parallel. Under
+this scenario, it is evident that parallel computation of transfer
+matrices is highly recommendable and useful in practice. The
+authors of this work have achieved new exact results on a wider
+kagome strip lattice with the help of this implementation [23].
+
+Modern multi-core architectures have proven to be useful
+for improving the performance of hard problems such as the
+computation of the transfer matrix in the Potts model. In the
+future, we are interested in further improving the algorithm in
+order to build more efﬁcient transfer matrices.
+
+ACKNOWLEDGMENT
+
+The authors would like to thank CONICYT for funding the
+PhD program of Crist´obal A. Navarro. This work was partially
+supported by the FONDECYT projects N o 1120495 and N o
+1120352.
+
+REFERENCES
+
+[1] R. B. Potts, “Some generalized order-disorder
+
+transformation,” in
+Transformations, Proceedings of the Cambridge Philosophical Society,
+vol. 48, 1952, pp. 106–109.
+
+[2] S.-C. Chang and R. Shrock, “Exact potts model partition functions on
+strips of the honeycomb lattice,” Physica A: Statistical Mechanics and
+its Applications, vol. 296, no. 1-2, p. 48, 2000. [Online]. Available:
+http://arxiv.org/abs/cond-mat/0008477
+
+[3] R. Shrock and S.-H. Tsai, “Exact partition functions
+
+for potts
+antiferromagnets on cyclic lattice strips,” Physica A, vol. 275, p. 27,
+1999. [Online]. Available: http://arxiv.org/abs/cond-mat/9907403
+
+[25] M. P. Forum, “Mpi: A message-passing interface standard,” Knoxville,
+
+TN, USA, Tech. Rep., 1994.
+
+[26] D. L. Eager, J. Zahorjan, and E. D. Lazowska, “Speedup versus
+efﬁciency in parallel systems,” IEEE Trans. Computers, vol. 38, no. 3,
+pp. 408–423, 1989.
+
+[4] S.-C.
+model
+of
+107,
+http://linkinghub.elsevier.com/retrieve/pii/S037843710100142X
+
+potts
+strips
+vol.
+[Online]. Available:
+
+Salas,
+functions
+lattice,”
+pp.
+
+Chang,
+partition
+square
+5/6,
+
+“Exact
+arbitrary-length
+
+Journal
+1207–1253,
+
+and
+on wider
+
+Statistical Physics,
+
+R.
+
+Shrock,
+
+of
+2002.
+
+J.
+
+the
+
+no.
+
+[5] S.-C. Chang, J. L. Jacobsen, J. Salas, and R. Shrock, “Exact
+potts model partition functions for strips of the triangular lattice,”
+Physica A, vol. 286, no. 1-2, p. 59, 2002.
+[Online]. Available:
+http://arxiv.org/abs/cond-mat/0211623
+
+[6] E. Ising, “Beitrag zur theorie des ferromagnetismus,” Zeitschrift F¨ur
+[Online]. Available:
+
+Physik, vol. 31, no. 1, pp. 253–258, 1925.
+http://dx.doi.org/10.1007/BF02980577
+
+[7] L. Onsager,
+
+“The
+
+effects
+particles,” Annals
+
+of
+colloidal
+of
+Sciences, vol. 51, no. 4, pp. 627–659, 1949. [Online]. Available:
+http://dx.doi.org/10.1111/j.1749-6632.1949.tb27296.x
+
+interaction
+shape
+the New York Academy
+
+of
+of
+
+the
+
+on
+
+[8] G. J. Woeginger, “Combinatorial optimization - eureka, you shrink!”
+M. J¨unger, G. Reinelt, and G. Rinaldi, Eds. New York, NY,
+USA: Springer-Verlag New York, Inc., 2003, ch. Exact algorithms
+for NP-hard problems: a survey, pp. 185–207. [Online]. Available:
+http://dl.acm.org/citation.cfm?id=885909.885927
+
+[9] E. E. Ferrero, J. P. De Francesco, N. Wolovick, and S. A. Cannas,
+“q-state potts model metastability study using optimized gpu-based
+monte carlo algorithms,” Arxiv preprint arXiv11010876, p. 26, 2011.
+[Online]. Available: http://arxiv.org/abs/1101.0876
+J. J. Tapia and R. D’Souza, “Parallelizing the cellular potts model
+on graphics processing units,” Computer Physics Communications, vol.
+182, no. 4, pp. 857–865, 2011.
+
+[10]
+
+[11] A. K. Hartmann, “Partition function of twoand 
+three-dimensional potts
+ferromagnets for arbitrary values of q>0,” PHYS.REV.LETT., vol. 94, p.
+050601, 2005. [Online]. Available: doi:10.1103/PhysRevLett.94.050601
+[12] A. Bedini and J. L. Jacobsen, “A tree-decomposed transfer matrix for
+computing exact potts model partition functions for arbitrary graphs,
+with applications to planar graph colourings,” Journal of Physics A:
+Mathematical and Theoretical, vol. 43, no. 38, p. 385001, 2010.
+[Online]. Available: http://stacks.iop.org/1751-8121/43/i=38/a=385001
+[13] R. Shrock, “Exact potts model partition functions on ladder graphs,”
+Physica A: Statistical Mechanics and its Applications, vol. 283, no. 3-4,
+p. 73, 2000. [Online]. Available: http://arxiv.org/abs/cond-mat/0001389
+[14] C. Castaneda-Marroquen, C. Navarrete, A. Ortega, M. Alfonseca,
+and E. Anguiano, “Parallel metropolis-montecarlo simulation for potts
+model using an adaptable network topology based on dynamic graph
+partitioning,” in Parallel and Distributed Computing, 2008. ISPDC ’08.
+International Symposium on, july 2008, pp. 89 –96.
+
+[15] W. T. Tutte, “A contribution to the theory of chromatic polynomials,”
+
+J. Math, vol. 6, pp. 80–91, 1954.
+
+[16] W. D. y Merino C, “The potts model and the tutte polynomial,” J. Math.
+
+Phys., vol. 43, pp. 1127–1149, 1 2000.
+
+[17] A. D. Sokal, “The multivariate tutte polynomial (alias potts model) for
+
+graphs and matroids,” Surveys in Combinatorics, p. 54, 2005.
+
+[18] H. S. Wilf, Algorithms and Complexity, 2nd ed. Natick, MA, USA:
+
+A. K. Peters, Ltd., 2002.
+
+[19] G. Haggard, D. J. Pearce, and G. Royle, “Computing tutte polynomials,”
+ACM Trans. Math. Softw., vol. 37, pp. 24:1–24:17, September 2010.
+[Online]. Available: http://doi.acm.org/10.1145/1824801.1824802
+
+[20] A. Bj¨orklund, T. Husfeldt, P. Kaski, and M. Koivisto, “Computing the
+tutte polynomial in vertex-exponential time,” CoRR, vol. abs/0711.2585,
+2007.
+
+[21] G. A. P. M. Ghaemi, “Size reduction of the transfer matrix of two-
+
+[22]
+
+dimensional ising and potts models,” 2, vol. 4, 2003.
+I. Foster, “Designing and building parallel programs: Concepts and tools
+for parallel software engineering.” Boston, MA, USA: Addison-Wesley
+Longman Publishing Co., Inc., 1995.
+
+[23] P. D. Alvarez, F. Canfora, S. A. Reyes, and S. Riquelme, “Potts
+model on recursive lattices: some new exact results,” European physical
+journal B. (EPJ B), vol. 85, p. 99, 2012.
+
+[24] B. Chapman, G. Jost, and R. v. d. Pas, Using OpenMP: Portable
+Shared Memory Parallel Programming (Scientiﬁc and Engineering
+Computation). The MIT Press, 2007.
+
+

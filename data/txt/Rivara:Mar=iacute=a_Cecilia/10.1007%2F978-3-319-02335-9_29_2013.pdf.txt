@@ -1,0 +1,1426 @@
+Multithread Lepp-Bisection Algorithm
+for Tetrahedral Meshes
+
+Pedro A. Rodriguez1 and Maria-Cecilia Rivara2
+
+1 Department of Information Systems, University of Bio-Bio, Avda. Collao 1202,
+
+Concepcion, Chile
+prodrigu@ubiobio.cl
+
+2 Department of Computer Science, University of Chile, Avda. Blanco Encalada
+
+2120, Santiago, Chile
+mcrivara@dcc.uchile.cl
+
+Summary. We discuss a multithread Lepp-bisection algorithm for the reﬁnement 
+of quality tetrahedral meshes over multicore architectures. We include
+an empirical study that show that an eﬃcient and robust serial implementation 
+was obtained, and that an scalable and eﬃcient multithread implementation 
+was obtained. Furthermore, the algorithms tend to improve the reﬁned
+meshes.
+
+1 Introduction
+
+Longest edge reﬁnement algorithms were designed to deal with the iterative 
+and local reﬁnement of triangulations for ﬁnite element applications.
+In 3-dimensions the algorithm locally reﬁnes a tetredra set Sref and some
+neighboring tetraedra in each iteration. The new points introduced in the
+mesh are midpoints of the longest edge of some tetrahedra of either of the
+input mesh or of some reﬁned nested meshes. All the tetrahedra are reﬁned
+by its longest-edge (bisection by the plane deﬁned by the midpoint of the
+longest edge and the two opposite vertices). In 2-dimensions the longest edge
+bisection guarantees the construction of reﬁned triangulations that maintain
+the quality of the input mesh [18, 21, 3]. Even when the extension of this
+property to 3-dimensions is an open problem yet, empirical evidence shows
+that the 3D algorithm behaves analogously to the 2-dimensional algorithm
+in practice.
+
+Lepp-bisection algorithm is an eﬃcient reformulation of the longest edge
+algorithm with the following advantages: (a) only local reﬁnement operations
+are performed which always maintain a conforming mesh (the intersection of
+pairs of adjacent tetrahedra is either a common vertex, or a common edge
+or a common face); (b) the use of the Lepp concept allows to easily design
+parallel algorithms.
+
+J. Sarrate & M. Staten (eds.), Proceedings of the 22nd
+International Meshing Roundtable,
+DOI: 10.1007/978-3-319-02335-9_29, c(cid:2) Springer International Publishing Switzerland 2014
+
+525
+
+526
+
+P.A. Rodriguez and M.-C. Rivara
+
+Distributed longest edge based algorithms for the parallel reﬁnement of
+triangulations have been discussed in the literature. In a review paper for
+ﬂuid dynamics applications, Williams [25] recommends the use of parallel
+4-triangles longest edge algorithm for the reﬁnement of huge triangulations;
+Jones and Plassmann [13, 14, 15] discuss in detail a parallel 4-triangles reﬁnement 
+algorithm; Casta˜nos and Savage [7, 8, 9] proposed a distributed
+parallelization of the original longest edge algorithm in 3-dimensions; Rivara
+et al [19] studied a Lepp-based algorithm for the uniform reﬁnement of tetrahedral 
+meshes. Balman in [4] proposed a Lepp-based algorithm that uses
+a 8-tetrahedra longest edge algorithm [16] and an acyclical directed graph
+(DAG) for storing the information of the Lepp submeshes.
+
+Other distributed parallel algorithms have been also discussed in the liter-
+ature: algorithms based on octrees techniques [23, 22]; and Delaunay methods
+centered in the reuse of serial Delaunay codes, [1, 2, 11, 10].
+
+In this paper we propose a multithread Lepp-bisection algorithm for the
+parallel reﬁnement of tetrahedral meshes. We discuss implementation issues,
+and present an empirical study that shows that an eﬃcient and scalable software 
+was obtained. These results generalize recent multithread Lepp-bisection
+algorithms for two-dimensional triangulations [20].
+
+2 Serial Lepp-Bisection Algorithms
+
+2.1 Lepp and Terminal Edge Concepts
+
+In two dimensions, Lepp(t), the longest edge propagating path of a triangle
+t [18, 21], is a sequence of increasing triangles that allows to ﬁnd a unique
+local largest longest edge in the mesh (terminal edge) shared by two terminal
+triangles (one triangle for a boundary terminal edge). For an illustration see
+Fig. 1.
+
+In 3-dimensions Lepp(t) corresponds to a multidirectional searching process 
+[19] that allows to ﬁnd a set of terminal edges according to the following
+deﬁnitions:
+
+Deﬁnition 1. E is a terminal edge in a tetrahedral mesh τ if E is the longest
+edge of every tetrahedron that shares E. In addition we call terminal star
+TS(E) the set of tetrahedra that shares a terminal edge E.
+
+Deﬁnition 2. For any tetrahedron t0 in τ , the Lepp(t0) is recursively deﬁned
+as follows:
+
+(a) Lepp(t0) includes every tetrahedron t that shares the longest edge of t0
+with t, and such that longest edge of t is greater than longest edge of t0.
+(b) For any tetrahedron ti in Lepp(t0), this Lepp(t0) also contains every
+tetrahedron t that shares the longest edge of ti and where longest edge
+of t is greater than longest edge of ti.
+
+Multithread Lepp-Bisection Algorithm for Tetrahedral Meshes
+
+527
+
+Note that Lepp(t0) is a 3D submesh which has a ﬁnite and variable number
+
+of associated terminal-edges and terminal stars.
+
+2.2 Serial Algorithm
+
+For each tetrahedron t to be reﬁned, the serial Lepp-bisection algorithm ﬁnds
+Lepp(t) and an associated set W of terminal edges. Then for each terminal
+edge E in W , the longest edge bisection of every tetrahedron of the terminal 
+star ST (E) is performed, which corresponds to a very local reﬁnement
+operation that maintains a conforming mesh (where the intersection of pair
+of adjacent tetrahedra is either a common vertex, or a common edge, or
+a common face). This process is repeated until the target tetrahedron t is
+reﬁned.
+
+The algorithm can be schematically described as follows.
+
+Algorithm 1. SerialLeppBisectionAlgorithm(τ , S)
+
+Input: τ mesh of tetrahedra; S set of tetrahedra to be reﬁned.
+Output: reﬁned mesh τf .
+while S (cid:2)= φ do
+
+For each tetrahedron t0 ∈ S.
+while t0 remains in the mesh do
+
+Compute Lepp(t0) and set of terminal edges W
+for each terminal edge L in W do
+
+Perform longest edge bisection of each tetrahedron that belongs to the
+terminal star TS(L).
+
+end for
+end while
+
+end while
+
+3 Multithread 3D Lepp-Bisection Algorithm
+
+3.1 Syncronization Issues
+
+We consider a shared memory multicore computer having p physical cores.
+To perform the reﬁnement task, each core Pi(i = 1, ..p) is in charge of the
+parallel processing of an individual tetrahedron t in S and its associated
+changing Lepp sequence until the tetrahedron t is reﬁned in the mesh. Once
+the reﬁnement of t is performed, Pi will pick up another tetrahedron of S to
+continue the reﬁnement task.
+
+To succesfully perform the parallel work, we need to deal with the following
+synchronization issues [20]: (a) To avoid processing collisions associated to the
+parallel processing of tetrahedra whose 3D Lepp submeshes overlap; (b)To
+avoid data structure unconsistencies due to the parallel reﬁnement of adjacent
+terminal stars that belong to adjacent (non-overlapping) Lepp submeshes.
+
+528
+
+P.A. Rodriguez and M.-C. Rivara
+
+0 in 2-dimensions, where Lepp(t0) ∩ Lepp(t∗
+
+Figure 1 illustrates the case of overlaping Lepp submeshes for triangles t0
+) = {t2, t3, t4, t5}. If two
+
+and t∗
+diﬀerent cores simultaneously process these triangles, to avoid a processing
+collision, the ﬁrst core that reaches t2 will capture it (marking t2 as busy),
+and will continue processing its asigned Lepp, while the other processor must
+stop its work.
+
+Figure 2 illustrates the case where two processors intend to simultaneously
+reﬁne two adjacent terminal stars in 2-dimensions. This can not be allowed
+since the parallel updating of the data structure can introduce erroneous
+neighboring information.
+
+Lepp(t  )
+0 
+
+t0
+
+t1
+
+t3
+
+t2
+
+t4
+
+A
+
+t5
+
+Lepp(t*)
+0
+
+3t’
+
+t*0
+
+1t’
+
+2t’
+
+B
+
+Fig. 1 Lepp(t0) = {t0, t1, t2, t3, t4, t5} and Lepp(t∗
+AB is a terminal edge (local largest edge in the mesh)
+
+0) = {t∗, t(cid:3)
+
+1, t(cid:3)
+
+2, t(cid:3)
+
+3, t2, t3, t4, t5},
+
+In practice the algorithm will proceed as follows:
+
+1. To avoid Lepp processing collision, for each tetrahedra t0 being processed,
+the tetrahedron t0 and each tetrahedron in the of Lepp submesh are
+marked as occupied. None of these tetrahedra can be accessed by other
+thread until these are reﬁned. In exchange, the new reﬁned tetraedra are
+marked as non-occupied.
+
+2. When a thread p that processes a target tetrahedron t1 reaches an occupied
+tetrahedron in the Lepp-submesh of t1, the following tasks are performed:
+(a) the thread p is freed; (b) the tetrahedra of the partially computed
+Lepp, are unmarked; and (c) the tetrahedra t1 is again added to Sref .
+
+3. To assure data structure consistency we only perform reﬁnement of a terminal 
+star when the involved neighbors are non-marked tetrahedra.
+
+4. If a set of terminal tetraedra (that form a terminal star) has marked neighbors,
+ the associated thread is freed, which proceeds to look for another
+tetrahedron to be reﬁned.
+
+Multithread Lepp-Bisection Algorithm for Tetrahedral Meshes
+
+529
+
+3.2 Randomization and Prefetching Techniques
+
+To develop an eﬃcient and robust algorithm for multicore architectures we
+also need use the following techniques:
+
+Randomization. To reduce the cases of Lepp collisions a randomization
+
+strategy is used to process the target tetrahedra.
+
+
+
+
+
+
+
+
+
+Fig. 2 Adjacent terminal triangles (of terminal edges AB and CD). The parallel
+reﬁnement of both pair of terminal triangles is prohibited.
+
+Prefetching Technique. In order to develop a non-architecture dependant 
+algorithm, the following prefetching strategy is used to reﬁne the terminal 
+stars: Before starting the reﬁnement process, each thread computes
+a complete terminal star which together with its immediate neighbors are
+ﬁrstly stored in a fast cache memory. The reﬁnement of the terminal star is
+performed over this cache memory.
+
+The multithread algorithm is schematically described in Algorithms 2
+
+and 3.
+
+3.3 Performance Measures for Parallel Algorithms
+
+The performance of a parallel algorithm is usually measured by using the
+speedup and the eﬃciency measures. The speedup S is deﬁned as S = Ts/Tp,
+where Ts is the time taken by the sequencial algorithm to solve the problem,
+while Tp is the time spent by the parallel algorithm by using p processors
+to solve the same problem. The eﬃciency E is deﬁned as E = S/p, where S
+is the speedup with p processors and p is the number of processors used to
+solve the associated problem.
+
+530
+
+P.A. Rodriguez and M.-C. Rivara
+
+Algorithm 2. Multithread3DLeppBisection(τ , S)
+
+Input: τ conforming tetrahedral mesh; S set of tetrahedra to be reﬁned.
+Output: a reﬁned and conforming tetrahedralization τf
+while S (cid:2)= φ (perform multithread processing) do
+
+for each free core p do
+
+Set stop-variable equal to false.
+Core p randomly selects t in S.
+while t remains in mesh and Stop-variable is false do
+
+LeppComputation(t, Lepp, W, Isuccess1).
+if Isuccess1 is true then
+
+ReﬁneTerminalStars(t, W, Isuccess2).
+
+else
+
+Set stop-variable equal to true.
+
+end if
+
+end while
+if
+
+Isuccess2 is false then
+Set stop-variable equal to true
+
+end if
+Free processor p.
+
+end for
+end while
+
+Algorithm 3. ReﬁneTerminalStars(t, W, Isuccess2)
+
+Set Isuccess2 equal to true
+for each terminal edge E in W do
+
+Compute terminal star T S
+if there exists a neighbor tetrahedron of T S marked as occupied then
+
+Set Isuccess2 equal to false
+return
+
+else
+
+Store the tetrahedra of T S and immediate neighbors in fast cache memory
+Perform reﬁnement of T S in cache memory
+
+end if
+end for
+
+The ideal speedup is equal to p, while the ideal eﬃciency is equal to 1.
+Note however that in practice it is common that a parallel implementation
+does not achieve linear speedup (S = p) since the parallel implementation
+usually requires of some kind of overhead for the management of the parallel
+issues [17, 12].
+
+Note also that the scalability of the parallel code can be observed by studying 
+how the speedup changes as more cores are available. For an application
+that scales well, the speedup should increase at (or close to) the same rate as
+the amount of cores increases. That is if you double the number of cores, the
+speedup should also double [6]. Thus for an ideal and scalable parallel algorithm,
+ the graph of the speedup versus the number of processors corresponds to
+
+Multithread Lepp-Bisection Algorithm for Tetrahedral Meshes
+
+531
+
+Algorithm 4. LeppComputation(t, Lepp, W, Isuccess1)
+
+Input: tetrahedron t.
+Output: Lepp submesh associated to t, W set of terminal edges.
+Set Isuccess1 equal to true.
+Add t to Lepp.
+for each t∗ recursively found in Lepp(t) do
+
+if
+
+t∗ is marked as occupied then
+Isuccess1 is set to false.
+return
+
+else
+
+Mark t as occupied.
+Add t to Lepp.
+
+end if
+Find set of terminal edges W.
+
+end for
+
+a 45 degrees straight line (this behavior is called linear), while a good and scalable 
+behavior corresponds to an approximate straight line with angle lightly
+less than 45
+
+◦
+
+.
+
+4 Empirical Testing
+
+The empirical testing was perfomed by using a 8 physical cores computer (two
+Quad Core processors, Intel Xeon E5550 of 64 bits, and 23.5GB of memory).
+To empirically evaluate the algorithm behavior, we have used two kind of
+initial meshes: (a) meshes of convex polyhedra deﬁned by the convex hull of
+sets of randomly generated points in the interior of a 3-dimensional box; (b)
+meshes of 3D solid objects. The initial meshes were obtained by using CGAL
+Delaunay software [5] [24].
+
+For the test problems we have used two iterative reﬁnement strategies:
+(1) iterative reﬁnement of sets of the largest tetrahedra in the current mesh;
+and (2) iterative reﬁnement of sets of randomly selected tetrahedra in the
+mesh. To perform the random selection, to every initial and new tetrahedron,
+a value between 0 to 1 is randomly assigned.
+
+4.1 Empirical Study on the Eﬃciency and Scalability
+
+of the Serial Algorithm
+
+To study the eﬃciency and scalability of the serial implementation we have
+used initial meshes of the convex hull of sets of random points (random
+data generated inside a 3D box as shown in Figure 3), and two complex
+solid objects (shaft geometry of Figure 4, elephant geometry of Figure 5).
+
+532
+
+P.A. Rodriguez and M.-C. Rivara
+
+Fig. 3 Input and reﬁned mesh of convex geometry for TP1, TP2 and TP3 testing
+problems
+
+Fig. 4 Input and reﬁned mesh for shaft geometry
+
+Table 1 Test problems
+
+TP1: Convex polyhedron (0.5 millions), reﬁnement of largest tetrahedra
+TP2: Convex polyhedron (0.5 millions), reﬁnement of random tetrahedra
+TP3: Big convex polyhedron (13.3 millions), reﬁnement of largest tetrahedra
+TP4: Shaft geometry (2654), reﬁnement of largest tetrahedra
+TP5: Shaft geometry (2654), reﬁnement of random tetrahedra
+TP6: Elephant geometry; reﬁnement of largest tetrahedra
+
+The triangulations were obtained with Delaunay CGAL software. Table 1
+summarizes the test problems considered in this paper.
+
+Table 2 and Table 3 present reﬁnement statistics of the serial Leppbisection 
+algorithm for the same initial mesh (around 500,000 tetrahedra)
+of the convex polyhedron and two reﬁnement strategies until obtaining
+11,282,761 and 10,203,417 of tetrahedra, respectively.
+
+Multithread Lepp-Bisection Algorithm for Tetrahedral Meshes
+
+533
+
+Fig. 5 Elephant. Initial and ﬁnal reﬁned meshes. Here the tetrahedra that intersect
+the sphere were iteratively reﬁned until a given tetrahedron-size was achieved.
+
+Table 2 TP1 Convex Polyhedron. Random data (75,000 points randomly gener-
+ated); reﬁnement of 200000 largest tetrahedra by iteration until longest edge ≤ δ;
+δ = 100
+
+It. Mesh Size
+
+(cid:5) Added
+
+Total Average Time (ms)
+
+(cid:5) Tetrahedra Tetrahedra time (ms)
+
+by Tetrahedron
+
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+
+503972
+1360438
+2405694
+3506501
+4557270
+5561370
+6539275
+7473237
+8291995
+9057137
+9721170
+10267847
+10826347
+11194281
+11278476
+11282736
+11282761
+
+856466
+1045256
+1100807
+1050769
+1004100
+977905
+933962
+818758
+765142
+664033
+546677
+558500
+367934
+84195
+4260
+
+25
+
+73591
+89550
+94374
+90083
+86031
+80739
+71411
+62491
+58372
+50638
+41542
+42080
+27580
+6229
+302
+
+2
+
+0.085924018
+0.0856727921
+0.0857316496
+0.0857305459
+0.0856797132
+0.0825632347
+0.0764602843
+0.0763241397
+0.0762891071
+0.0762582582
+0.075990027
+0.0753446732
+0.0749590959
+0.0739830156
+0.0708920188
+
+0.08
+
+Table 2 summarizes 16 iterations for the serial algorithm. In every iteration,
+ the 200,000 largest tetrahedra with largest edge greater than a δ value
+(if this is possible) are reﬁned. The table includes the following information:
+number of the iteration, mesh size (number of tetrahedra) of the current
+mesh, number of tetrahedra added by reﬁnement process, total processing
+
+534
+
+P.A. Rodriguez and M.-C. Rivara
+
+Table 3 TP2 Convex Polyhedron. Random data (75,000 points randomly gener-
+ated); reﬁnement of 100000 randomly selected tetrahedra by iteration
+
+It. Mesh Size
+
+(cid:5) Added
+
+Total Average Time (ms)
+
+(cid:5) Tetrahedra Tetrahedra time (ms)
+
+by Tetrahedron
+
+0
+1
+2
+3
+4
+5
+
+503972
+1670808
+3161759
+5121789
+7443137
+10203417
+
+1166836
+1490951
+1960030
+2321348
+2760280
+
+80831
+102685
+135210
+160592
+191696
+
+0.0692736597
+0.0688721494
+0.068983638
+0.0691804934
+0.069448027
+
+Table 4 TP3 Mesh statistics. Convex polyhedron of randomly generated points;
+reﬁnement of 50000 randomly selected tetrahedra by iteration until longest edge ≤
+δ; δ = 11
+
+It. Mesh Size
+
+(cid:5) Added
+
+Total Average Time (ms)
+
+(cid:5) Tetrahedra Tetrahedra time (ms)
+
+by Tetrahedron
+
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+
+13504909
+14043040
+14341936
+14644899
+14966833
+15288352
+15592634
+15847491
+16056472
+16247115
+16427632
+16617437
+16777497
+16902314
+16982671
+17002240
+17002295
+
+538131
+298896
+302963
+321934
+321519
+304282
+254857
+208981
+190643
+180517
+189805
+160060
+124817
+80357
+19569
+
+55
+
+45662
+24418
+24588
+25943
+25849
+24474
+20464
+16755
+15280
+14448
+15165
+12844
+9985
+6437
+1525
+
+4
+
+0.0848529447
+0.0816939671
+0.0811584253
+0.0805848404
+0.0803964929
+0.0804319677
+0.0802960091
+0.0801747527
+0.0801498088
+0.0800367832
+0.0798977898
+0.0802449082
+0.0799971158
+0.0801050313
+0.0779293781
+0.0727272727
+
+time in miliseconds, average time (ms) by each tetrahedron added to the
+mesh. Note that an eﬃcient serial implementation was obtained where the
+processing time for each new tetrahedron added to the mesh remains constant
+(0.070 - 0.085 ms) independently of the mesh size.
+
+Table 3 summarizes 5 iterations of the serial algorithm over the same initial
+mesh of around 500,000 tetrahedra used for Table 2. Here 100,000 randomly
+selected tetrahedra are reﬁned by iteration. Note that the average time by
+each added tetrahedron is again constant and independent of the mesh size.
+Table 4 summarizes reﬁnement statistics for the behavior of the serial
+algorithm for the test problem TP3 that considers a huge initial mesh of
+
+Multithread Lepp-Bisection Algorithm for Tetrahedral Meshes
+
+535
+
+Table 5 TP4 3D solid object. Shaft geometry; reﬁnement of 50000 largest tetrahedra 
+by iteration (if possible) until longest edge ≤ δ; δ = 3
+
+It. Mesh Size
+
+(cid:5) Added
+
+Total Average Time (ms)
+
+(cid:5) Tetrahedra Tetrahedra time (ms)
+
+by Tetrahedron
+
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+
+2654
+9412
+29749
+89760
+224786
+369415
+428445
+436536
+436920
+436926
+
+6758
+20337
+60011
+135026
+144629
+59030
+8091
+384
+
+6
+
+465
+1376
+4129
+9370
+10083
+4165
+566
+26
+1
+
+0.0688073394
+0.0676599302
+0.0688040526
+0.0693940426
+0.0697163086
+0.0705573437
+0.0699542702
+0.0677083333
+0.1666666667
+
+Table 6 TP5 Mesh statistics. Shaft. Reﬁnement of 1000 randomly selected tetrahedra 
+by iteration
+
+It. Mesh Size
+
+(cid:5) Added
+
+Total Average Time (ms)
+
+(cid:5) Tetrahedra Tetrahedra time (ms)
+
+by Tetrahedron
+
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+
+2654
+9640
+21781
+37299
+54681
+74756
+95896
+117930
+139845
+161989
+183883
+
+6986
+12141
+15518
+17382
+20075
+21140
+22034
+21915
+22144
+21894
+
+589
+1010
+1293
+1451
+1679
+1771
+1851
+1836
+1861
+1841
+
+0.0843114801
+0.0831891936
+0.0833225931
+0.0834771603
+0.0836363636
+0.0837748344
+0.0840065354
+0.0837782341
+0.0840408237
+0.0840869645
+
+13,504,909 tetrahedra and produces a ﬁnal mesh of 17 millions of tetrahedra.
+This testing case, which uses a 87.7% of the primary memory, shows analogous
+behavior to the previous cases.
+
+Tables 5 and 6 summarize results for the shaft geometry of Figure 4, while
+
+Table 7 shows results for the elephant geometry.
+
+Tables 8 and 9, and Figure 6 present results on the scalability of the
+multithread algorithm for ﬁve (TP1, TP2, TP3, TP4 and TP6) of the six
+testing problems of Table 1 (reﬁned ﬁnal meshes from 0.44 to 17.0 millions of
+tetrahedra). It is worth noting that an eﬃcient and scalable implementation
+was obtained, whose behavior is independent of the size of the ﬁnal reﬁned
+mesh.
+
+It is worth noting that for the all these testing problems the number of Lepp
+collisions remains rather low (6 to 10% of the computed Lepps). This can be
+
+536
+
+P.A. Rodriguez and M.-C. Rivara
+
+Table 7 TP6 Mesh statistics. Elephant geometry. Reﬁnement of 1000 randomly
+selected tetrahedra by iteration until longest edge ≤ δ; δ = 0.02
+
+It. Mesh Size
+
+(cid:5) Added
+
+Total Average Time (ms)
+
+(cid:5) Tetrahedra Tetrahedra time (ms)
+
+by Tetrahedron
+
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+
+1905
+7905
+16560
+25707
+36792
+49912
+62655
+76789
+90704
+103982
+116952
+
+6000
+8655
+9147
+11085
+13120
+12743
+14134
+13915
+13278
+12970
+
+477
+673
+710
+866
+1028
+997
+1111
+1090
+1043
+1019
+
+0.0795
+
+0.0777585211
+0.0776210779
+0.0781235904
+0.0783536585
+0.0782390332
+0.0786047828
+0.0783327345
+0.0785509866
+0.0785659214
+
+Table 8 Execution Time (ms)
+
+Execution Time (ms)
+
+1P
+
+2P
+
+TP1: Convex polyhedron (LE ≥ δ)
+748312 410372
+TP2: Convex polyhedron (Random)
+671014 350453
+TP3: Big convex polyhedron (LE ≥ δ) 283841 156620
+TP5: Shaft
+34117 17315
+TP6: Elephant
+25192 13442
+
+4P
+
+201852
+180832
+83256
+8908
+7111
+
+8P
+
+105161
+92519
+41136
+4700
+3748
+
+Table 9 Perfomance measures: speedup and eﬃciency
+
+Speed-Up
+
+Eﬃciency
+
+1P 2P 4P 8P 1P 2P 4P 8P
+TP1: 3-dim convex hull (LE ≥ δ)
+1 1.82 3.71 7.12 1.0 0.91 0.93 0.89
+TP2: 3-dim convex hull (Random) 1 1.91 3.71 7.25 1.0 0.96 0.93 0.91
+TP3: 3-dim convex hull (LE ≥ δ)
+1 1.81 3.41 6.90 1.0 0.91 0.85 0.86
+TP5: Shaft
+1 1.97 3.83 7.23 1.0 0.99 0.96 0.91
+TP6: Elephant
+1 1.97 3.83 7.23 1.0 0.94 0.89 0.84
+
+due to the fact that a small percentage of tetrahedra is reﬁned by iteration.
+Additional empirical work is needed to get more precise conclusions on this
+matter.
+
+4.2 Empirical Study on the Quality of Reﬁned 3D
+
+Triangulations for Initial Quality Meshes
+
+Figures 7, 8, 9 10, 11 present results on the quality of the reﬁned meshes for
+ﬁve testing problems: for a convex geometry by reﬁning the largest tetrahedra
+
+Multithread Lepp-Bisection Algorithm for Tetrahedral Meshes
+
+537
+
+ 
+
+
+
+!" 
+
+
+ 
+
+# 
+
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	
+
+
+
+
+
+
+
+
+
+
+%&" 
+
+
+
+
+
+
+
+Fig. 6 Speedup for TP1, TP2, TP3, TP5 and TP6 testing problems
+
+
+
+ !"
+
+#""$%
+
+&"$%
+
+
+
+
+
+
+
+
+
+
+
+    	 	
+ 
+   
+
+ !"
+
+
+
+'
+
+%
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Fig. 7 TP1: Three-dimensional convex hull. Reﬁnement of largest tetrahedra.
+Quality distribution for initial and ﬁnal meshes.
+
+ 
+
+!  "#
+
+$ "#
+
+	
+
+
+
+	
+
+
+
+	
+
+
+
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    	 	
+ 
+   
+
+%
+
+Fig. 8 TP2: Three-dimensional convex hull. Random selection. Quality distribution 
+for initial and reﬁned mesh.
+
+538
+
+P.A. Rodriguez and M.-C. Rivara
+
+ !"
+
+#$$%&
+
+'$%&
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    	 	
+ 
+   
+
+"&
+
+Fig. 9 TP6: Elephant. Random selection of tetrahedra. Quality distribution for
+initial and ﬁnal meshes.
+
+ !"
+
+#$$%&
+
+'$%&
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    	 	
+ 
+   
+
+"&
+
+Fig. 10 TP6: Elephant. Random selection. Quality distribution for initial and ﬁnal
+meshes.
+
+ 
+
+!""#$%
+
+&"#$%
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    	 	
+ 
+   
+
+ %
+
+Fig. 11 TP5: Shaft. Random selection. Percentage of quality by range: initial and
+reﬁned mesh.
+
+(TP1 and TP3); for the same convex geometry with random selection of
+the tetrahedra to be reﬁned (TP2), for an elephant geometry with random
+selection of the tetrahedra to be reﬁned (TP6); for a shaft geometry with
+
+Multithread Lepp-Bisection Algorithm for Tetrahedral Meshes
+
+539
+
+random selection of the tetrahedra to be reﬁned (TP5). See Figures 3, 5 and
+4 of section 4.1.
+
+To measure the quality of a tetrahedron t, we used the function Q(t) = C
+volume (t) / longest-edge3, where C is such that Q(t’) = 1 for the equilateral
+tetrahedron t’. It is worth noting that for all these test problems (Figures 7,
+8, 9 10, and 11) the Lepp-bisection algorithm tends to improve the quality
+distribution of the mesh.
+
+5 Conclusions
+
+We have presented and discussed a multithread Lepp-bisection algorithm
+for the reﬁnement of tetrahedral meshes. We include empirical results that
+show that an eﬃcient and robust serial implementation was obtained, and
+that an eﬃcient and scalable multithread implementation was also obtained.
+
+References
+
+1. Antonopoulos, C., Blagojevic, F., Chernikov, A., Chrisochoides, N., Nikolopoulos,
+ D.: Algorithm, software, and hardware optimizations for delaunay mesh
+generation on simultaneous multithreaded architectures. Journal on Parallel
+and Distributed Computing 69(7) (2009)
+
+2. Antonopoulos, C., Blagojevic, F., Chernikov, A., Chrisochoides, N., Nikolopoulos,
+ D.: A multigrain delaunay mesh generation method for multicore smt-based
+architectures. Journal on Parallel and Distributed Computing 69(7) (2009)
+
+3. Bedregal, C., Rivara, M.-C.: A study on size-optimal longest edge reﬁnement
+algorithms. In: Jiao, X., Weill, J.-C. (eds.) Proceedings of the 21st International
+Meshing Roundtable, vol. 123, pp. 121–136. Springer, Heidelberg (2013)
+
+4. Balman, M.: Tetrahedral mesh reﬁnement in distributed environments. In:
+
+ICPP Workshops, pp. 497–504. IEEE Computer Society (2006)
+
+5. Boissonnat, J.-D., Devillers, O., Pion, S., Teillaud, M., Yvinec, M.: Triangulations 
+in CGAL. Computational Geometry 22, 5–19 (2002); Special issue
+SoCG00
+
+6. Breshears, C.: The Art of Concurrency: A Thread Monkey’s Guide to Writing
+
+Parallel Applications. O’Reilly Media Inc. (2009)
+
+7. Casta˜nos, J., Savage, J.: Pared: A framework for the adaptive solution of pdes.
+
+In: HPDC (1999)
+
+8. Casta˜nos, J., Savage, J.: Repartitioning unstructured adaptive meshes. In:
+
+IPDPS, pp. 823–832. IEEE Computer Society (2000)
+
+9. Casta˜nos, J., Savage, J.: Parallel reﬁnement of unstructured meshes. Technical
+
+report cs-99-10, Department of Computer Science, Brown University
+
+10. Chernikov, A., Chrisochoides, N.: Algorithm 872: Parallel 2d constrained delaunay 
+mesh generation. ACM Transactions on Mathematical Software 34(1)
+(2008)
+
+11. Chernikov, A., Chrisochoides, N.: Generalized two-dimensional delaunay mesh
+
+reﬁnement. SIAM Journal on Scientiﬁc Computing 31, 3387–3403 (2009)
+
+12. Grama, A., Karypis, G., Kumar, V., Gupta, A.: Introduction to Parallel Computing,
+ 2nd edn. Addison Wesley (2003)
+
+540
+
+P.A. Rodriguez and M.-C. Rivara
+
+13. Jones, M., Plassmann, P.: Computational results for parallel unstructured mesh
+computations. Computing Systems in Engineering 5(4-6), 297–309 (1994); 3rd
+National Symposium on Large-Scale Structural Analysis for High-Performance
+Computers and Workstations
+
+14. Jones, M., Plassmann, P.: Adaptive reﬁnement of unstructured ﬁnite-element
+
+meshes. Finite Elem. Anal. Des. 25(1-2), 41–60 (1997)
+
+15. Jones, M., Plassmann, P.: Parallel algorithms for the adaptive reﬁnement and
+partitioning of unstructured meshes. In: Proceedings of the Scalable HighPerformance 
+Computing Conference, pp. 478–485. IEEE (1997)
+
+16. Plaza, A., Rivara, M.C.: Mesh reﬁnement based on the 8-tetrahedra longestedge 
+partition. In: 12th International Meshing Roundtable, pp. 67–78 (2003)
+
+17. Rauber, T., R¨unger, G.: Parallel Programming for multicore and cluster systems.
+ Springer (2010)
+
+18. Rivara, M.C.: Lepp-bisection algorithms, applications and mathematical properties.
+ Appl. Numer. Math. 59(9), 2218–2235 (2009)
+
+19. Rivara, M.C., Calderon, C., Fedorov, A., Chrisochoides, N.: Parallel decoupled
+terminal-edge bisection method for 3d mesh generation. Eng. Comput. 22(2),
+111–119 (2006)
+
+20. Rivara, M.C., Rodriguez, P., Montenegro, R., Jorquera, J.: Multithread parallelization 
+of lepp-bisection algorithms. Appl. Numer. Math. 62(4), 473–488
+(2012)
+
+21. Rivara, M.C.: New longest-edge algorithms for the reﬁnement and/or improvement 
+of unstructured triangulations. International Journal for Numerical Methods 
+in Engineering 40(18), 3313–3324 (1997)
+
+22. Shephard, M., Flaherty, J., Bottasso, C., de Cougny, H., Ozturan, C., Simone,
+M.: Parallel automatic adaptive analysis. Parallel Comput. 23(9), 1327–1347
+(1997)
+
+23. Shephard, M.S., Guerinoni, F., Flaherty, J., Ludwig, R., Baehmann, P.: Finite
+octree mesh generation for automated adaptive three-dimensional ﬂow analysis.
+ In: Proc. 2nd Int. Conf. Numer. Grid Generation in Computational Fluid
+Mechanics, pp. 709–718 (1988)
+
+24. Teillaud, M.: Three dimensional triangulations in cgal. Abstracts 15th European 
+Workshop Computational Geometry, pp. 175–178. INRIA SophiaAntipolis 
+(1999)
+
+25. Williams, R.: Adaptive parallel meshes with complex geometry. In: Numerical
+Grid Generation in Computational Fluid Dynamics and Related Fields, pp.
+201–213. Elsevier Science Publishers (1991)
+
+

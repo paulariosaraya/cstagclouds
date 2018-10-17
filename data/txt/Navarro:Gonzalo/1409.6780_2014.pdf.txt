@@ -1,0 +1,724 @@
+Document Counting in Practice(cid:63)
+
+Travis Gagie1, Aleksi Hartikainen1, Juha K¨arkk¨ainen1, Gonzalo Navarro2, Simon J. Puglisi1, and
+
+Jouni Sir´en2
+
+1 Department of Computer Science,
+
+University of Helsinki, Finland
+
+{gagie,alhartik,tpkarkka,puglisi}@cs.helsinki.fi
+2 Center of Biotechnology and Bioengineering (CeBiB),
+
+Department of Computer Science,
+{gnavarro,jsiren}@dcc.uchile.cl
+
+University of Chile, Chile
+
+Abstract. We address the problem of counting the number of strings in a collection where a given
+pattern appears, which has applications in information retrieval and data mining. Existing solutions
+are in a theoretical stage. We implement these solutions and develop some new variants, comparing
+them experimentally on various datasets. Our results not only show which are the best options for
+each situation and help discard practically unappealing solutions, but also uncover some unexpected
+compressibility properties of the best data structures. By taking advantage of these properties, we can
+reduce the size of the structures by a factor of 5–400, depending on the dataset.
+
+5
+1
+0
+2
+
+ 
+t
+c
+O
+1
+
+ 
+
+ 
+ 
+]
+S
+D
+.
+s
+c
+[
+ 
+ 
+
+2
+v
+0
+8
+7
+6
+
+.
+
+9
+0
+4
+1
+:
+v
+i
+X
+r
+a
+
+(cid:63) This work is funded in part by Fondecyt Project 1-140796; Basal Funds FB0001, Conicyt, Chile; the Jenny and
+
+Antti Wihuri Foundation, Finland; and by the Academy of Finland through grants 268324 and 258308.
+
+1 Introduction
+
+In the classic pattern matching problem, we are given a text string T [1, n] and a pattern string
+P [1, m], and must count or report all the positions in T at which P occurs. Document retrieval
+problems are natural variants of this classic problem in which T is composed of d smaller strings, or
+documents. The three main document retrieval problems considered to date are: document counting,
+where the task is to compute the number of documents containing P ; document listing, where we
+must return a list of all the documents that contain P ; and top-k listing, returning the k documents
+most relevant to P , given some relevance measure (for example, the k documents that contain P
+most often). From an algorithmic point of view, these problems are interesting because the number
+of occurrences of P in T , denoted occ, may be very much larger than docc, the number of distinct
+documents in which the pattern occurs, and so tailored solutions may outperform those based on
+brute-force application of classical pattern matching.
+
+In recent years, document retrieval problems have been the subject of intense research in both
+the string algorithms and information retrieval communities (see recent surveys [12,16]). The vast
+majority of this work has been on the latter two problems (listing and top-k). Indeed, there have
+been only two results on document counting [21,7], and no investigation into their practicality has
+ever been undertaken.
+
+However, competitive listing and top-k solutions require fast algorithms for counting. In recent
+work [18] it was shown that the best choice of listing and top-k algorithm in practice strongly
+depends on the docc/occ ratio, and thus the ability to compute docc quickly may allow the eﬃcient
+selection of an appropriate listing/top-k algorithm at query time. Secondly, from an information
+retrieval point of view, docc (known in that community as document frequency, or df) is a necessary
+component of most ranking formulaes [22,2,3], and so fast computation of it is desirable. Document
+counting is also important for data mining applications on strings (or string mining, see, e.g., [6,4]),
+where the value docc/d for a given pattern is its support in the collection.
+
+Our contribution. The main results of this paper are as follows:
+
+1. We provide the ﬁrst implementations and experimental evaluations of the only two previous
+document counting solutions by Sadakane [21] and Gagie et al. [7]. We also adapt to counting a
+previous successful structure for document listing, called precomputed document listing (PDL)
+[18]. Our experiments, carried out on a wide range of data sets, show that, while Gagie et al.’s
+method can use as little as a quarter of the space Sadakane’s method uses, it is always more
+than 10 times slower, making its use hard to justify. Similarly, the adapted PDL is never the
+best choice.
+
+2. We show that Sadakane’s data structure inherits the repetitiveness present in the underlying
+data, which can be exploited to reduce its space occupancy. Surprisingly, the structure also
+becomes repetitive with random and near-random data, such as DNA sequences. We show how
+to take advantage of this redundancy in a number of diﬀerent ways, leading to diﬀerent spacetime 
+trade-oﬀs. The best of these compressed representations are 5–400 times smaller than the
+original representation, depending on the dataset, while answering document counting queries
+only marginally slower, and sometimes even faster.
+
+The paper is organized as follows. Section 2 introduces some background and notation. We
+review Sadakane’s and Gagie et al.’s methods for document counting in Section 3. In Section 4
+we describe our new methods for compressing Sadakane’s structure and a new variant of the PDL
+
+1
+
+structure [18], adapted for document counting. Section 5 contains results and discussion from our
+experiments and Section 6 concludes.
+
+2 Background
+
+Let T [1, n] be a concatenation of a collection of d documents. We assume that each document
+ends with a special character $ that is lexicographically smaller than any other character of the
+alphabet. The suﬃx array (SA) of the collection is an array SA[1, n] of pointers to the suﬃxes of
+T in lexicographic order. The document array (DA) DA[1, n] is a related array, where DA[i] is the
+identiﬁer of the document where suﬃx T [SA[i], n] begins. The suﬃx tree (ST) is a versatile text
+index based on building a trie for the suﬃxes of the text, and compacting unary paths into single
+edges. If we list the leaves of the suﬃx tree in lexicographic order, we get the suﬃx array.
+
+Many succinct and compressed data structures are based on bitvectors. A bitvector is a binary
+sequence B[1, n], with additional data structures to support rank and select. Operation rank1(B, i)
+counts the number of 1-bits in the preﬁx B[1, i], while select1(B, i) ﬁnds the 1-bit of rank i. These
+operations can also be deﬁned for 0-bits, as well as on general sequences. Several diﬀerent encodings
+are commonly used for the binary sequence. Plain bitvectors store the sequence as-is, while entropycompressed 
+bitvectors reduce its size to close to the zero-order entropy. Gap encoding stores the
+distances between successive minority bits, while run-length encoding stores the lengths of successive
+runs of 1-bits and 0-bits. Grammar-compressed bitvectors use a context-free grammar to encode
+the sequence.
+
+The compressed suﬃx array (CSA) [11] and the FM-index (FMI) [5] are space-eﬃcient text
+indexes based on the Burrows-Wheeler transform (BWT) [1] — a permutation of the text originally
+developed for data compression. The Burrows-Wheeler transform BWT[1, n] is easily obtained from
+the text and the suﬃx array: BWT[i] = T [SA[i] − 1], with T [0] = $. As the CSA and the FMI are
+very similar data structures, we collectively name them compressed suﬃx arrays (CSAs) in this
+paper.
+
+We consider text indexes supporting four kinds of queries: 1) ﬁnd(P ) returns the range [sp, ep],
+where the suﬃxes in SA[sp, ep] start with pattern P ; 2) locate(P ) returns SA[sp, ep]; 3) count(P )
+returns the number of documents containing pattern P ; 4) list(P ) returns the identiﬁers of the
+distinct documents containing pattern P . For queries 2–4, we also consider variants where the
+parameter is the suﬃx array range [sp, ep] or the suﬃx tree node v corresponding to pattern P .
+CSAs support the ﬁrst two queries; ﬁnd is relatively fast, while locate can be much slower. The
+main time/space trade-oﬀ in a CSA, the suﬃx array sample period, aﬀects the performance of
+locate queries. Larger sample periods result in slower and smaller indexes.
+
+3 Prior Methods for Document Counting
+
+In this section we review the two prior methods for document counting, one by Sadakane [21] and
+another by Gagie et al. [7].
+
+3.1 Sadakane’s method
+
+Sadakane [21] showed how to solve count in constant time adding just 2n + o(n) bits of space. We
+start with the suﬃx tree of the text, and add new internal nodes to it to make it a binary tree. For
+
+2
+
+each internal node v of the binary suﬃx tree, with nodes u and w as its children, we determine the
+number of redundant suﬃxes h(v) = |list(u)∩ list(w)|. This allows us to compute count recursively:
+count(v) = count(u) + count(w) − h(v). By using the leaf nodes descending from v, [sp, ep], as base
+cases, we can solve the recurrence:
+
+count(v) = count(sp, ep) = (ep + 1 − sp) −(cid:88)
+
+h(u),
+
+u
+
+where the summation goes over the internal nodes of the subtree rooted at v.
+
+We form array H[1, n− 1] by traversing the internal nodes in inorder and listing the h(v) values.
+As the nodes are listed in inorder, subtrees form contiguous ranges in the array. We can therefore
+rewrite the solution as
+
+count(sp, ep) = (ep + 1 − sp) − ep−1(cid:88)
+
+H[i].
+
+To speed up the computation, we encode the array in unary as bitvector H(cid:48). Each cell H[i] is
+encoded as a 1-bit, followed by H[i] 0-bits. We can now compute the sum by counting the number
+of 0-bits between the 1-bits of ranks sp and ep:
+
+i=sp
+
+count(sp, ep) = 2(ep − sp) − (select1(H(cid:48), ep) − select1(H(cid:48), sp)) + 1.
+
+As there are n − 1 1-bits and n − d 0-bits, bitvector H(cid:48) takes at most 2n + o(n) bits.
+
+3.2 Counting with the document array or the interleaved LCP array
+
+Muthukrishnan [15] deﬁned, for eﬃciently computing list(P ), an array C[1, n] so that C[i] = j if
+j is the rightmost position preceding i such that DA[i] = DA[j]. He uses the property that the
+ﬁrst occurrence DA[i] of each document in DA[sp, ep] is the only one for which C[i] < sp. This
+property makes C useful for counting, as we only have to determine the number of values below
+sp in C[sp, ep]. This can be done in O(log n) time using a wavelet tree [10] on C, which requires
+n log n + o(n log n) bits of space. Gagie et al. [8] used a more sophisticated representation, achieving
+n log d + o(n log d) + O(n) bits of space and query time O(log(ep− sp + 1)) to compute count(sp, ep).
+Both time and space are not competitive with Sadakane’s method. However, a more recent
+approach [7] could be space-competitive, especially on repetitive document collections. Let lcp(S, T )
+be the length of the longest common preﬁx of sequences S and T . The LCP array of T [1, n] is
+an array LCP[1, n], where LCP[i] = lcp(T [SA[i − 1], n], T [SA[i], n]). We get the interleaved LCP
+array ILCP[1, n] by building separate LCP arrays for each of the documents, and interleaving them
+according to the document array. As ILCP[i] < |P| iﬀ position i contains the ﬁrst occurrence of DA[i]
+in [sp, ep], we can solve count by counting the number of values less than |P| in ILCP[sp, ep]. Just
+as before, this is eﬃciently done with a wavelet tree representation of ILCP. The advantage of using
+ILCP is that, if the documents are similar to each other, then ILCP will have many runs of about d
+equal values (i.e., the same suﬃx coming from all the d documents), and thus it can be run-length
+compressed. The wavelet tree is built only on the run heads, and count(sp, ep) is computed from
+the run heads and the run lengths. Still this is expected to be slower than Sadakane’s method.
+
+3
+
+4 New Techniques for Document Counting
+
+4.1 Compressing Sadakane’s method
+
+As described above, Sadakane’s structures requires 2n + o(n) bits, irrespective of the underlying
+data. However, even this can be a considerable overhead on highly compressible collections, taking
+signiﬁcantly more space than the CSA (on top of which Sadakane’s structure operates).
+Fortunately, as we now show, the bitvector H(cid:48) used in Sadakane’s method is highly compressible.
+There are ﬁve main ways of compressing the bitvector, with diﬀerent combinations of them working
+better with diﬀerent datasets.
+
+individual values of h(u), u ∈ Vv, do not matter, as long as the sum (cid:80)
+same. We can therefore make bitvector H(cid:48) more compressible by setting H[i] = (cid:80)
+
+1. Let Vv be the set of nodes of the binary suﬃx tree corresponding to node v of the original
+suﬃx tree. As we only need to compute count(v) for the nodes of the original suﬃx tree, the
+h(u) remains the
+h(u),
+where i is the inorder rank of node v, and H[j] = 0 for the rest of the nodes. As there are no
+real drawbacks in this reordering, we will use it with all of our variants of Sadakane’s method.
+2. Run-length encoding works well with versioned collections and collections of random documents.
+When a pattern occurs in many documents, but no more than once in each of the documents,
+the corresponding subtree will be encoded as a run of 1-bits in bitvector H(cid:48).
+
+u∈Vv
+
+u∈Vv
+
+3. When the documents in the collection have a versioned structure, we can also use grammarbased 
+compression. To see this, consider a substring x that occurs in many documents, but at
+most once in each document. If each occurrence of substring x is preceded by character a, the
+subtrees of the binary suﬃx tree corresponding to patterns x and ax have identical structure,
+and DA[ﬁnd(x)] = DA[ﬁnd(ax)]. Hence the subtrees are encoded identically in bitvector H(cid:48).
+
+4. If the documents are internally repetitive but unrelated to each other, the suﬃx tree has many
+subtrees with suﬃxes from just one document. We can prune these subtrees into leaves in the
+binary suﬃx tree, using a ﬁlter bitvector F [1, n − 1] to mark the remaining nodes. Let v be a
+node of the binary suﬃx tree with inorder rank i. We will set F [i] = 1 iﬀ count(v) > 1. Given a
+range [sp, ep− 1] of nodes in the binary suﬃx tree, the corresponding subtree of the pruned tree
+is [rank1(F, sp), rank1(F, ep − 1)]. The ﬁltered structure consists of bitvector H(cid:48) for the pruned
+tree, and a compressed encoding of bitvector F .
+5. We can also use ﬁlters based on array H instead of count. If H[i] = 0 for the most cells, we can
+use a sparse ﬁlter FS[1, n−1], where FS[i] = 1 iﬀ H[i] > 0, and build bitvector H(cid:48) only for those
+nodes. We can also encode positions with H[i] = 1 separately with an 1-ﬁlter F1[1, n− 1], where
+F1[i] = 1 iﬀ H[i] = 1. With an 1-ﬁlter, we do not write 0-bits in H(cid:48) for nodes with H[i] = 1,
+but subtract the number of 1-bits in F1[sp, ep − 1] from the result of the query instead. It is
+also possible to use a sparse ﬁlter and an 1-ﬁlter simultaneously. In that case, we set FS[i] = 1
+iﬀ H[i] > 1.
+We analyze the number of runs of 1-bits in bitvector H(cid:48) in the expected case. Assume that our
+document collection consists of d random documents, each of length m, over an alphabet of size
+σ. We call string S unique, if it occurs at most once in every document. The subtree of the sparse
+suﬃx tree corresponding to a unique string is encoded as a run of 1-bits in bitvector H(cid:48). Therefore
+any set of unique strings that covers all leaves of the tree will deﬁne an upper bound for the number
+of runs.
+
+4
+
+Fig. 1. The number of runs of 1-bits in Sadakane’s bitvector H(cid:48) on synthetic collections of DNA sequences (σ = 4).
+Each collection has been generated by taking a random sequence of length m = 27 to 217, duplicating it d = 217 to
+27 times (making the total size of the collection 224), and mutating the sequences with random point mutations at
+probability p = 0.001 to 1. The dashed line represents the expected case upper bound for p = 1.
+
+Consider a random string of length k. The probability that the string is non-unique is at most
+d) + i. As there
+d/(2σi). The expected size of
+
+√
+dm2/(2σ2k). Let N (i) be the number of non-unique strings of length ki = logσ(m
+are σki strings of length ki, the expected value of N (i) is at most m
+the smallest cover of unique strings is therefore at most
+
+√
+
+∞(cid:88)
+
+∞(cid:88)
+
+N (i) ≤(cid:16) σ
+
++ 1
+
+2
+
+(cid:17)
+
+√
+m
+
+d,
+
+(σk0 − N (0)) +
+
+√
+(σN (i − 1) − N (i)) = m
+
+d + (σ − 1)
+
+i=1
+
+i=0
+
+where σN (i − 1) − N (i) is the number of strings the become unique at length ki. The number of
+runs of 1-bits in H(cid:48) is therefore sublinear in the size of the collection (dm). See Figure 1 for an
+experimental conﬁrmation of this analysis.
+
+4.2 Precomputed document counting
+
+Precomputed document listing (PDL) [7] is a document listing method based on storing precomputed
+answers for list queries for a carefully selected subset of suﬃx tree nodes. The suﬃx array is ﬁrst
+covered by subtrees of the suﬃx tree containing a small number of leaves (e.g., no more than 256).
+The roots of these subtrees are called the basic blocks. We store the answers for list for the basic
+blocks, as well as for some higher-level nodes, using grammar-based compression. The answer for
+list(v) can be found in two ways. If v is below the basic blocks, the query range is short, and so
+the list of document identiﬁers can be found quickly by using the locate functionality of the CSA.
+Otherwise we can compute list(v) as the union of a small number of stored answers.
+
+5
+
+DocumentsRuns of 1−bits12825651210242048409681921638432768655361310721001000100001e+051e+061e+07llllllllllll3md^0.5p = 1p = 0.1p = 0.01p = 0.001A straightforward way to extend the PDL structure to support count queries would be adding
+document counts to the stored answers. We now list reasons why this would not work well, and
+develop a structure that overcomes these problems.
+
+1. Using locate even for a single position is much slower than Sadakane’s method. To overcome
+this, we select node v as a basic block if occ > docc for the node or one of its siblings, and no
+descendant of v is a basic block (basic blocks must form a cover of the leaves). Now if the query
+node is below the basic blocks, we know that docc = occ.
+
+2. Computing the union of stored answers is also relatively slow. We therefore store document
+
+counts for all suﬃx tree nodes above the basic blocks.
+
+3. The tree structure of PDL has been designed for speed instead of size. When the structure
+stores lists of document identiﬁers, the tree takes only a small fraction of the total space. When
+we store only document counts, this is no longer the case. To make the tree smaller, we can use
+a succinct tree representation, for example based on balanced parentheses (BP) [14].
+
+The precomputed document counting structure consists of three components. Document counts
+are stored in an array in preorder. As most of the counts are either for the basic blocks or for
+nodes immediately above them, we expect them to be small compared to d. Therefore we use a
+variable-width encoding for the counts. The tree structure is stored using the balanced parenthesis
+representation. If there are n(cid:48) nodes with stored document counts, the tree takes 2n(cid:48) + o(n(cid:48)) bits.
+Finally, we use a gap encoded bitvector to mark the boundaries of the basic blocks. Given a query
+range, we can ﬁnd the corresponding range of basic blocks with rank queries. Then, given the ﬁrst
+and last basic block in the range, we can ﬁnd their lowest common ancestor using standard tree
+operations. Finally, given the lowest common ancestor in preorder, we return the corresponding
+document count.
+
+The tree only needs to support a very speciﬁc operation: namely, ﬁnd the lowest common
+ancestor of leaves i and j, which are guaranteed to be the ﬁrst and the last leaves in the subtree.
+We can therefore optimize the tree for that query, making it smaller and faster than a general BP
+tree. Each leaf of the tree is identiﬁed by the last 1-bit (opening parenthesis) in a run of 1-bits. As
+there are no unary internal nodes in the tree, the lowest common ancestor is either identiﬁed by
+the ﬁrst 1-bit in run i, or its closing parenthesis is the last 0-bit before run j + 1, depending on
+which of them is deeper in the tree.
+
+To ﬁnd the lowest common ancestor, the BP bitvector needs to support two kinds of queries:
+select for the heads of the runs of 1-bits, and rank for the 1-bits. Let select(i) and select(j + 1) be the
+starting positions of runs i and j + 1, and rank(i) and rank(j + 1) be the ranks of the 1-bits at those
+positions. We can compute the depth of the run head i as depth(i) = rank(i) − (select(i) − rank(i)),
+while the depth of the closing parenthesis before run j + 1 is the same as the depth of run head
+j + 1. If depth(i) ≥ depth(j + 1), the lowest common ancestor of basic blocks i and j is node rank(i)
+in preorder. Otherwise, the lowest common ancestor is node rank(i) + depth(j + 1) − depth(i).
+
+5 Experiments
+
+5.1
+
+Implementation
+
+We use two fast document listing algorithms as our baseline document counting methods. Brute-D
+uses an explicit document array, sorting a copy of the query range DA[sp, ep] to count the number
+
+6
+
+of distinct document identiﬁers. PDL-RP [18] is a variant of precomputed document listing, using
+grammar-based compression to space-eﬃciently store the answers for list queries for a carefully
+selected subset of suﬃx tree nodes. As the basic text index, both algorithms use RLCSA [13], a
+practical implementation of the compressed suﬃx array intended for repetitive datasets. The suﬃx
+array sample period was set to 32 on non-repetitive datasets, and to 128 on repetitive datasets.
+
+Our implementation of precomputed document counting, PDL-count, uses an SDSL [9] bitvector
+for the tree topology, and components from the RLCSA library for the other parts. We also used
+RLCSA components for several variants of Sadakane’s method. First, we have a set of basic (i.e.,
+not applying ﬁltering) versions of this method, depending on how bitvector H(cid:48) is encoded:
+
+Sada uses a plain bitvector representation.
+Sada-RR uses a run-length encoded bitvector as supplied in the RLCSA implementation. It uses
+δ-codes to represent run lengths and packs them into blocks of 32 bytes of encoded data. Each
+block stores the number of bits and 1-bits up to its beginning.
+
+Sada-RS uses a run-length encoded bitvector, represented with a sparse bitvector (like that of
+
+Sada-S) marking the beginnings of the 0-runs and another for the 1-runs.
+
+Sada-RD uses run-length encoding with δ-codes to represent the lengths. The bitvector is cut into
+blocks of 128 1-bits, and three sparse bitvectors (like in Sada-S) are used to mark the number
+of bits, 1-bits, and starting positions of block encodings.
+
+Sada-grammar uses grammar-compressed bitvectors [17].
+
+There are also various versions that include ﬁltering, and diﬀer on how the bitvector F is
+
+represented (we only study the most promising combinations):
+
+Sada-P-G uses Sada for H(cid:48) and a gap-encoded bitvector for F . This gap-encoding is provided in
+the RLCSA implementation, which is similar to that of run-length encoding but only runs of
+0-bits are considered.
+
+Sada-P-RR uses Sada for H(cid:48) and a run-length encoded bitvector (as in Sada-RR) for F .
+Sada-RR-G uses Sada-RR for H(cid:48) and a gap-encoded bitvector for F .
+Sada-RR-RR uses Sada-RR for H(cid:48) and the same encoding for F .
+Sada-S uses sparse bitmaps for both H(cid:48) and the sparse ﬁlter FS. Sparse bitmaps store the lower
+w bits of the position of each 1-bit in an array, and use gap encoding in a plain bitvector for
+the high-order bits. Value w is selected to minimize the size (cf. [20]).
+
+Sada-S-S is Sada-S with an additional sparse bitmap for F1
+Sada-RS-S uses Sada-RS for H(cid:48) and a sparse bitmap (as in Sada-S) for F1.
+Sada-RD-S uses Sada-RD for H(cid:48) and a sparse bitmap (as in Sada-S) for F1.
+
+Finally, ILCP implements the technique described in Section 3.2, using the same encoding as in
+
+Sada-RS to represent the bitvectors of the wavelet tree.
+
+The implementations were written in C++ and compiled on g++ version 4.8.1.3 Our test
+environment was a machine with two 2.40 GHz quad-core Xeon E5620 processors (12 MB cache
+each) and 96 GB memory. Only one core was used for the queries. The operating system was
+Ubuntu 12.04 with Linux kernel 3.2.0.
+
+3 The implementations are available at http://jltsiren.kapsi.fi/rlcsa and https://github.com/ahartik/
+
+succinct.
+
+7
+
+Table 1. Statistics for document collections. Collection size in megabytes, RLCSA size without suﬃx array samples
+in megabytes and in bits per character, number of documents, average document length, number of patterns, average
+number of occurrences and document occurrences, and the ratio of occurrences to document occurrences.
+
+Collection
+
+Size
+
+RLCSA
+
+Documents
+
+n/d Patterns
+
+occ
+
+docc
+
+occ/docc
+
+Page
+Revision
+Enwiki
+Inﬂuenza 321 MB
+Swissprot
+54 MB
+
+9.00 MB (0.11 bpc)
+641 MB
+640 MB
+9.04 MB (0.11 bpc)
+639 MB 309.31 MB (3.87 bpc)
+10.53 MB (0.26 bpc)
+25.19 MB (3.71 bpc)
+
+190
+31208
+44000
+227356
+143244
+
+3534921
+21490
+15236
+1480
+398
+
+14286
+14284
+19628
+1000
+10000
+
+2601
+2592
+10316
+59997
+160
+
+6
+1065
+2856
+44012
+121
+
+444.79
+2.43
+3.61
+1.36
+1.33
+
+5.2 Experimental data
+
+We compared the performance of the document counting methods on ﬁve real datasets. Three of the
+datasets consist of natural language texts in XML format, while two contain biological sequences.
+Three of the datasets are repetitive in diﬀerent ways. See Table 1 for some basic statistics on the
+datasets.
+
+Page is a repetitive collection of 190 pages with a total of 31208 revisions from a Finnish language
+Wikipedia archive with full version history. The revisions of each page are concatenated to form
+a single document. For patterns, we downloaded a list of Finnish words from the Institute for
+the Languages in Finland, and chose all words of length ≥ 5 that occur in the collection.
+
+Revision is the same as Page, except that each revision is a separate document.
+Enwiki is a nonrepetitive collection of 44000 pages from a snapshot of the English language
+Wikipedia. As patterns, we used search terms from an MSN query log with stop words ﬁltered 
+out. We generated 20000 patterns according to term frequencies, and selected those that
+occur in the collection.
+
+Inﬂuenza is a repetitive collection containing the genomes of 227356 inﬂuenza viruses. For patterns,
+we extracted 100000 random substrings of length 7, ﬁltered out duplicates, and kept the 1000
+patterns with largest occ/docc ratios.
+
+Swissprot is a nonrepetitive collection of 143244 protein sequences used in many document retrieval
+papers (e.g. [19]). We extracted 200000 random substrings of length 5, ﬁltered out duplicates,
+and kept the 10000 patterns with largest occ/docc ratios.
+
+5.3 Results
+
+The results of the experiments can be seen in Figure 2. The time required for ﬁnd and the size of
+rest of the index (the RLCSA and possible document retrieval structures) were not included in the
+plots, as they are common to all solutions. As plain Sada was almost always the fastest method, we
+scaled the plots to leave out anything much larger than it. On the other hand, we set the size of the
+baseline document listing methods to 0, as they are exploiting the functionality already present in
+the index.
+
+On Page, the ﬁltered methods Sada-P-RR and Sada-RR-RR were clearly the best choices. While
+plain Sada was much faster, it also took much more space than the rest of the index. With the
+exception of Sada-grammar, which was quite slow, no other method could compress the structure
+very well. On Revision, there were many small encodings with similar performance. Among the very
+
+8
+
+small encodings, Sada-RS-S was the fastest. Sada-S was somewhat larger and faster. Like with Page,
+plain Sada was even faster, while taking too much space to be a serious alternative.
+
+The situation changed on the non-repetitive Enwiki. Only Sada-RD-S, Sada-RS-S, and Sadagrammar 
+could compress the bitvector well below 1 bpc, and Sada-grammar was much slower than
+the other two. At around 1 bpc, Sada-S was again the fastest option. Plain Sada required twice as
+much space as Sada-S, while also being twice faster.
+
+The other two collections, Inﬂuenza and Swissprot, contain biological (DNA and protein, re-
+spectively) sequences, and so could be considered collections of random sequences. Because such
+collections are easy cases for Sadakane’s method, it was no surprise that many of the encodings
+compressed the bitvector very well. On both datasets, Sada-S was the fastest small encoding, while
+being only marginally larger than any other encoding. As the small encodings required less than
+0.01 bpc on Inﬂuenza, ﬁtting easily in CPU cache, they were often as fast as or even faster than
+plain Sada.
+
+It is interesting that diﬀerent compression techniques succeed in diﬀerent collections. The only
+variant that is always among the smallest ones is Sada-grammar, although it is much slower than
+most competitors.
+
+None of the other methods could compete against a good encoding of Sadakane’s method. The
+ILCP-based structure, ILCP, was always larger and slower than compressed variants of Sada. We
+tried other encodings for ILCP, but they were always strictly worse than either ILCP or plain
+Sada. PDL-count achieved similar performance as compressed Sadakane’s method on Revision and
+Inﬂuenza, but it was always somewhat larger and slower.
+
+6 Conclusions
+
+We investigated the time/space trade-oﬀs in document counting data structures, implementing
+both known solutions and new methods. While Sadakane’s method was the fastest choice, we found
+that it can be compressed signiﬁcantly below the original 2n + o(n) bits, for a document collection
+of total size n. We achieved 5-fold compression on the natural language Enwiki dataset. When the
+dataset was repetitive or contained random sequences, but not both, the best compressed encodings
+were around 20 times smaller than the original Sadakane’s structure. With both repetitive data
+and random sequences in the Inﬂuenza collection, we achieved up to 400-fold compression. In all
+cases, the query times were around 1 microsecond or less.
+
+The high compressibility of Sadakane’s structure is an unforeseen result that emerges from our
+experiments. It is interesting that this compressibility owes to very diﬀerent reasons depending on
+the characteristics of the text collections, but it always shows up, albeit in diﬀerent degrees. A deeper
+study of the behavior of this bitvector could uncover further compression possibilities, or lead to
+simple compressibility measures on the collection that predict the ultimate size of this representation
+under certain compression methods (e.g., grammar compression, run-length compression, sparsitybased 
+compression, etc.).
+
+9
+
+Fig. 2. Document counting on diﬀerent datasets. We show the average time in microseconds required by a count
+query, as a function of the size of the document counting structure in bits per character.
+
+10
+
+pageSize (bpc)Time (ms)00.511.522.50.11101001000llllllBrute−DPDL−RPPDL−countSada−RRSada−P−GSada−P−RRSada−RR−GSada−RR−RRSada−grammarSadaSada−RSSada−RS−SSada−RDSada−RD−SSada−S−SSada−SILCPinfluenzaSize (bpc)Time (ms)00.511.522.50.11101001000lllrevisionSize (bpc)Time (ms)00.511.522.50.11101001000llllswissprotSize (bpc)Time (ms)00.511.522.50.11101001000llllenwikiSize (bpc)Time (ms)00.511.522.50.11101001000lllReferences
+
+1. M. Burrows and D. J. Wheeler. A block sorting lossless data compression algorithm. Technical Report 124,
+
+Digital Equipment Corporation, 1994.
+
+2. S. B¨uttcher, C. Clarke, and G. Cormack. Information Retrieval: Implementing and Evaluating Search Engines.
+
+MIT Press, 2010.
+
+3. B. Croft, D. Metzler, and T. Strohman. Search Engines: Information Retrieval in Practice. Pearson Education,
+
+2009.
+
+4. J. Dhaliwal, S. J. Puglisi, and A. Turpin. Practical eﬃcient string mining. IEEE Transactions on Knowledge
+
+and Data Engineering, 24(4):735–744, 2012.
+
+5. P. Ferragina and G. Manzini. Indexing compressed text. Journal of the ACM, 52(4):552–581, 2005.
+6. J. Fischer, V. M¨akinen, and N. V¨alim¨aki. Space eﬃcient string mining under frequency constraints. In Proc.
+
+IEEE International Conference on Data Mining (ICDM), pages 193–202, 2008.
+
+7. T. Gagie, K. Karhu, G. Navarro, S. J. Puglisi, and J. Sir´en. Document listing on repetitive collections. In Proc.
+
+24th Annual Symposium on Combinatorial Pattern Matching (CPM), LNCS 7922, pages 107–119, 2013.
+
+8. T. Gagie, J. K¨arkk¨ainen, G. Navarro, and S.J. Puglisi. Colored range queries and document retrieval. Theoretical
+
+Computer Science, 483:36–50, 2013.
+
+9. S. Gog, T. Beller, A. Moﬀat, and M. Petri. From theory to practice: Plug and play with succinct data structures.
+
+In Proceedings of the 13th International Symposium on Experimental Algorithms (SEA), pages 326–337, 2014.
+
+10. R. Grossi, A. Gupta, and J. Vitter. High-order entropy-compressed text indexes. In Proc. 14th Annual ACMSIAM 
+Symposium on Discrete Algorithms (SODA), pages 841–850, 2003.
+
+11. R. Grossi and J. Vitter. Compressed suﬃx arrays and suﬃx trees with applications to text indexing and string
+
+matching. SIAM Journal on Computing, 35(2):378–407, 2006.
+
+12. W.-K. Hon, M. Patil, R. Shah, S. V. Thankachan, and J. S. Vitter. Indexes for document retrieval with relevance.
+
+In Space-Eﬃcient Data Structures, Streams, and Algorithms, LNCS 8066, pages 351–362, 2013.
+
+13. V. M¨akinen, G. Navarro, J. Sir´en, and N. V¨alim¨aki. Storage and retrieval of highly repetitive sequence collections.
+
+Journal of Computational Biology, 17(3):281–308, 2010.
+
+14. J. I. Munro and V. Raman. Succinct representation of balanced parentheses and static trees. SIAM Journal on
+
+Computing, 31(3):762–776, 2002.
+
+15. S. Muthukrishnan. Eﬃcient algorithms for document retrieval problems.
+
+In Proc 13th Annual ACM-SIAM
+
+Symposium on Discrete Algorithms (SODA), pages 657–666, 2002.
+
+16. G. Navarro. Spaces, trees and colors: The algorithmic landscape of document retrieval on sequences. ACM
+
+Computing Surveys, 46(4):article 52, 2014.
+
+17. G. Navarro and A. Ord´o˜nez. Grammar compressed sequences with rank/select support. In Proc. 21st International
+
+Symposium on String Processing and Information Retrieval (SPIRE), LNCS 8799, pages 31–44, 2014.
+
+18. G. Navarro, S. J. Puglisi, and J. Sir´en. Document retrieval on repetitive collections.
+
+In Proc. 22nd Annual
+
+European Symposium on Algorithms (ESA B), LNCS 8737, pages 725–736, 2014.
+
+19. G. Navarro and D. Valenzuela. Space-eﬃcient top-k document retrieval. In Proc. 11th International Symposium
+
+on Experimental Algorithms (SEA), LNCS 7276, pages 307–319, 2012.
+
+20. D. Okanohara and K. Sadakane. Practical entropy-compressed rank/select dictionary. In Proc. 9th Workshop on
+
+Algorithm Engineering and Experiments (ALENEX), 2007.
+
+21. K. Sadakane. Succinct data structures for ﬂexible text retrieval systems. Journal of Discrete Algorithms, 5:12–22,
+
+2007.
+
+22. J. Zobel and A. Moﬀat. Exploring the similarity space. SIGIR Forum, 32(1):18–34, 1998.
+
+11
+
+

@@ -1,0 +1,6017 @@
+Noname manuscript No.
+(will be inserted by the editor)
+
+Fast In-Memory XPath Search using Compressed Indexes
+
+Diego Arroyuelo #1, Francisco Claude ∗2, Sebastian Maneth +%3, Veli Mäkinen †4,
+Gonzalo Navarro $5, Kim Nguy˜ˆen +6, Jouni Sirén †7, Niko Välimäki †8
+
+1
+1
+0
+2
+
+ 
+t
+c
+O
+5
+
+ 
+
+ 
+ 
+]
+
+B
+D
+.
+s
+c
+[
+ 
+ 
+
+2
+v
+9
+8
+0
+2
+
+.
+
+7
+0
+9
+0
+:
+v
+i
+X
+r
+a
+
+#Yahoo! Research Latin America, Chile
+
+1darroyue@dcc.uchile.cl
+
+∗David R. Cheriton School of Computer Science,
+
+University of Waterloo, Canada
+
+2fclaude@cs.uwaterloo.ca
+
++NICTA, Australia
+
+3sebastian.maneth@nicta.com.au,
+
+6kim.nguyen@nicta.com.au
+
+†Dept. of Computer Science, University of Helsinki, Finland
+
+4vmakinen@cs.helsinki.fi
+7jltsiren@cs.helsinki.fi
+8nvalimak@cs.helsinki.fi
+
+$Dept. of Computer Science, University of Chile, Chile
+
+5gnavarro@dcc.uchile.cl
+
+%School of Computer Science and Engineering,
+
+University of New South Wales, Australia
+
+the date of receipt and acceptance should be inserted later
+
+Abstract A large fraction of an XML document typically
+consists of text data. The XPath query language allows to
+search such text via its equal, contains, and starts-with predicates.
+ These predicates can be efﬁciently implemented using
+a compressed self-index of the document’s text data. Most
+queries, however, are hybrid: they contain parts which query
+the text of the document, and contain other parts which query
+the tree structure of the document. It is therefore a challenge
+to appropriately choose a query evaluation order which optimally 
+leverages the execution speeds of the text and tree indexes.
+ Here the SXSI system is introduced. It stores the tree
+structure of an XML document using a bit array of opening
+and closing brackets plus a sequence of labels, and stores
+the text nodes of the document using a global compressed
+self-index. On top of these indexes sits an XPath query engine 
+that is based on tree automata. The engine uses fast
+counting queries on the text index in order to determine
+whether to evaluate top-down or bottom-up with respect to
+the tree structure. The resulting system has several advantages 
+over existing systems: (1) on pure tree queries (without 
+text search) such as the XPathMark queries, the SXSI
+system performs on par or better than the fastest known systems 
+MonetDB and Qizx, and (2) on queries that use text
+search, SXSI outperforms the existing systems by 1–3 orders 
+of magnitude (depending on the size of the result set),
+and (3) for all tested data and queries, SXSI’s memory consumption 
+consistently stays below two times the document
+size.
+
+Address(es) of author(s) should be given
+
+1 Introduction
+
+As more and more data is stored, transmitted, queried, and
+manipulated in XML, the popularity of XPath and XQuery
+as query languages for semi-structured data is increasing.
+Evaluating such XML queries efﬁciently is challenging, and
+has triggered much research. Today there is a wealth of public 
+and commercial XPath/XQuery engines, apart from several 
+theoretical proposals.
+
+In this paper we focus on XPath, which is simpler and
+forms the basis of XQuery. XPath query engines can be
+roughly divided into two categories: sequential and indexed.
+In the former, which follows a streaming approach, no preprocessing 
+of the XML data is performed. Each query sequentially 
+reads the whole document, and the goal is to be
+as close as possible to making just one pass over the data,
+while using as little main memory as possible to hold intermediate 
+results and data structures. Instead, the indexed
+approach preprocesses the XML document to build a data
+structure on it, so that later queries can be evaluated without 
+traversing the whole document. A serious shortcoming
+of the indexed approach is that the index can use much more
+space than the original data, and thus may have to be manipulated 
+on disk. There are two approaches for dealing with
+this problem: (1) to load the index only partially (by using
+clever clustering techniques), or (2) to use less powerful indexes 
+which require less space. Examples of systems using
+these approaches are Qizx/DB [58], MonetDB/XQuery [7],
+and Tauro [56].
+
+In this work we aim at an index for XML that uses little
+space compared to the size of the data, so that the indexed
+document can ﬁt in main memory for moderate-sized data,
+
+2
+
+thereby solving XPath queries without any need of resorting 
+to disk. An in-memory index should outperform streaming 
+approaches, even when the data ﬁts in RAM. This is
+conﬁrmed when comparing our indexed approach against
+two well-known streaming XPath engines (over data coming 
+from a RAM-disk): GCX [34] and SPEX [51] run about
+50 and 350 times, respectively, slower than our system. Of
+course such a comparison is hardly fair because the streaming 
+engines need to parse the entire XML input document at
+each run.
+
+Note that usually main memory XML query systems
+(such as Saxon [33], Galax [15], Qizx/Open [58], etc.) use
+machine pointers to represent XML data. We observe that
+on various well-established DOM implementations, this representation 
+blows up memory consumption to about 5–10
+times the size of the original XML document.
+
+An XML document can be regarded essentially as a text
+collection (that is, a set of strings) organized into a tree
+structure, so that the strings correspond to the text data and
+the tree structure corresponds to the nesting of tags. The
+problem of manipulating text collections within compressed
+space is now well understood [9, 41, 48], and also much
+work has been carried out on compact data structures for
+trees [2,5,13,14,22,23,30,32,47,53]. In this paper we show
+how both types of compact data structures can be integrated
+into a compressed index representation for XML data, which
+is able to efﬁciently solve XPath queries.
+
+A feature inherited from its components is that the compressed 
+index replaces the XML document, in the sense that
+the data (or any part of it) can be efﬁciently reproduced
+from the index (and thus the data itself can be discarded).
+The result is called a self-index, as the data is inextricably
+tied to its index. A self-index for XML data was recently
+proposed [16, 17], yet its support for XPath is reduced to
+a very limited class of queries that are handled particularly
+well. Namely, they handle “simple paths”, that is, queries
+of the form //t1/t2/ . . . /tk, where each ti is a tagname. For
+such queries they can count in time O(k), and can report in
+time O(log1+ n) per result. See [44] where a comparison is
+presented which allows to conclude that, for result counting
+over XMark documents, their self-index can be between one
+and two orders of magnitude faster than our system.
+
+The main value of our work is to provide the ﬁrst practical 
+and public tool for compressed indexing of XML data,
+dubbed Succinct XML Self-Index (SXSI), which takes little
+space, solves a signiﬁcant portion of XPath, and largely outperforms 
+the best public software supporting XPath we are
+aware of, namely MonetDB/XQuery [7] and Qizx/DB [58].
+Currently we support at least forward Core XPath [26], i.e.,
+all forward navigational axes, plus, additionally text() and
+the attribute axis, and the three text predicates = (equality),
+contains, and starts-with. The main challenges in achieving 
+our results have been to obtain practical implementations 
+of compact data structures (for texts, trees, and oth-
+ers) that are at a theoretical stage, to develop new compact
+schemes tailored to this particular problem, and to develop
+query processing strategies tuned for the speciﬁc cost model
+that emerges from the use of these compact data structures.
+The limitations of our scheme are that it is in-memory, that
+it is static (i.e., the index must be rebuilt when the XML data
+changes), and that it does not handle XQuery. The ﬁrst limitation 
+is a design decision; the last two are subject of future
+work.
+
+This paper introduces the three main ingredients of SXSI:
+(i) the text index, (ii) the tree index, and (iii) the query evaluator.
+ While technical details on the ﬁrst two components
+can be found elsewhere in the literature, we here only mention 
+the main aspects of these components and focus on how
+they are integrated inside of the SXSI system. A new aspect 
+of executing automata to solve XPath queries is the
+notion of relevant nodes [43]; intuitively, a node is relevant 
+if the automaton must necessarily visit it to solve the
+query. A large speed-up is obtained by using the new “jump”
+primitives of our tree index in order to visit only relevant
+nodes. We present an algorithm for “true bottom-up runs”,
+which are beneﬁcial if the query contains highly selective
+text predicates. In our experimental section we ﬁrst test the
+core speeds of our indexes; for instance, timing global pattern 
+counting over the text index against a naive string buffer,
+or, full traversals over the tree index against traversing a
+pointer-based tree store. The main part of the experimental 
+section is about comparing SXSI against the state-of-theart 
+XPath engines MonetDB/XQuery and Qizx/DB. We use
+two batches of experiments: the “tree oriented” queries of
+the XPathMark benchmark [20] (over XMark data [54]) and
+our own “text oriented” queries (over Medline documents).
+Our results show that SXSI outperforms the other systems
+for virtually all tested queries, and moreover that the running 
+times of SXSI are more predictable and “robust” than
+those of other systems.
+
+2 Basic Concepts and Model
+
+We regard an XML document as (i) an ordered set of strings
+and (ii) a labeled tree. The latter is the natural XML parse
+tree deﬁned by the hierarchical tags, where the (normalized)
+tag name labels the corresponding node. We add an extra
+root node (labeled “&”) on top of the document’s root node;
+this node is needed for XPath semantics, but could also be
+used to hold additional information such as the document
+name. Each text node is represented as a leaf labeled #. Attributes 
+are handled as follows in this model. Each node with
+attributes gets an additional single child labeled @ (at the ﬁrst
+child position), and for each attribute @attr=value of the
+node, a child labeled attr is added to its @-node, and a leaf
+child labeled % to the attr-node. The text content value is
+
+Table 1 Notation.
+
+Term Meaning
+
+T
+u
+Σ
+σ
+$
+n
+t
+
+d
+
+Hk(S)
+
+Concatenation of all the texts in the collection
+Length of T in symbols
+Alphabet of the distinct text symbols
+Size of Σ
+Character that terminates each text in the collection
+Number of nodes in the XML tree
+Number of different tag and attribute names in the
+document
+Number of texts in the XML tree (in our model, tree
+leaves)
+k-th order empirical entropy of string S
+
+then associated to that leaf. Therefore, there is exactly one
+string content associated to each tree leaf labeled # or %.
+We refer to those strings as texts. Note that we do not store
+empty texts; for instance, the XML document <a></a> is
+stored as a single a-labeled leaf node (which is the unique
+child of the &-labeled root node).
+
+Let us call T the set of all the texts and u its total length
+measured in symbols, n the total number of tree nodes, Σ
+the alphabet of the strings and σ = |Σ|, t the total number
+of different tag and attribute names, and d the number of
+texts (or tree leaves). These receive text identiﬁers which are
+consecutive numbers assigned in a left-to-right parsing of
+the data. In our implementation Σ is simply the set of byte
+values 1 to 255, and 0 will act as a special terminator called
+$. This symbol occurs exactly once at the end of each text
+in T . Note that our implementation can easily support also
+UTF-8 encoding and hence adheres to the XML standard.
+Table 1 summarizes the notation.
+
+To connect tree nodes and texts, we deﬁne global identiﬁers,
+ which give unique numbers to both internal and leaf
+nodes, in depth-ﬁrst preorder. Figure 1 shows a toy document 
+(top left) and our model of it (top right), as well as
+its representation using our data structures (bottom), which
+serves as a running example for the rest of the paper. In the
+model, the tree is formed by the solid edges, whereas dotted
+edges display the connection with the set of texts. The tree
+contains the extra root node (labeled &), as well as extra internal 
+nodes (labeled #, @, and %). Note how the attributes
+are handled. There are six texts, which are associated to the
+tree leaves and receive consecutive text numbers (marked
+in italics at their right). Global identiﬁers are associated to
+each node and leaf (drawn at their left). The conversion between 
+tag names and symbols, drawn within the bottom-left
+component, is used to translate queries and to recreate the
+XML data. Note that if the return and space (indentation)
+characters are present precisely as shown in the “XML data”
+box of the ﬁgure, then there are indeed several additional #-
+leaves in the tree: for instance, the whitespace (return and
+space characters) after the initial <parts> and before the
+ﬁnal </parts> give rise to two extra texts (and therefore
+
+3
+
+the parts-node in the tree has additional ﬁrst and last children 
+labeled #). In total there are seven such whitespace texts
+which have been omitted in our ﬁgure for reasons of readability.
+
+
+Some notation and measures of compressibility follow,
+preceding a rough description of our space complexities.
+The empirical k-th order entropy [45] of a sequence S over
+alphabet Σ, Hk(S) ≤ log σ, is a lower bound to the output
+size per symbol of any k-th order compressor applied to S.
+The formula of the zero-order entropy is as follows:
+
+(cid:88)
+
+c∈Σ
+
+H0(S) =
+
+sc
+s
+
+log
+
+s
+sc
+
+,
+
+where sc is the number of occurrences of c in S and s = |S|.
+We assume log = log2 and 0 log 0 = 0 henceforth. Let Σk
+denote the set of words over Σ of length k. Now let SW be
+the set of characters preceding the occurrences of W ∈ Σk
+in S, then for k > 0,
+
+(cid:88)
+
+W∈Σk
+
+Hk(S) =
+
+1
+s
+
+|SW|H0(SW ).
+
+Note 0 ≤ Hk(S) ≤ Hk−1(S) ≤ . . . ≤ H0(S) ≤ log σ.
+
+We will build on self-indexes able of handling text collections 
+T of total length u within uHk(T ) + o(u log σ)
+bits [19, 41, 48]. On the other hand, representing an unlabeled 
+tree of n nodes requires 2n − O(log n) bits, and several 
+representations using 2n + o(n) bits support many tree
+query and navigation operations in constant time (e.g., [53]).
+The labels require in principle other n log t bits. Sequences
+S can be stored within |S| log σ(1 + o(1)) bits (and even
+|S|H0(S) + o(|S| log σ)), so that any element S[i] can be
+accessed, and they can also efﬁciently answer the following
+queries [19, 25, 28]:
+
+rankc(S, i) is the number of c’s in S[1, i];
+selectc(S, j) is the position of the j-th c in S.
+These are essential building blocks for more complex functionalities,
+ as seen later.
+
+The ﬁnal space requirement of our index will include:
+
+1. uHk(T ) + o(u log σ) bits for representing the text collection 
+T in self-indexed form. This supports the string
+searches of XPath and can (slowly) reproduce any text.
+2. d log d+o(d log d) bits for the mapping between the selfindex 
+and the text identiﬁers, e.g., to determine to which
+text identiﬁer a self-index position belongs, or restricting
+self-index searches to some texts.
+
+3. 2n + o(n) bits for representing the tree structure. This
+supports many navigational operations in constant time.
+4. 4n log t + 2n + o(n) bits to represent the tags in a way
+
+that they support very fast XPath searches.
+
+5. 2n + o(n) bits for mapping between tree nodes and text
+
+identiﬁers.
+
+4
+
+Fig. 1 Our running example on representing an XML document.
+
+6. Optionally, u log σ or uHk(T ) + o(u log σ) bits, plus
+d ), to achieve faster text extraction than in 1).
+
+O(d log u
+
+As a practical yardstick, without the extra storage of
+texts (Item 6) the memory consumption of our system is
+about the size of the original XML ﬁle (and, being a selfindex,
+ includes it!), and with the extra text store the memory
+consumption is 1–2 times the size of the original XML ﬁle.
+In Section 3 we describe our representation of the set of
+strings, including how to obtain text identiﬁers from text positions.
+ This explains items 1, 2, and 6 above. Section 4 describes 
+our representation for the tree and the labels, and the
+way the correspondence between tree nodes and text identiﬁers 
+works. This explains items 3, 4, and 5. Section 5 describes 
+how we process XPath queries on top of these compact 
+data structures. In Sections ?? and 6 we give some implementation 
+details and empirically compare our SXSI engine 
+with the most relevant public engines we are aware of.
+We conclude in Section 7.
+
+3 Text Representation
+
+3.1 FM-Index and Backward Searching
+
+Given a string T of total length u, from an alphabet of size
+σ, the alphabet-friendly FM-index [19] requires uHk(T ) +
+o(u log σ) bits of space. The index supports counting the
+number of occurrences of a pattern P in O(|P| log σ) time.
+Locating the occurrences takes extra O(log1+ u) time per
+answer, for any constant  > 1.
+
+The FM-index is based on the Burrows–Wheeler transform 
+(BWT) of string T [8]. Assume T ends with the special 
+end-marker $. Let M be a matrix whose rows are all the
+cyclic rotations of T in lexicographic order. The ﬁrst column 
+of M, denoted F , contains all symbols of T in lexicographic 
+order. The last column L of M forms a permutation
+of T which is the BWT string L = T bwt. The matrix is only
+conceptual; the FM-index uses only on the T bwt string. Figure 
+2 illustrates the matrix M with its ﬁrst and last rows (F
+and L = T bwt) in bold. Figure 1 (bottom right) shows how
+this ﬁts in our overall scheme.
+
+The resulting permutation from T to T bwt is reversible.
+There exists a simple last-to-ﬁrst mapping from symbols in
+L to F [18]: Let C[c] be the total number of symbols in T
+that are lexicographically less than c. Then the LF-mapping
+is deﬁned as
+
+Text data is represented as a succinct full-text self-index [48]
+that is generally known as the FM-index [18]. The index supports 
+efﬁcient pattern matching operations that can be easily
+extended to support different XPath predicates.
+
+LF(i) = C[L[i]] + rankL[i](L, i).
+
+Note that L[i] is the symbol preceding the i-th lexicographically 
+smallest row of M. Thus, if T bwt[i] = T [j], then
+
+<part @name="pen">   <color>blue</color>   <stock>40</stock>   Soon discontinued.</part><part @name="rubber">   <stock>30</stock></part></parts></parts>XML datablue4030partpartname@#color#stock#stockname@#346pen1rubber5%%2Soon discontinuedDoc[1] = 6Doc[2] = 4Doc[3] = 2...pen$Soon discontinued$blue$40$rubber$30$T =$$$$$$0034 SbbbcddeeeeiilnnnnoooprrstuuuF =bwtL = T     =DocText collection123456213456nde0r043$$n$ub$se uupbtdbeooiocS$e$inrlnp = "part"n = "@name"c = "color"s = "stock"Modelparts&2134567891110121314151617P = "parts"/@:/%:/p:n:/n:c:/c:s:/s:#:/#:@:%:000010000000000000000010000000000000000001000000000000000001000000000000000000010000000000000000000000000000000000001000000000000000000000000000000000010000000000010000000000000000000000001000000000001000000000000100100010000000000010000000000000001001000100000000000100000001000000000000000001000000000000000000001000000000000000001000000000000100000000000000000100000000000000001000000000000000001000000000p:00100000000000000000100000000000000000000000000000000100000000000100P:/P:01000000000000000000000000000000000000000000000000000000000000000010Tag =& P  p @ n % /% /n /@ # /# c # /# /c s # /# /s /p p @ n % /% /n /@ s # /# /s /p /P /&Par = ( ( ( ( ( ( ) ) ) ( ) ( ( ) ) ( ( ) ) ) ( ( ( ( ) ) ) ( ( ) ) ) ) )Tree5
+
+i := m
+sp := 1
+ep := n
+While sp ≤ ep and i ≥ 1 Do
+
+c := pi
+sp := C[c] + rankc(T bwt, sp − 1) + 1
+ep := C[c] + rankc(T bwt, ep)
+i := i − 1
+If ep < sp Then
+
+FM-Count(p1p2 . . . pm)
+1.
+2.
+3.
+4.
+5.
+6.
+7.
+8.
+9.
+10.
+11.
+12.
+
+Else
+
+Return 0
+Return ep − sp + 1
+
+Fig. 2 Example of the FM-index for text T = “discontinued” sampled 
+each l = 3 positions.
+
+Fig. 3 Counting on the FM-index.
+
+T bwt[LF(i)] = T [j − 1]. The symbols of T can therefore
+be read in reverse order by starting from the location i such
+that T bwt[i] = $, and applying LF recursively:
+T [u] = $ = T bwt[i],
+T [u − 1] = T bwt[LF(i)],
+T [u − 2] = T bwt[LF(LF(i))],
+and so on until, after u steps, we get the ﬁrst symbol T [1].
+The values C[c] can be stored in a small array of σ log u
+bits. Function rankc(L, i) can be computed in O(log σ) time
+with a data structure called wavelet tree which, when built
+on T bwt, uses only uHk(T ) + o(u log σ) bits [19, 28]. In
+practice we opt for a Huffman-shaped wavelet tree using uncompressed 
+bitmaps inside [10]. Despite this achieves space
+u(H0(T ) + 1)(1 + o(1)), it is much faster than the other implementations.
+ In particular, operations cost O(H0(T )) time
+on average, an improvement that applies to all the O(log σ)
+worst-case complexities that follow.
+
+Pattern matching is supported via backward searching
+on the BWT [18]. Given a pattern P [1, m], the backward
+search starts with the range [sp, ep] = [1, u] of rows in
+M. At each step i ∈ {m, m − 1, . . . , 1} of the backward
+search, the range [sp, ep] is updated to match all rows of M
+that have P [i, m] as a preﬁx. New range [sp(cid:48), ep(cid:48)] is given
+by sp(cid:48) = C[P [i]] + rankP [i](L, sp − 1) + 1 and ep(cid:48) =
+C[P [i]]+rankP [i](L, ep). Each step takes O(log σ) time using 
+the wavelet tree, and ﬁnally ep−sp+1 gives the number
+of times P occurs in T . Figure 3 gives the pseudocode.
+
+To ﬁnd out the location of each occurrence, the text is
+traversed backwards from each sp ≤ i ≤ ep (virtually,
+using LF on T bwt) until a sampled position is found. This
+is a sampling carried out at regular text positions, so that
+the corresponding positions in T bwt are marked in a bitmap
+Bs[1, u], and the text position corresponding to T bwt[i], if
+Bs[i] = 1, is stored in a samples array Ps[rank1(Bs, i)].
+If every l-th position of T is sampled, the extra space is
+O((n/l) log n) (including the compressed Bs [52]) and the
+locating takes O(l log σ) time per occurrence. Using l =
+
+Θ(log1+ u/ log σ) yields o(u log σ) extra space and locating 
+time O(log1+ u).
+
+Figure 2 illustrates a sampling of T each l = 3 symbols.
+ Assume we look for P = “n”; then backward search
+ﬁnds [sp, ep] = [8, 9]. Now to locate the occurrence at 8
+we see that Bs[8] = 0, Bs[LF(8)] = Bs[10] = 0, and ﬁnally 
+Bs[LF(10)] = Bs[2] = 1. This corresponds to position 
+Ps[rank1(Bs, 2)] = Ps[2] = 4. Since we applied LF
+twice, the answer is 4 + 2 = 6. We have found the occurrence 
+T [6..] = “n..”.
+
+3.2 Text Collection and Queries
+
+The textual content of the XML data is stored as $-terminated
+strings so that each text corresponds to one string. Let T be
+the concatenated sequence of the d texts. Array Ps is extended 
+to record both the text identiﬁer and the offset inside
+it. Since there are several $’s in T , we ﬁx a special ordering 
+such that the end-marker of the i-th text appears at F [i]
+in M (see Figure 1, bottom right). This generates a valid
+T bwt of all the texts and makes it easy to extract the i-th text
+starting from its $-terminator.
+
+Now T bwt contains all end-markers in some permuted
+order. This permutation is represented with a data structure
+Doc, that maps from positions of $s in T bwt to text identiﬁers.
+ Let T bwt[j] correspond to the ﬁrst symbol of the text
+with identiﬁer x, thus if i = LF(j) it holds T bwt[i] = $.
+Then we store Doc[rank$(T bwt, i)] = x. Furthermore, Doc
+can be stored in a format that allows for range searching
+(as illustrated in Figure 1 (right)): Given a range [sp, ep] of
+T bwt and a range of text identiﬁers [x, y], Doc can be used
+to output identiﬁers of all $-terminators within the range
+[sp, ep] × [x, y], in O(log d) time per answer. In practice,
+because we only use the simpler functionality in the current
+system, Doc is implemented as a plain array using d log d
+bits.
+
+Note Doc allows us to never switch from one text to another 
+while looking for the preceding sampled value: If we
+
+FTbwtBs$discontinued1continued$dis1d$discontinue0discontinued$1ed$discontinu0inued$discont0iscontinued$d0ntinued$disco0nued$disconti0ontinued$disc0scontinued$di0tinued$discon1ued$discontin1Ps1341710discontinued$12345678910111213$0c1d2e4i5n7o9s10t11u12C6
+
+reach a $ before ﬁnding any Bs[i] = 1, array Doc can be
+used to determine that we are at the ﬁrst position of some
+text with identiﬁer x.
+
+The basic pattern matching feature of the FM-index can
+be extended to support XPath functions such as starts-with,
+ends-with, contains, and operators =, ≤, <, >, ≥ for lexicographic 
+ordering. Given a pattern and a range of text identiﬁers 
+to be searched, these functions return all text identiﬁers
+that match the query within the range. In addition, existential 
+(is there a match in the range?) and counting (how many
+matches in the range?) queries are supported. Time complexities 
+are O(|P| log σ) for the search phase, plus an extra
+for reporting. While we describe the operators in their general 
+form, which need the range reporting functionality from
+Doc, our current prototype implements only the simple case
+[x, y] = [1, d], where Doc can be an array.
+
+starts-with(P, [x, y]): The goal is to ﬁnd texts in [x, y] range
+preﬁxed by the given pattern P . After the normal backward
+search, the range [sp, ep] in T bwt contains the end-markers
+of all the texts preﬁxed by P . Now [sp, ep] × [x, y] can be
+mapped to Doc, and existential and counting queries can be
+answered in O(log d) time. Matching text identiﬁers can be
+reported in O(log d) time per identiﬁer.
+
+ends-with(P, [x, y]): Backward searching is localized to texts
+in [x, y] by choosing [sp, ep] = [x, y] as the starting interval,
+since we have forced the ordering of F [1, d] so that F [z] = $
+is the terminator of text with identiﬁer z. After the backward 
+search, the resulting range [sp, ep] contains all possible
+matches, thus existential and counting queries are answered
+in constant time after the search. To ﬁnd out text identiﬁers
+for each occurrence, the text must be traversed backwards to
+ﬁnd a sampled position (or a $). The cost is O(l log σ) per
+answer, where l is the sampling step.
+
+operator = (P, [x, y]): Whole texts which are equal to P ,
+and with identiﬁers in the range [x, y], can be found as follows.
+ Start with a backward search as in ends-with, and then
+map to the $-terminators as in starts-with. The time complexities 
+are same as in starts-with.
+
+contains(P, [x, y]): To ﬁnd texts that contain P , we start
+with the normal backward search and ﬁnish like in endswith.
+ In this case there might be several occurrences inside
+one text, which have to be ﬁltered. Thus, the time complexity 
+is proportional to the total number of occurrences,
+O(l log σ) for each. Existential and counting queries are as
+slow as reporting queries. The basic O(|P| log σ)-time counting 
+of all the occurrences of P can still be useful for query
+optimization.
+
+operators ≤, <, >, ≥: Operator ≤ matches texts that are
+lexicographically smaller than or equal to the given pattern.
+It can be solved like the starts-with query, but updating only
+the ep of each backward search step, while sp = 1 stays
+constant. While [sp, ep] delimits the rows of M that start
+with P [i, m], [1, ep] delimits the rows that start with a preﬁx
+lexicographically smaller than or equal to P [i, m]. If at some
+point there are no occurrences of P [i] = c within the preﬁx
+L[1, ep], this means that P [i, m] does not appear in T . To
+continue the search we replace ep = C[c] and continue for
+P [1, i − 1]. Other operators can be supported analogously,
+and costs are as for starts-with.
+
+The new XPath extension, XPath Full Text 1.0 [59], suggests 
+a wider selection of functionality for text searching.
+Implementation of these extensions requires regular expression 
+and approximate searching functionalities, which can
+be supported within our index using the general backtracking 
+framework [36]: The idea is to alter the backward search
+to branch recursively to different ranges [sp(cid:48), ep(cid:48)] representing 
+the sufﬁxes of the text preﬁxes (i.e., substrings). This is
+c = C[c] + rankc(L, sp − 1) + 1 and
+done by computing sp(cid:48)
+c = C[c] + rankc(L, ep) for all c ∈ Σ at each step and
+ep(cid:48)
+recursing on each [sp(cid:48)
+c, ep(cid:48)
+c]. Then the pattern (or regular ex-
+pression) can be compared with all substrings of the texts,
+allowing us to search for approximate occurrences [36]. The
+running time becomes exponential in the number of errors
+allowed, but different branch-and-bound techniques can be
+used to obtain practical running times [37,38]. We omit further 
+details, as these extensions are out of the scope of this
+paper.
+
+3.3 Construction and Text Extraction
+
+The FM-index can be built by adapting any BWT construction 
+algorithm. Linear time algorithms exist for the task,
+but their practical bottleneck is the peak memory consumption.
+ Although there exist general timeand 
+space-efﬁcient
+construction algorithms, it turned out that our special case
+of text collection admits a tailored incremental BWT construction 
+algorithm [57] (see the references and experimental 
+comparison therein for previous work on BWT construc-
+tion): The text collection is split into several smaller collections,
+ and a temporary index is built for each of them separately.
+ The temporary indexes are then merged, and ﬁnally
+converted into a static FM-index. The BWT allows extracting 
+the i-th text by successively applying LF from T bwt[i],
+at O(log σ) cost per extracted symbol.
+
+3.4 Additional Text Collections
+
+To enable faster text extraction, we allow storing the texts
+in plain format in n log σ bits, or in an enhanced LZ78compressed 
+format (derived from the LZ-index [4]) using
+uHk(T ) + o(u log σ) bits. These secondary text representations 
+are coupled with a delta-encoded bit vector storing
+starting positions of each text in T . This bitmap requires
+O(d log u
+
+d ) more bits.
+
+In fact, keeping next to the FM-index an additional copy
+of all texts in plain format has more advantages. As mentioned 
+before, the time complexity of contains-queries is
+proportional to the total number of occurrences. This implies 
+that for large occurrence numbers, it becomes faster
+to search over the plain texts than over the FM-index. The
+precise cut-off point depends on the sampling factor l, see
+Section 6.3 for mor details. Since a global count over the
+FM-index is fast (O(|P| log σ) time), we use it to determine
+whether to search over the plain text or over the FM-index.
+Since search over our implementaiton of the LZ-index
+is problematic, we only consider plain and FM-index from
+now on, and do not mention the LZ-index anymore.
+
+4 Tree Representation
+
+4.1 Data Representation
+
+The tree structure of an XML collection is represented by the
+following compact data structures, which provide navigation
+and indexed access to it. See also the bottom left of Figure 1.
+
+4.1.1 Par
+
+This is the balanced parentheses representation of the tree
+structure (see, e.g., [46]). It is obtained by traversing the tree
+in depth-ﬁrst-search (DFS) order, writing a "(" whenever
+we arrive at a node, and a ")" when we leave it (thus it is
+easily produced during the XML parsing). In this way, every 
+node is represented by a pair of matching opening and
+closing parentheses. A tree node is identiﬁed by the position
+of its opening parenthesis in Par (that is, a node is just an
+integer index within Par). In particular, we use the balanced
+parentheses implementation of [53], which supports a very
+complete set of operations, including ﬁnding the i-th child
+of a node, in constant time; for more information concerning 
+implementation details and performance, see [3]. Overall 
+Par uses 2n + o(n) bits. This includes the space needed
+for constant-time binary rank on Par, which is very fast in
+practice.
+
+4.1.2 Tag
+
+This is the sequence of the tag identiﬁers of each tree node,
+including an opening and a closing version of each tag, to
+mark the beginning and ending point of each node. These
+tags are numbers in [1, 2t] and are aligned with Par so that
+the tag of node i is simply Tag[i].
+
+7
+
+We also need rank and select queries on Tag. They allow
+to realize special operations such as “TaggedDesc” which
+“jumps” to the ﬁrst descendant of the given node, such that
+the descendant has a given label (see Section 4.2.2). Several 
+sequence representations supporting access and these
+operations are known [10, 25, 28]. Given that Tag is not too
+critical in the overall space, but it is in time, we opt for a
+practical representation that favors speed over space. First,
+we store the tags in an array using (cid:100)log 2t(cid:101) bits per ﬁeld,
+which gives constant time access to Tag[i]. The rank and
+select queries over the sequence of tags are answered by a
+second structure. Consider the binary matrix R[1..2t][1..2n]
+such that R[i, j] = 1 if Tag[j] = i. We represent each
+row of the matrix using Okanohara and Sadakane’s structure 
+sarray [50]. Its space requirement for each row i is
++ ni(2 + o(1)) bits, where ni is the number of
+ni log 2n
+ni
+times symbol i appears in Tag. The total space of both structures 
+adds up to 2n log(2t) + 2nH0(Tag) + n(2 + o(1)) ≤
+4n log t + 2n + o(n) bits. They support access and select in
+O(1) time, and rank in O(log n) time.1
+
+4.2 Tree Navigation
+
+We deﬁne the following operations over the tree structure,
+which are useful to support XPath queries over the tree.
+Most of these operations are supported in constant time, except 
+when a rank over Tag is involved. Let tag be a tag identiﬁer.
+
+
+4.2.1 Basic Tree Operations
+
+These are direcly inherited from Sadakane’s implementation 
+[53]. We mention only the most important ones for this
+paper; x is a node (a position in Par).
+
+– Close(x): The closing parenthesis matching Par[x]. If x
+is a small subtree this takes a few local accesses to Par,
+otherwise a few non-local table accesses.
+
+– Preorder(x) = rank((Par, i): Preorder number of x.
+– SubtreeSize(x) = (Close(x) − x + 1)/2: Number of
+– IsAncestor(x, y) = x ≤ y ≤ Close(x): Whether x is an
+
+nodes in the subtree rooted at x.
+
+ancestor of y.
+
+– FirstChild(x) = x + 1: First child of x, if any.
+– NextSibling(x) = Close(x) + 1: Next sibling of x, if
+
+any.
+
+– Parent(x): Parent of x. Somewhat costlier than Close(x)
+in practice, because the answer is less likely to be near x
+in Par.
+
+1 They report higher complexities, but these are easily improved by
+using a representation for dense arrays that supports select in constant
+time.
+
+8
+
+4.2.2 Connecting to Tags
+
+5 XPath Queries
+
+The following operations are essential for our fast XPath
+evaluation.
+– SubtreeTags(x, tag): Returns the number of occurrences
+of tag within the subtree rooted at node x. This is
+ranktag(Tag, Close(x)) − ranktag(Tag, x − 1).
+
+– Tag(x): Gives the tag identiﬁer of node x. In our representation 
+this is just Tag[x].
+
+– TaggedDesc(x, tag): The ﬁrst node (in pre-order) labeled
+tag strictly within the subtree rooted at x. It is obtained
+as selecttag(Tag, ranktag(Tag, x) + 1) if it is ≤ Close(x),
+and undeﬁned otherwise.
+
+– TaggedPrec(x, tag): The last node labeled tag with preorder 
+smaller than that of node x, and not an ancestor
+of x. Let r = ranktag(Tag, x − 1). If selecttag(Tag, r) is
+not an ancestor of node x, we stop. Otherwise, we set
+r = r − 1 and iterate.
+
+– TaggedFoll(x, tag): The ﬁrst node labeled tag with preorder 
+larger than that of x, and not in the subtree of x.
+This is selecttag(Tag, ranktag(Tag, Close(x)) + 1).
+
+Our goal is to support a practical subset of XPath, while being 
+able to guarantee efﬁcient evaluation based on the data
+structures described in the previous sections. As a ﬁrst shot
+we target the forward fragment of “Core XPath” [26]. We
+focus our presentation on the descendant and child axes,
+but self, attribute and following-sibling are also
+part of our implementation. Thus, the non-terminal “Axis”
+in the following EBNF can here be thought of as generating 
+only the terminals “descendant” and “child”. A node
+test (non-terminal “NodeTest” below) is either the wildcard
+(“*”), a tag name, or a node type test, i.e., one of “text()”
+or “node()”. Note that our current prototype does not support 
+the node type tests “comment()” and “processing-
+instruction()”. Of course, additional to Core XPath, we
+support all text predicates of XPath 1.0, i.e., the =, contains,
+and starts-with predicates. Here is an EBNF for Core XPath.
+
+Core
+LocationPath
+LocationStep
+
+::=
+::=
+::= Axis ‘::’ NodeTest
+
+LocationPath | ‘/’ LocationPath
+LocationStep (‘/’ LocationStep)*
+| Axis ‘::’ NodeTest ‘[’ Pred ‘]’
+Pred ‘and’ Pred | Pred ‘or’ Pred
+| ‘not’ ‘(’ Pred ‘)’ | Core | ‘(’ Pred ‘)’
+
+4.2.3 Connecting the Text and the Tree
+
+Pred
+
+::=
+
+Conversion between text numbers, tree nodes, and global
+identiﬁers, is easily carried out by using Par and a bitmap B
+of 2n bits that marks the opening parentheses of tree leaves
+containing text, plus o(n) extra bits to support rank/select
+queries; the latter uses an implementation of [52] which is
+described in [10]. The bitmap B enables the computation of
+the following operations:
+– LeafNumber(x): Gives the number of leaves up to x in
+
+Par. This is rank1(B, x).
+– TextIds(x): Gives the range of text identiﬁers that descend 
+from node x. This is simply [LeafNumber(x −
+1) + 1, LeafNumber(Close(x))].
+
+– XMLIdText(d): Gives the global identiﬁer for the text
+
+with identiﬁer d. This is Preorder(select1(B, d)).
+
+– XMLIdNode(x): Gives the global identiﬁer for a tree
+
+node x. This is just Preorder(x).
+
+4.3 Displaying Contents
+
+A data value is the value of an attribute or the content of
+a text node. Here, all data values are considered as strings.
+If an XPath expression selects only data values then we call
+it value expression. In our fragment, p is a value expression
+if its last axis is the attribute axis or the text() test. Inside
+of a ﬁlter we call “self” (and “.”) a value expression if the
+last axis to the left of the ﬁlter is a value expression. Our
+XPath fragment (“Core+”), consists of Core XPath plus the
+following data value comparisons which may appear inside
+ﬁlters (that is, may be generated by the nonterminal Pred of
+above). Let w be a string and p a value expression.
+
+– p = w (equality): tests if the string w is equal to a string
+
+selected by p.
+
+– contains(p, w): tests if the string w is contained in a
+
+string selected by p.
+
+– starts-with(p, w): tests if the string w is a preﬁx of a
+
+string selected by p.
+
+Given a node x, we want to recreate its XML serialization,
+that is, return (a portion of) the original XML string. We
+traverse the structure starting from Par[x], retrieving the tag
+names and the text contents, from the text identiﬁers. The
+time is O(log σ) per text symbol (or O(1) if we use the redundant 
+text storage described in Section 3) and O(1) per
+tag.
+– GetText(d): Generates the text with identiﬁer d.
+– GetSubtree(x): Generates the subtree at node x.
+
+5.1 Tree Automata Representation
+
+Tree automata are a well-known and popular tool for reasoning 
+about XML, see, e.g., [24,39,49,55]. Only seldomly
+have they been used as a tool for query evaluation. In [27]
+automata are used to evaluate, on an XML stream, many
+(very simple) XPath queries in parallel. It is well-known
+that Core XPath can be evaluated using tree automata; see,
+e.g., [35] and [6]. Here we use alternating tree automata (as
+
+in [11] and [31]). Such automata work with Boolean formulas 
+over states, which must become satisﬁed for a transition 
+to ﬁre. This allows a much more compact representation 
+of queries through automata, than ordinary tree automata 
+(without formulas). Our tree automata are deﬁned
+over a binary tree view of the XML tree where the left child
+is the ﬁrst child of the XML node and the right child is the
+next sibling of the XML node.
+
+satisﬁed at the root node);
+
+Deﬁnition 1 (Non-deterministic marking automaton) An
+automaton A is a tuple (L,Q,T ,B, δ), where:
+– L is a countable (possibly inﬁnite) set of tree labels;
+– Q is the ﬁnite set of states;
+– T ⊆ Q is the set of top states (that is, states that must be
+– B ⊆ Q is the set of bottom states (that is, states that must
+cof → F is the transition function, where
+– δ : Q × 2L
+F is the set of Boolean formulas 2. A Boolean formula
+φ is a ﬁnite production of the grammar:
+φ ::= (cid:62) | ⊥ | φ ∨ φ | φ ∧ φ | ¬φ | a | p (formula)
+a ::= ↓1 q | ↓2 q
+where p ∈ P is a built-in predicate and q is a state.
+
+be satisﬁed at the leaves);
+
+f ∪ 2L
+
+(atom)
+
+Before explaining in details the use of formulas, we motivate 
+our use of ﬁnite or co-ﬁnite sets as guards for transitions.
+ While traditionally automata transitions are guarded
+by a state and a single label, this would make the encoding
+of XPath into automata very tedious and needlessly complicate 
+the algorithms. Indeed, one of the features of XPath is
+a wildcard node test, namely “*”. One solution could be to
+suppose that for a given automaton the set of labels of the
+input document is known in advance and that this set is used
+as alphabet for the automaton. Unfortunately, this does not
+accurately reﬂect the semantics of XPath in which a query
+can be deﬁned independently of any document and can even
+be executed on any document (it might not yield any result
+but its application is nonetheless valid). Another solution (as
+in [27]) is to equip automata with a special “default” transition,
+ labelled for instance “_”, which is taken if in the current 
+state no other transition can be evaluated. This has two
+drawbacks. Firstly, it is only well-deﬁned for deterministic
+tree automata (our encoding makes heavy use of nondeter-
+minism). Secondly, the evaluation function is polluted by the
+special cases which handle this default transition. Our solution 
+is more blunt. We guard transitions by ﬁnite or co-ﬁnite
+sets of labels, and a transition is taken if the label of the current 
+node is a member of that set. For instance, the “*” XPath
+test is encoded as a transition guarded by the set L−{@, #},
+where “@” and “#” represent labels of subtrees containing
+
+2 We denote by 2L
+
+of co-ﬁnite subsets of L.
+
+f the set of ﬁnite subsets of L and by 2L
+
+cof the set
+
+9
+
+attribute nodes and text nodes in our encoding. This allows
+us to give a very straightforward evaluation function for tree
+automata, which relies on the evaluation of Boolean formulas,
+ presented next.
+
+Deﬁnition 2 (Evaluation of a formula) Given an automaton 
+A and an input tree t, the evaluation of a formula is given
+by the judgment R1,R2, n (cid:96)A φ = (b, R) where R1 and
+R2 are mappings from states to sets of nodes of t, n is a node
+of t, φ is a formula, b ∈ {(cid:62),⊥}, and R is a set of nodes of
+t. We deﬁne the semantics of this judgment by the means of
+the inference rules given in Figure 4.
+
+(true)
+
+(not)
+
+R1, R2, t(cid:48) (cid:96)A (cid:62) = ((cid:62), ∅)
+R1, R2, t(cid:48) (cid:96)A φ = (b, R)
+R1, R2, t(cid:48) (cid:96)A ¬φ = (b, ∅)
+R1, R2, t(cid:48) (cid:96)A φ1 = (b1, R1)
+R1, R2, t(cid:48) (cid:96)A φ2 = (b2, R2)
+
+R1, R2, t(cid:48) (cid:96)A φ1 ∨ φ2 = (b1, R1)(cid:54) (b2, R2)
+R1, R2, t(cid:48) (cid:96)A φ1 ∧ φ2 = (b1, R1)(cid:55) (b2, R2)
+
+R1, R2, t(cid:48) (cid:96)A φ1 = (b1, R1)
+R1, R2, t(cid:48) (cid:96)A φ2 = (b2, R2)
+
+(or)
+
+(and)
+
+q ∈ dom(Ri)
+
+R1, R2, t(cid:48) (cid:96)A↓i q = ((cid:62), R(q))
+
+for i ∈ {1, 2} (left,right)
+
+R1, R2, t(cid:48) (cid:96)A mark = ((cid:62), {t(cid:48)})
+
+(mark)
+
+EvalP red(p,t’) =b, R
+R1, R2, t(cid:48) (cid:96)A p = (b, R)
+
+(pred)
+
+when no other rule applies
+R1, R2, t(cid:48) (cid:96)A φ = (⊥, ∅)
+
+where:
+(cid:62) = ⊥ and ⊥ = (cid:62)
+
+(b1, R1)(cid:62) (b2, R2) =
+(b1, R1)(cid:63) (b2, R2) =
+
+
+(cid:26) (cid:62), R1 ∪ R2 if b1 = (cid:62), b2 = (cid:62)
+
+if b1 = (cid:62), b2 = ⊥
+if b2 = (cid:62), b1 = ⊥
+(cid:62), R1 ∪ R2 if b1 = (cid:62), b2 = (cid:62)
+otherwise
+
+(cid:62), R1
+(cid:62), R2
+⊥, ∅
+⊥, ∅
+
+otherwise
+
+Fig. 4 Inference rules deﬁning the evaluation of a formula
+
+These rules are straightforward and combine the rules
+for a classical alternating automaton, with the rules of a
+marking automaton. Rules (or) and (and) implements the
+Boolean connective of the formula and collect the marking 
+found in their true sub-formulas. Rules (left) and (right)
+(written as a rule schema for concision) evaluate to true if the
+state q is in the corresponding set. Intuitively, R1 (resp. R2)
+is the set of states recognizing the left (resp. right) subtree
+of the input tree. Rule (pred) supposes the existence of an
+evaluation function for built-in predicates. Among the latter,
+we suppose the existence of a special predicate mark, which
+
+10
+evaluates to (cid:62) and returns the singleton set containing the
+current node.
+
+We now give the semantics of an automaton by means
+of the run function TopDownRun (see Figure 5). This alIf 
+t is the empty tree Then
+
+Else
+
+TopDownRun(A, t, r)
+1.
+2.
+3.
+4.
+5.
+6.
+7.
+8.
+
+Return (cid:91)
+
+Return {q → ∅ | q ∈ B ∩ r}
+trans := {q, (cid:96) → φ | q ∈ r and Tag(t) ∈ (cid:96)}
+ri := {q |↓i q ∈ φ, ∀φ ∈ trans}, for i ∈ {1, 2}
+R1 := TopDownRun(A, FirstChild(t), r1)
+R2 := TopDownRun(A, NextSibling(t), r2)
+
+{q (cid:55)→ R | R1, R2, t (cid:96)A, φ = ((cid:62), R)}
+
+(q,(cid:96)→φ)∈trans
+
+Fig. 5 Evaluation function for tree automata
+
+gorithm is based on the text book algorithm for recursive
+bottom-up evaluation of tree automata (see e.g. [31]). The
+algorithm performs a recursive ﬁrst child/next sibling traversal 
+of the tree until a leaf is reached (base case for the recur-
+sion). When returning form the recursive evaluation on the
+left and right subtrees (Lines 6 and 7, Figure5) the function
+evaluate the set of transitions for the current node, based
+on the set of states recognizing the left and right subtree.
+However, instead of blindly doing a recursive descent from
+the root to the leaves and evaluating when returning from
+the recursive calls, the transitions are restricted by the set
+of states r (Line 4). This technique is dubbed “bottom-up
+evaluation with top-down preprocessing” in [31]. We therefore 
+named the run function TopDownRun to differentiate
+it from a real bottom-up run (starting from the leaves of the
+tree) that we present in Section 5.3.2. The novelty is our use
+of maps from states to nodes instead of only sets of states,
+to efﬁciently implement the marking of selected nodes.
+
+5.2 From XPath to Automata
+
+→ ↓1 q1
+
+where δ contains the following transitions (recall that &,
+@, and # denote the special tags for the document node,
+attribute nodes, and text nodes, respectively):
+1 q0,{&}
+2 q1,{listitem} → ↓1 q2 ∧ ↓1 q1 ∧ ↓2 q1
+3 q1,L − {@, #} → ↓1 q1 ∧ ↓2 q1
+4 q2,{keyword} → mark ∧ ↓1 q3 ∧ ↓1 q2 ∧ ↓2 q2
+5 q2,L − {@, #} → ↓1 q2 ∧ ↓2 q2
+6 q3,{emph}
+7 q3,L − {@, #} → ↓2 q3
+It is clear that this encoding is linear in the size of the query.
+For each step, we create one state and two transitions. The
+ﬁrst transition (Transitions 2, 4, and 6 above) represents the
+action the automaton performs when the current node matches
+the step at issue. For instance if Transition 2 is taken, it
+means that the current node has label listitem and that:
+– the state encoding the rest of the query, namely q2, rec-
+
+→ (cid:62)
+
+ognizes the left subtree (hence the ↓1 q2)
+
+– the current step also holds recursively for the descendant 
+and following nodes of the current node (because
+of ↓1 q1∧ ↓2 q1).
+
+The second transition associated with a step handles the default 
+case and the recursion. For instance, in Transition 3, if
+the current node is not a listitem or if it is a listitem for
+which the continuation path does not hold, then we just stay
+in the same states for descendant and following nodes. This
+use of non-determinism (since {listitem} ⊆ L − {@, #})
+is crucial to keep the automaton linear in the size of the
+query. Lastly, note how “top-level steps” (listitem and
+keyword in our example) are encoded by universal transitions,
+ in which the use of the “∧” connectives forces the
+formula to be recursively checked down to the leaves (and
+therefore explores the tree to ﬁnd all occurrences of such
+steps) while “ﬁlter steps” (here emph) are encoded as existential 
+transitions, which become satisﬁed as soon as one
+node veriﬁes them.
+
+The translation of an XPath query to an alternating automaton 
+is a simple syntax-directed translation which can be carried 
+out in one pass through the parse tree of the query.
+Roughly speaking, the resulting automaton is “isomorphic”
+to the original query (and has essentially the same size). We
+illustrate the translation by an example. Consider the query
+
+/descendant::listitem/descendant::keyword[
+
+5.3 Leveraging the Speed of the Low-Level Interface
+
+We have seen how to evaluate an XPath query by compiling
+it into a tree automaton and running the latter on the input
+document. We present now several techniques that make use
+of the tree and text index presented in Sections 4 and 3. It is
+these techniques that make our SXSI prototype competitive
+in speed with state-of-the-art XML databases.
+
+for which the automaton is
+A = (L,{q0, q1, q2},{q0},{q1, q2}, δ)
+
+Conventionally, the run of a tree automaton visits every node
+of the input tree. This is for instance the behaviour of the
+
+emph]
+
+5.3.1 Jumping to relevant nodes
+
+11
+
+tree automata presented in [35], which perform two scans of
+the whole XML document (the latter being stored on disk in
+a particular format). However, for typical queries, most of
+the nodes are “useless” in the sense that the automaton only
+loops through them staying in the same set of states. In other
+words, the automaton ignores most of the nodes. To restrict
+the run to interesting nodes, we use the notion of relevant
+nodes introduced in [43]. While the full characterization is
+out of the scope of this paper, we give a ﬂavor of relevant
+nodes, using an example. Consider the query
+
+/descendant::listitem/descendant::keyword
+
+Clearly, we only care about listitem and keyword and
+how they are positioned with respect to each other. This is
+precisely the information that is provided through the TaggedDesc 
+and TaggedFoll functions of the tree representation.
+These functions allow us to have a “contracted” view of the
+tree, restricted to nodes with certain labels of interest (but
+preserving the overall tree structure). For instance, to solve
+the above query we can call TaggedDesc(Root, listitem)
+which selects the ﬁrst listitem node x. Now, simply traverse 
+recursively the subtree rooted at x, using TaggedDesc(_,
+keyword) and TaggedFoll(_, keyword) instead of FirstChild
+and NextSibling. After this, we determine the next listitem
+node using TaggedFoll(x, listitem). We do this optimization 
+of “jumping run” based on the automaton: for a given
+set of states of the automaton we compute the set of relevant 
+transitions which cause a state change. The labels of
+those transitions are the relevant labels to which we jump,
+using TaggedDesc and TaggedFoll. For instance, in the automaton 
+for the above query (which is the same as the one
+given in Section 5.2, minus state q3 and corresponding tran-
+sitions) only Transitions 2 and 4 are relevant (that is, these
+transitions are valid only when the automaton is on a relevant 
+node). Thus, in state q0 the automaton can use TaggedDesc 
+to jump to listitem nodes, and in state q1 it can jump
+to keyword nodes. It should be noted that for such a query,
+our “jumping run” is optimal: the automaton only visits the
+top-most listitem nodes and all the keyword nodes below
+them. This behaviour is similar to the idea of “partitioning
+and pruning” in the staircase join [29], but here achieved by
+means of automata.
+
+5.3.2 Bottom-Up Runs
+
+While the previous technique works well for tree-based queries
+it still remains slow for very selective value-based queries.
+For instance, consider the query
+
+//listitem//keyword[contains(.,"Unique")]
+
+The text interface described in Section 3 can answer the
+text predicate very efﬁciently returning the set of text nodes
+matching this contains query. If the number of occurrences
+
+is low, and in particular smaller than the number of listitem
+or keyword tags in the document (which can also be determined 
+efﬁciently through the tree structure interface), then
+it would be faster to take these text nodes as starting point
+for query evaluation and test if their path upward to the root
+matches the XPath expression //listitem//keyword. This
+scheme is particularly useful for text oriented queries with
+low selectivity text predicates. However, it also applies for
+tree only queries: imagine the query //listitem//keyword
+on a tree with many listitem nodes but only a few keyword
+nodes. We can start bottom-up by jumping to the keyword
+nodes and then check their ancestors for listitem nodes. (Note
+that with the tree index described here, we cannot directly
+jump to all bottom-most keyword nodes. We would need to
+iterate through all keyword nodes. Direct access could be
+provided through additional sarrays storing for each label
+its bottom-most nodes.)
+
+We now devise a real bottom-up evaluation algorithm
+of our automata. The algorithm takes an automaton and a
+sequence of potential match nodes (in our example, the text
+nodes containing the string "Unique"). It then moves up
+to the root, using the Parent function and checks that the
+automaton arrives at the root node in its initial state qi. Note
+that, if naively done, such a bottom-up run will visit many
+nodes repeatedly: if a node is the common-ancestor of m
+potential match nodes, then it would be visited m times.
+
+Instead, we move bottom-up left-to-right, and only move
+upwards from the left-most potential match until we reach
+its lowest common ancestor with the next potential match.
+This technique is similar in spirit to shift-reduce parsing
+(see [1]). This scheme is illustrated in Figure 6. Consider
+a sequence [t1,. . . ,tn] (ordered in pre-order) of potentially
+matching nodes. The algorithm starts on node t1. First, if the
+node is not a leaf, we call the TopDownRun function on t1
+with r = Q. This returns the mapping R1 of all states accepting 
+t1. We move from t1 upwards to the document root,
+starting with states dom(R1). Once we arrive at a node t(cid:48)
+1
+which is an ancestor of the next potential matching subtree
+t2, we stop at t(cid:48)
+1 and start the algorithm on t2 until it reaches
+1. Upon reaching t(cid:48)
+t(cid:48)
+1, we merge both mappings and continue
+upwards until we reach the root or a common ancestor of t(cid:48)
+1
+and t3, and so on. The idea of “stopping” at a node to explore 
+the the next potential matching subtree is similar to
+the shift action of a bottom-up parser: the stopped node is
+pushed onto a stack (here the recursive call stack) while the
+rest of the symbols are processed. Similarly, the “merging”
+of two nodes which are then replaced by their lowest common 
+ancestor is similar to the reduce action of a bottom-up
+parser: two symbols are removed from the parsing stack and
+replaced by the non-terminal of the corresponding grammar
+rule. Merging the runs at the lowest common ancestor guaranties 
+that we never touch any node more than once, during
+
+12
+
+t(cid:48)
+
+1
+
+x
+
+(b)
+
+x
+
+t1
+
+x
+
+x
+
+(a)
+
+t2
+
+t(cid:48)
+(a)
+
+1
+
+x
+
+x
+
+t1
+
+x
+
+x
+
+t2
+
+(b)
+
+t(cid:48)
+
+1
+
+x
+
+x
+
+t1
+
+x
+
+x
+
+t2
+
+(a) Initial TopDownRun
+(b) MatchAbove walks upwards
+and ignores non-matching subtrees
+
+Fig. 6 Illustration of the bottom-up run
+
+(a) MatchAbove stops at the common ancestor 
+of t1 and t2
+(b) Recursive call on t2, climbs up to t(cid:48)
+
+1
+
+Results of left and right subtrees are
+merged at t(cid:48)
+1 and the initial MatchAbove 
+restarts
+
+Else
+
+Else
+
+If s is empty Then
+
+BottomUpRun(A, s)
+1.
+Return ∅
+2.
+3.
+t1, s(cid:48) := Head(s), Tail(s)
+4.
+R := TopDownRun(A, t1, Q)
+5.
+R(cid:48), s(cid:48)(cid:48) := MatchAbove(A, t, s(cid:48), R, #)
+6.
+Return R(cid:48)
+7.
+MatchAbove(A, t, s, R1, stop)
+8.
+9.
+10.
+11.
+12.
+13.
+14.
+15.
+16.
+17.
+
+R2, s(cid:48)(cid:48) := ∅, s
+t2, s(cid:48) := Head(s), Tail(s)
+R := TopDownRun(A, t2, Q)
+R2, s(cid:48)(cid:48) := MatchAbove(A, t2, s(cid:48), R, p)
+
+p := Parent(t)
+If s is empty or not(IsAncestor(p, t2)) Then
+
+If t = stop Then
+Return R1, s
+
+Else
+
+18.
+
+19.
+
+20.
+
+(cid:91)
+
+Tag(p) ∈ (cid:96)
+
+trans := {q, (cid:96) → φ | ∃q(cid:48) ∈ dom(Ri)s.t. ↓i q(cid:48) ∈ φ
+R(cid:48) :=
+{q (cid:55)→ R | R1, R2, t (cid:96)A, φ = ((cid:62), R)}
+Return MatchAbove(A, p, s(cid:48), R(cid:48), stop)
+
+(q,(cid:96)→φ)∈trans
+
+}
+
+Fig. 7 Bottom-up evaluation function
+
+a bottom-up run. The bottom-up run algorithm is given in
+Figure 7.
+
+The ﬁrst function takes an automaton and a sequence of
+potential matches in pre-order, and proceed to run the automaton 
+bottom-up from the left-most potential match (t1,
+Line 6, Figure 7). The MatchAbove function is the one
+“climbing-up” the tree. We assume that the Parent(_) function 
+returns the empty tree when applied to the root node. If
+the input node is not equal to the sentinel stop node (which
+is initially the empty tree #, allowing to stop only after the
+root node has been processed) then we ﬁrst check whether
+
+the next potential match is a descendant of our parent (Line
+12). If so, then we pause for the current branch and recursively 
+call MatchAbove with our parent as stop tree. Once
+it returns, we compute all the possible transitions that the
+automata can take from the parent node to arrive on the left
+and right subtree with the correct conﬁguration (Line 18).
+We then merge both conﬁgurations using the same computation 
+as in the top-down algorithm (Line 19). Finally, we
+recursively call MatchAbove on the parent node, with the
+new conﬁguration and sequence of potential matching nodes
+(Line 20).
+
+5.4 General Optimizations, On-the-ﬂy Determinization
+
+While the optimizations presented in the previous sections
+give the most important speed-up we describe hereafter a
+series of implementation techniques used for the efﬁcient
+evaluation of automata.
+
+5.4.1 Hash consing of data-structures
+
+We use hash consing for all critical data-structures: sets of
+states, formulas, sets of transitions, sets of labels and so
+on. Hash consed values have the following two properties.
+First, structurally equal values are shared in memory. Therefore 
+testing for equality of such values (for instance testing
+that two sets of transitions are equal) consists in comparing 
+their memory address (which is cheap). Second, to each
+such value we can associate a unique integer id (this can
+be its memory address for instance but more interestingly
+a small integer assigned at the creation of the value). These
+two properties —especially the second one— are instrumental 
+to the other optimizations. Indeed, as described in [12],
+we can memoize (or cache) the results of expensive computations 
+and reuse them when needed instead of recomputing
+
+them. In particular, we can associate to each function a table,
+indexed by the the argument’s id. While the ﬁrst computation 
+might be expensive, its result is stored once and for all
+in the table and can be retrieved with one pointer indirection 
+later on, when the same computation is requested. We
+explain now how this generic technique comes into play for
+automata evaluation.
+
+both sets of nodes are disjoint and we do not need to keep
+sorted sets of nodes but only need sequences which support
+O(1) concatenation. Computing the union of two result sets
+Rj and Rk can therefore be done in constant time and con-
+
+sequently(cid:62) and(cid:63) can be implemented in constant time.
+
+5.4.4 Lazy result sets
+
+13
+
+5.4.2 Just-in-time compilation of automata
+
+In the TopDownRun algorithm (Figure 5) the most expensive 
+operations are in Lines 4, 5, and 8. By expensive we
+mean that they take time O(|Q|) where |Q| is the number of
+steps in the original query. At Line 4, we gather all the transitions 
+that can be selected from the current label (cid:96) and set
+of states r. From these we compute, at Line 5, the new set
+of states r1 and r2 onto which we will launch the recursive
+call. As explained in Section 5.3, from the set of states r1
+(resp. r2) we compute the “jump” moves that the automaton 
+will do to reach the next node in the left (resp. right)
+subtree. If none of the formulas requires the evaluation of
+a value predicate (such as contains for instance) then we
+can see that this whole computation of Lines 4 and 5 can be
+cached in a 2-dimensional array, using only (cid:96) (the current
+label, identiﬁed by a small integer) and r (a hash consed set
+of states with a unique small id) as key. In practice we store
+in this table a small sequence of instructions that are computed 
+at run time and which represent the behaviour of the
+automaton for the next step (for instance “jump to the next
+keyword label in state {q0, q1}). This just-in-time compilation 
+scheme absorbs in practice most of the overhead caused
+by the automaton machinery and makes running an automaton 
+almost as fast as executing a hand-written, precompiled
+function. In the same fashion, the computation of the judgment 
+(cid:96)A can be memoized, this time in two parts. First, the
+sets of states (that is the domain of the resulting mapping)
+is simply stored once and for all, and second, a sequence of
+instructions telling how to propagate the results from the left
+and right subtrees is stored and evaluated for each node.
+
+5.4.3 Handling of result sets
+
+Maintaining sets of (result) nodes can be expensive. Our efﬁcient 
+management of sets of nodes relies on the following 
+two observations. First, note that only the states outside
+of ﬁlters actually accumulate nodes. All other states always
+yield empty bindings. Thus we can split the set of states into
+
+marking and regular states. This reduces the number of(cid:62)
+and(cid:63) operations on result sets. Note also that given a transition 
+qi, (cid:96) →↓1 qj∧ ↓2 qk where qi, qj, and qk are marking
+states, all nodes accumulated in qj are in the left subtree of
+the current node. Likewise, all the nodes accumulated in qk
+are subtrees of the right subtree of the current node. Thus
+
+Another way to leverage the speed and jumping capabilities
+of our tree index is by making use of a lazy result set. Consider 
+the query //listitem//keyword. When reaching a
+listitem node, the automaton is in a state which encodes
+the following behaviour: “accumulate all keyword nodes
+below this node”. Therefore instead of having the automaton
+jump through the subtree to individually put each keyword
+node in the result set, we only store the listitem node (i.e.
+the current node during evaluation) and a ﬂag to remember
+that during serialization, it is not the listitem node which
+should be printed but rather all its keyword descendants.
+Since our tree index allows us to reach each such node using 
+a constant time jump operation, we delay the process of
+getting all the ﬁnal result nodes until serialization, therefore
+speeding up the materialization process. This not only saves
+time but also memory since the full set of nodes do not have
+to by materialized in memory.
+
+5.4.5 Early evaluation of formulas
+
+Another optimization consists in evaluating the Boolean formulas 
+of the automaton as early as possible. First, remark
+that in the TopDownRun algorithm, a node is “visited” three
+times. Once when the automaton enters the node, during the
+top-down phase (Line 1). Here, we only know that at most
+all states in r yield a successful run. Then when returning
+from the left subtree (Line 6), we know R1 that is, the states
+which yield an accepting run for the left subtree. The idea
+now is to perform a partial evaluation of formulas using only
+R1. If this happens to be sufﬁcient to prove or disprove the
+states in r, then the right subtree can be skipped altogether.
+This optimization is very important for ﬁlters as it insures
+that for instance in a query such as //listitem[.//keyword]
+the run function only tests for the presence of the left-most
+keyword node below a listitem node.
+
+5.4.6 Relative Tag position tables
+
+As explained earlier, the transitions for the query
+
+.../descendant::keyword/...
+
+would be (just-in-time) compiled into a piece of code performing 
+a subtree traversal using TaggedDesc(_ , keyword)
+and TaggedFoll(_ , keyword) instead of FirstChild and NextSibling.
+ This is already optimal for documents where keyword 
+nodes may appear arbitrarily. However, it is often the
+
+14
+
+case that labels are not recursive (that is, nodes with a label 
+l do not occur below other l-labelled nodes). To further 
+optimize the compilation of the automaton, we build
+–while indexing the document– four relative position tables,
+telling for each label l in the document the sets of labels
+that occur respectively in child position, descendant position,
+ following-sibling position and following position. When
+compiling at runtime the automaton and generating a call to
+TaggedDescendant for a label l, we check that this l label
+can indeed appear as descendant of the label of the current
+node (and similarly for other jumping functions). If the label
+does not occur, then the TaggedDescendant call is replaced
+by a constant function returning directly the correct sets of
+states for the left subtree as well as an empty result set, as if
+the automaton had made a full-run on this subtree and found
+nothing.
+
+6 Experimental Results
+
+This section presents our experimental results and is organized 
+as follows. We ﬁrst describe our experimental settings,
+test machines, and benchmark data. We then provide a ﬁrst
+round of experiments illustrating the raw performances of
+the tree and text index: indexing time and resulting index
+size, performing full pre-order traversal using FirstChild and
+NextSibling moves, and direct querying of the text index. A
+third subsection illustrates how the tree index and automatabased 
+engine work together to achieve very fast tree-oriented
+query evaluation (in particular using the jumping moves described 
+in Section 4.1.2). We then show how the automaton 
+machinery can leverage the speed of both the text and
+tree index by evaluating queries containing both text and
+tree predicates. Lastly we illustrate the versatility of our ap-
+proach: our engine is easily extended to support querying of
+XML document storing bio-genetic data.
+
+We have implemented a prototype XPath evaluator based
+on the data structures and algorithms presented in the previous 
+sections. Both the tree structure and the FM-index were
+developed in C++, while the XPath engine was written using
+the OCaml language.
+
+6.1 Protocol
+
+To validate our approach we benchmark our implementation 
+against two well established XQuery implementations,
+MonetDB/XQuery and Qizx/DB. We describe our experimental 
+settings hereafter.
+
+used to store the various ﬁles is ext4, with default settings.
+All tests are run on a minimal environment where only the
+tested program and essential services were running. We use
+the standard compiler and libraries available on this distribution 
+(namely g++ 4.6.1, libxml2 2.7.8 for document parsing
+and OCaml 3.11.2).
+
+Qizx/DB We use version 3.0 of Qizx/DB engine (free edi-
+tion), running on top of the 64-bit version of the JVM (with
+the -server ﬂag set as recommended in the Qizx user man-
+ual). The maximal amount of memory of the JVM is set to
+the maximal amount of physical memory (using the -Xmx
+ﬂag). We also use the ﬂag -r of the Qizx/DB command line
+interface, which allows us to re-run the same query without
+restarting the whole program (this ensures that the JVM’s
+garbage collector and thread machinery do not impact the
+performances). We use the timing provided by Qizx debugging 
+ﬂags, and report the serialization time (which actually
+includes the materialization of the results in memory and the
+serialization).
+
+MonetDB/XQuery We use version Oct2010-SP1 of MonetDB,
+ and in particular, version 4.40.3 of MonetDB4 server
+and version 0.40.3 of the XQuery module (pathﬁnder). We
+use the timing reported by the “-t” ﬂag of MonetDB client
+program, mclient. We keep the materialization time and
+the serialization time separate.
+
+Running times and memory reporting For each query, we
+keep the best of ﬁve runs. For Qizx/DB, each individual run
+consists of two repeated runs (“-r 2”), the second one being 
+always faster. For MonetDB, before each batch of ﬁve
+runs, the server is exited properly and restarted. For all systems,
+ we exclude from the running times the time used for
+loading the index into main memory (based on the engines’
+timing reports). We monitor the resident set size of each
+process which corresponds to the amount of process memory 
+actually mapped in physical memory.
+
+For the tests in which serialization is involved we serialize 
+to the /dev/null device (that is, all the results are
+discarded without causing any output operation).
+
+Remarks We also compared with Tauro [56]. Yet, as it uses
+a tailored query language, we could not produce comparable
+results.
+
+6.2 Indexing
+
+Test machine Our test machine features an Intel Core i5
+platform featuring 3.33Ghz cores, 3.8 GB of RAM and a SATA 
+hard drive. The OS is a 64-bit version of Ubuntu Linux
+(11.04). The kernel version is 2.6.38 and the ﬁle system
+
+Our implementation features a versatile index. It is divided
+into three parts. First, the tree representation composed of
+the parenthesis structure, as well as the tag structure. Second,
+ the FM-index encoding the text collection. Third, the
+
+GlobalCount
+number
+
+number
+
+ContainsCount
+time
+0.04
+2.281
+29.924
+4.616
+128.28
+218.462
+553.496
+401.214
+1722.95
+5084.14
+19641.8
+189299
+132780
+
+1
+19
+144
+438
+966
+1493
+4690
+8534
+12073
+22974
+42586
+595716
+5870474
+
+15
+
+ReportContains
+
+
+mem
+(MB)
+
+0.012
+1.588
+32.668
+4.457
+122.014
+215.196
+548.009
+399.674
+1717.83
+5083.77
+19630.3
+188377
+132241
+
+61
+61
+61
+61
+61
+61
+62
+62
+62
+63
+64
+93
+86
+
+(q1, . . . , q13) = ( “Bakst”, “ruminants”, “morphine”, “AUSTRALIA”,
+“molecule”, “brain”, “human”, “blood”, “from”, “with”, “in”, “a”,
+“\n”)
+Table 2 Search times of FM-index (in ms), sampling factor l = 64
+
+GlobalCount
+
+q
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+
+q
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+
+1
+22
+392
+438
+1472
+2685
+6897
+10402
+20859
+63332
+238638
+2932251
+9730750
+
+number
+
+1
+22
+392
+438
+1472
+2685
+6897
+10402
+20859
+63332
+238638
+411409
+748326
+2932251
+9730750
+
+time
+.004
+.009
+.009
+.009
+.008
+.005
+.005
+.005
+.004
+.004
+.003
+.001
+.001
+
+time
+.005
+.01
+..009
+.009
+.009
+.006
+.005
+.005
+.003
+.004
+.002
+.001
+.001
+001
+.001
+
+number
+
+ContainsCount
+time
+0.049
+0.156
+1.718
+4.145
+6.247
+12.24
+25.403
+77.175
+84.012
+242.834
+1105.6
+1779.27
+3411.65
+13183.4
+87770.9
+
+1
+19
+144
+438
+966
+1493
+4690
+8534
+12073
+22974
+42586
+135307
+320440
+595716
+5870474
+
+Containsmem
+
+(MB)
+100
+100
+100
+100
+101
+101
+101
+101
+101
+102
+103
+108
+119
+133
+126
+
+Report
+0.013
+0.086
+1.357
+3.942
+5.853
+11.588
+27.344
+73.613
+78.663
+235.043
+1091.43
+1762.62
+3378.85
+13173.4
+88230.4
+
+(q1, . . . , q15) = ( “Bakst”, “ruminants”, “morphine”, “AUSTRALIA”,
+“molecule”, “brain”, “human”, “blood”, “from”, “with”, “in”, “b”, “g”,
+“a”, “\n”)
+Table 3 Search times of FM-index (in ms), sampling factor l = 4
+
+6.3 Raw Performance of Text Index
+
+Here we give a short overview of the performance of our implementation 
+of the FM-index. We present the search times
+for different versions of contains-queries:
+
+1. GlobalCount(P ): returns the global number of occurrences 
+of the pattern P in all texts.
+
+2. ContainsCount(P ): returns the number of texts that contain 
+P ,
+
+3. ContainsReport(P ): returns the positions of all occurrences 
+of P in the texts.
+
+Our experiments are over the text collection obtained
+from a 116MB XMark XML document [54]. The size of
+this text is around 82MB (if stored in one-byte per character
+ASCII format). Our “plain” alternative to the FM-index is
+
+116 223 335 447
+559
+Document Size (MB)
+Index construction time (min)
+5’1 10’40 17’ 23’ 29’40
+Index construction mem. use (MB) 296 568 844 1085 1387
+2.5
+Index loading time (s)
+
+2.0 2.4
+
+0.5
+
+1.5
+
+Fig. 8 Indexing of XMark documents
+
+auxiliary text representation allowing fast extraction of text
+content.
+
+It is easy to determine from the query which parts of
+the index are needed in order to solve it, and thus load only
+those into main memory. For instance, if a query only involves 
+tree navigation, then having the FM-index in memory 
+is unnecessary. On the other hand, if we are interested
+in very selective text-oriented queries, then only the tree part
+and FM-index are needed (both for counting and serializing
+the results). In this case, serialization is a bit slower (due to
+the cost of text extraction from the FM-index) but remains
+acceptable since the number of results is low; see Table 2
+for a comparison of the serialization speed of the FM-index
+versus serializing from plain string buffers in memory.
+
+Figure 8 reports the construction time and memory consumption 
+of the indexing process, the loading time from disk
+into main memory of a constructed index, and a comparison
+between the size of the original document and the size of our
+in-memory structures. For these indexes, a sampling factor
+l = 64 (cf. Section 3) was chosen. It should be noted that the
+size of the tree index plus the size of the FM-index is always
+less than the size of the original document.
+
+It should further be noted that although loading time is
+acceptable, it dominates query answering time. This is however 
+not a problem for the use case we have targeted: a main
+memory query engine where the same large document is
+queried many times. As mentioned in the Introduction, systems 
+such as MonetDB load their indexes only partially; this
+gives superior performance in a cold-cache scenario when
+compared with our system.
+
+16
+
+a naive (byte-wise) string buffer (using precisely 82MB of
+memory). To search over the plain buffer, we use OCaml’s
+regular string expression library. The naive search time is
+constant for all our queries at around 2700ms. For both the
+naive and the FM-index, the result positions (32 bit inte-
+gers) for ContainsReport queries are materialized in an array.
+ Consider now the performance of our FM-index in comparison.
+ First at sampling factor l = 64, shown in Table 2.
+As can be seen, the times for ContainsCount and ContainsReport 
+for the word “from” are at around 1720ms. Thus,
+in this case it is still faster to search over the FM-index.
+On the other hand, for the word “with” the search time is
+over 5000ms, thus, here the plain search becomes faster.
+Hence, somewhere between 20859 and 63332 occurrences
+lies the cut-off point from which on searching over the plain
+text is faster than over the FM-index. Table 3 shows timings 
+obtained with sampling factor l = 4. As can be seen
+the cut-off point is now much later, at a global count somewhere 
+between 411409 and 748326. The last columns of Tables 
+2 and 3 show the maximal memory consumption for
+these queries over the FM-index. As mentioned in the beginning 
+of this section, we measure the maximum memory
+used by the process, as report by the operating system( this
+is a slight over-approximation of the actual memory). The
+memory overhead for queries with large cardinality, such as
+the last queries (q13 and q15), is explained by the size of the
+result array: for both sampling factors this is around 25MB.
+This query has around 6 million results (ContainsCount-
+number), each result is stored as a 4 Byte integer. Thus,
+23MB are needed. However, additional memory overhead
+occurs when results are removed from the GlobalCount (because 
+they occur in the same XML text node). For instance,
+in the second to last query (q12/q14) the ratio of Global-
+Count-number to ContainsCount-number is much larger than
+for the last query (4.9 versus 1.7); it means that on average
+there are around 5 “a”-characters per text node, while there
+are only around 1.7 return-characters per text node. Correspondingly,
+ the maximum memory consumption is much
+higher too.
+
+6.4 Raw Performance of Tree Index
+
+ﬁle
+
+parse
+XMark116M 89446
+XMark223M 220143
+XMark559M 620479
+Treebank83M 67412
+medline122M 67935
+
+pointer
+
+373
+716
+7923
+465
+537
+
+parent
+504
+976
+2415
+615
+760
+
+tag
+4682
+9051
+22857
+14067
+6933
+
+tag-tabs
+1324
+2544
+6283
+18867
+2036
+
+Table 4 Construction times in ms for pointer versus SXSI tree store
+
+The performance of some low-level features of our tree
+index is compared with the corresponding performance of a
+standard pointer-based implementation of a tree. The latter
+provides for each tree node two 64-bit pointers to its ﬁrst
+child and next sibling nodes (and does not store labels). We
+ﬁrst compare construction times. Then we compare times
+for a full depth-ﬁrst left-to-right tree traversal on the different 
+structures. Finally, we test the speed of the taggedDesc
+and taggedFoll functions. We compare different traversals
+through all nodes with a given label: (i) using a pure C++
+function, (ii) using our automata in counting mode, and (iii)
+using our automata in materialization mode.
+
+Construction As Table 4 shows, the construction of the
+parenthesis structure takes roughly 1.5-times the amount of
+time of allocation a pointer structure for the tree. Constructing 
+the tag sequence is considerable slower, about ten times
+as much as building the parenthesis structure. This is because 
+for each opening and for each closing tag, a separate
+sarray is constructed (see bottom left of Figure 1). The last
+column shows the time for building the four tag-to-tag tables
+described in Section 5.4.6. We also show the XML parsing
+time in the ﬁrst column of the table.
+
+Full Traversals The left part of Table 5 shows that a full
+
+ﬁle
+XMark116M
+XMark223M
+XMark559M
+Treebank83M
+medline122M
+
+6
+12
+30
+7
+9
+
+33
+63
+164
+57
+48
+
+recursive, all nodes
+
+#nod
+
+pointer
+
+SXSI
+109
+209
+535
+184
+164
+
+element nodes, SXSI
+//*
+#nod
+153
+1.7
+296
+3.3
+756
+8.4
+2.4
+292
+244
+2.9
+
+rec.
+71
+137
+345
+136
+112
+
+Table 5 Traversal times (in ms), #nodes (in millions)
+
+tree traversal through all nodes is between 3.2 and 3.4 times
+slower with SXSI, than with a pointer tree data structure.
+Note that the pointers are allocated in pre-order too giving
+optimal performance for pre-order traversal. As a comparison,
+ if the pointers are allocated in post-order, then traversal
+time for the pr-order traversal is almost twice as slow as the
+numbers reported, and if pointers are allocated in in-order,
+then the times are a bit over twice as slow; see [3] for a
+discussion of the phenomenon. It should also be noted that
+for other access patterns, such as random root-to-leaf traversals,
+ the time difference between pointer and succinct trees
+is much larger, factors of up to 100 are measure in [3].
+
+In the right part of Table 5 we see the number of element 
+nodes in these trees, and the time it takes for SXSI to
+recurse through those node: either using a small recursive
+C-function (column “rec.”), or using the automaton for the
+XPath query //*, and executing in counting mode.
+
+tag
+category
+price
+listitem
+keyword
+
+#nodes
+1040
+10141
+63179
+73070
+
+jump(C++)
+
+//(cou)
+
+//(mat)
+
+1.2
+2.3
+16
+11
+
+1.6
+2.9
+22
+12
+
+1.7
+3.1
+24
+14
+
+Table 6 Iteration through all tag-labeled nodes over XMark116M
+
+Tagged Traversals Here the speed of the TaggedDesc and
+TaggedFoll functions is investigated. Using these two functions,
+ three different traversal through all nodes with a given
+label are considered: ﬁrst, by a small C++ function, and
+second and third by our automata through a //label query
+in counting and materializing modes, respectively. For instance,
+ Table 6 shows that iterating through all keywordnodes 
+of the 116MB Xmark document takes essentially the
+same time for all three methods (11–14ms). This is in contrast 
+to some other labels: for listitem for instance, the countautomaton 
+traversal is 1.5-times slower than the C++ traversal.
+ This can be explained by the fact that listitem is a recursive 
+tag: there are in fact 23298 listitem nodes that appear as
+descendants of listitem nodes. Hence, at each listitem node
+the automaton issues a taggedDescendant to search for further 
+nodes. The other labels such as keyword and category
+do not appear recursively. Since this information is part of
+our tree index (cf. Section 5.4.6), the automaton run function
+avoids all these taggedDesc calls, which brings the speed almost 
+up to the one of the C++ function.
+
+6.5 XPath Tree Queries
+
+We benchmark tree queries using the queries given in Figure 
+9. Queries Q01 to Q12 are taken from the XPathMark
+benchmark [21], derived from the XMark XQuery benchmark 
+suite. Q13 to Q17 are “crash tests” that are either simple 
+(Q13 selects only the root since it always has at least
+one descendant in our ﬁles) or generate roughly the same
+amount of results but with various intermediate result sizes.
+
+Query answering time For this experiment we use XMark
+documents of size 116MB and 1GB. In the cases of MonetDB 
+and Qizx, the ﬁles were indexed using the default settings.
+ Let us describe in detail Figure 10. Each of the six
+graphs should be read as follows. For each query (Q1 to
+Q17), the graph reports as vertical bars the relative running
+time of the three engines with respect to SXSI’s running
+time (therefore SXSI’s score is always 100%). In these graphs
+a higher bar means that the engine was slower. We also give
+at the top of each bar the average running time for the query
+in millisecond (or seconds, if the number is sufﬁxed with
+an “s”). For instance, in the ﬁrst graph —labelled “116 MB
+(counting)”— we can see that for query Q1, SXSI evaluates
+the query in 1.3ms, MonetDB 6.8ms (or roughly 500% of
+
+17
+
+Q01 /site/regions
+Q02 /site/regions/*/item
+Q03 /site/closed_auctions/closed_auction
+
+/annotation/description/text/keyword
+
+Q04 //listitem//keyword
+Q05 /site/closed_auctions/closed_auction[
+
+annotation/description/text/keyword]/date
+Q06 /site/closed_auctions/closed_auction[ .//keyword]/date
+Q07 /site/people/person[ proﬁle/gender and proﬁle/age]/name
+Q08 /site/people/person[ phone or homepage]/name
+Q09 /site/people/person[ address and (phone or homepage) and
+
+(creditcard or proﬁle)]/name
+
+Q10 //listitem[not(.//keyword/emph)]//parlist
+Q11 //listitem[ (.//keyword or .//emph) and
+
+(.//emph or .//bold)]/parlist
+
+Q12 //people[ .//person[not(address)] and
+
+.//person[not(watches)]]/person[watches]
+
+Q13 /*[ .//* ]
+Q14 //*
+Q15 //*//*
+Q16 //*//*//*
+Q17 //*//*//*//*
+
+Fig. 9 Tree oriented queries
+
+SXSI’s speed) and QizX 3.5 ms (or roughly 275% of SXSI’s
+speed). For count queries, the timing for all three engines are
+given side by side (SXSI, MonetDB and QizX in that order).
+For full reporting queries however, we want to gauge precisely 
+the amount of time spent during materialization and
+during serialization. The deﬁnition of materialization seems
+to ﬁt both MonetDB and SXSI: create a data-structure in
+memory which holds the resulting nodes in order and without 
+duplicates such that access of the ﬁrst result in pre-order
+can be done in constant time, and accessing the next resulting 
+node in pre-order can also be done in constant time. The
+timing for both SXSI and MonetDB are given in the graphs
+labelled “(materialization)”. As we explained earlier, QizX
+interleaves evaluation of the query and serialization, therefore 
+we only compared it to SXSI and MonetDB in the “(ma-
+terialization+serialization)” series. We also checked that all
+three engines generated in the end the same amount of data
+while in serialization mode and that they generated valid
+XML documents (in particular, characters such as “&” were
+escaped correctly).
+
+From the results of Figure 10, we see how the different 
+components of SXSI contribute to the efﬁcient evaluation 
+model. Fully qualiﬁed paths, such as queries Q1–3
+and Q5 illustrate the sheer speed of the tree structure and
+in particular the efﬁciency of its basic operations (such as
+FirstChild and NextSibling, which are used for the child
+axis), as well as the efﬁcient execution scheme provided
+by the automaton. The descendant axes (used e.g. in Q4,
+Q6, Q10–12) show the impact of the jumping primitives and
+the computation of relevant nodes. Complex ﬁlters (Q6–12)
+show how the alternating automata can efﬁciently evaluate
+
+4
+
+0
+
+8
+
+5
+
+2
+
+2
+
+0
+
+8
+
+4
+
+6
+
+2
+
+9
+
+2
+
+8
+
+.
+
+.
+
+1
+
+.
+
+7
+
+2
+1
+
+3
+3
+
+.
+
+.
+
+.
+
+.
+
+.
+
+.
+
+.
+
+.
+
+.
+
+.
+
+.
+
+.
+
+1
+1
+
+7
+1
+
+2
+7
+
+8
+1
+
+7
+1
+
+5
+6
+
+4
+1
+
+1
+2
+
+6
+5
+
+0
+2
+
+8
+1
+
+1
+7
+
+5
+
+8
+
+2
+
+0
+
+8
+
+3
+
+2
+
+8
+
+0
+
+.
+
+.
+
+4
+2
+
+4
+2
+
+.
+
+0
+3
+2
+
+8
+
+8
+
+.
+
+.
+
+1
+2
+
+7
+3
+
+.
+
+8
+8
+1
+
+2
+
+9
+
+.
+
+.
+
+7
+2
+
+9
+4
+
+.
+
+8
+0
+2
+
+5
+
+4
+
+.
+
+.
+
+3
+5
+
+4
+3
+
+.
+
+7
+8
+2
+
+.
+
+.
+
+.
+
+6
+3
+1
+
+5
+3
+1
+
+5
+1
+5
+
+5
+
+.
+
+3
+3
+
++
++
++
+
+0
+
+.
+
+7
+7
+
+7
+
+.
+
+0
+3
+1
+
+9
+
+.
+
+1
+
+2
+
+.
+
+7
+
+Q2
+Q2
+Q2
+Q2
+
+8
+
+.
+
+3
+
+.
+
+7
+
+1
+1
+
+Q3
+Q3
+Q3
+Q3
+
+Q4
+Q4
+Q4
+Q4
+
+Q5
+Q5
+Q5
+Q5
+
+Q6
+Q6
+Q6
+Q6
+
+Q7
+Q7
+Q7
+Q7
+
+Q8
+Q8
+Q8
+Q8
+
+Q9
+Q9
+Q9
+Q9
+
+Q10
+Q10
+Q10
+Q10
+
+Q11
+Q11
+Q11
+Q11
+
+Q12
+Q12
+Q12
+Q12
+
+9
+
+3
+
+.
+
+.
+
+1
+1
+
+8
+1
+
+7
+
+3
+
+.
+
+.
+
+2
+2
+
+6
+1
+
+0
+
+7
+
+.
+
+.
+
+5
+1
+
+1
+2
+
+6
+
+8
+
+.
+
+.
+
+0
+2
+
+6
+1
+
+8
+
+4
+
+.
+
+.
+
+5
+2
+
+4
+2
+
+8
+
+9
+
+.
+
+.
+
+1
+2
+
+7
+3
+
+7
+
+9
+
+.
+
+.
+
+8
+2
+
+9
+4
+
+2
+
+8
+
+.
+
+.
+
+4
+5
+
+4
+3
+
+8
+
+1
+
+.
+
+.
+
+5
+3
+1
+
+4
+3
+1
+
+3
+
+.
+
+4
+3
+
++
++
++
+
+Q13
+Q13
+Q13
+Q13
+
+4
+
+.
+
+8
+
+.
+
+1
+
+8
+2
+1
+
+Q2
+Q2
+Q2
+
+Q3
+Q3
+Q3
+
+Q4
+Q4
+Q4
+
+Q5
+Q5
+Q5
+
+Q6
+Q6
+Q6
+
+Q7
+Q7
+Q7
+
+Q8
+Q8
+Q8
+
+Q9
+Q9
+Q9
+
+Q10
+Q10
+Q10
+
+Q11
+Q11
+Q11
+
+Q12
+Q12
+Q12
+
+Q13
+Q13
+Q13
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+.
+
+.
+
+0
+8
+
+3
+7
+
+.
+
+4
+4
+3
+
+0
+
+0
+
+.
+
+.
+
+8
+1
+
+7
+2
+
+.
+
+3
+1
+1
+
+0
+
+0
+
+.
+
+.
+
+7
+2
+
+6
+2
+
+.
+
+4
+9
+1
+
+0
+
+0
+
+.
+
+.
+
+0
+3
+
+0
+3
+
+.
+
+0
+6
+2
+
+0
+
+0
+
+.
+
+.
+
+0
+4
+
+8
+5
+
+.
+
+3
+7
+2
+
+0
+
+0
+
+.
+
+.
+
+7
+3
+
+0
+6
+
+.
+
+8
+3
+2
+
+.
+
+.
+
+.
+
+.
+
+.
+
+.
+
+1
+6
+1
+
+5
+3
+1
+
+2
+0
+6
+
+1
+5
+2
+
+0
+4
+2
+
+1
+5
+8
+
+.
+
+0
+
+.
+
+1
+9
+
++
++
++
+
+3
+2
+5
+
+s
+0
+
+.
+
+.
+
+4
+8
+7
+
+s
+3
+
+.
+
+1
+
+6
+9
+
+.
+
+.
+
+7
+1
+4
+
+3
+5
+4
+
+s
+7
+
+.
+
+1
+
+0
+
+0
+
+.
+
+.
+
+7
+1
+
+6
+2
+
+.
+
+7
+1
+2
+
+Q2
+Q2
+Q2
+Q2
+
+Q3
+Q3
+Q3
+Q3
+
+0
+
+.
+
+.
+
+0
+5
+5
+
+0
+4
+6
+
+.
+
+0
+4
+8
+1
+
+3
+
+.
+
+.
+
+9
+7
+9
+
+5
+2
+2
+
+.
+
+8
+9
+0
+3
+
+s
+9
+
+.
+
+7
+2
+1
+
+5
+
+.
+
+7
+
+.
+
+0
+
+7
+4
+
+Q14
+Q14
+Q14
+Q14
+
+3
+
+7
+
+.
+
+0
+
+.
+
+0
+4
+
+Q14
+Q14
+Q14
+
+s
+2
+
+s
+7
+
+s
+5
+
+.
+
+.
+
+5
+
+6
+
+.
+
+9
+0
+2
+
+3
+
+.
+
+1
+
+6
+4
+1
+
+Q15
+Q15
+Q15
+
+s
+7
+
+s
+5
+
+.
+
+.
+
+5
+
+5
+
+s
+4
+
+.
+
+2
+8
+
+s
+1
+
+7
+
+.
+
+.
+
+s
+9
+
+7
+
+.
+
+.
+
+3
+
+.
+
+1
+
+6
+4
+1
+
+7
+7
+1
+
+4
+
+.
+
+2
+
+5
+4
+2
+
+2
+1
+3
+
+Q15
+Q15
+Q15
+Q15
+
+2
+
+.
+
+Q16
+Q16
+Q16
+Q16
+
+6
+
+.
+
+4
+
+.
+
+2
+
+4
+4
+2
+
+4
+
+8
+
+s
+1
+
+.
+
+.
+
+.
+
+4
+3
+1
+
+9
+4
+3
+
+1
+7
+3
+
+Q17
+Q17
+Q17
+Q17
+
+3
+
+6
+
+.
+
+.
+
+4
+4
+1
+
+1
+5
+3
+
+Q16
+Q16
+Q16
+
+s
+4
+
+Q17
+Q17
+Q17
+
+s
+9
+
+s
+9
+
+s
+2
+
+.
+
+.
+
+4
+
+4
+
+.
+
+7
+1
+8
+
+s
+3
+
+s
+5
+
+.
+
+.
+
+4
+
+3
+
+.
+
+2
+1
+1
+
+Q4
+Q4
+Q4
+Q4
+
+8
+
+8
+
+.
+
+.
+
+8
+7
+1
+
+s
+3
+
+.
+
+1
+
+2
+0
+2
+
+Q5
+Q5
+Q5
+Q5
+
+Q6
+Q6
+Q6
+Q6
+
+Q7
+Q7
+Q7
+Q7
+
+Q8
+Q8
+Q8
+Q8
+
+Q9
+Q9
+Q9
+Q9
+
+8
+
+1
+
+0
+
+2
+
+8
+
+5
+
+2
+
+4
+
+8
+
+3
+
+4
+
+5
+
+.
+
+.
+
+.
+
+.
+
+.
+
+.
+
+.
+
+.
+
+.
+
+.
+
+.
+
+.
+
+4
+1
+1
+
+7
+5
+2
+
+3
+2
+2
+
+9
+7
+1
+
+9
+2
+2
+
+5
+3
+3
+
+8
+1
+2
+
+6
+8
+3
+
+2
+9
+5
+
+9
+9
+1
+
+4
+1
+5
+
+0
+9
+8
+
+6
+
+0
+
+.
+
+.
+
+5
+4
+2
+
+1
+5
+5
+
+.
+
+s
+7
+9
+8
+
+Q10
+Q10
+Q10
+Q10
+
+7
+
+2
+
+Q11
+Q11
+Q11
+Q11
+
+s
+0
+
+Q12
+Q12
+Q12
+Q12
+
+7
+
+8
+
+Q13
+Q13
+Q13
+Q13
+
+Q14
+Q14
+Q14
+Q14
+
+s
+0
+
+Q15
+Q15
+Q15
+Q15
+
+Q16
+Q16
+Q16
+Q16
+
+Q17
+Q17
+Q17
+Q17
+
+.
+
+.
+
+9
+8
+4
+
+s
+4
+
+.
+
+1
+
+9
+9
+5
+
+s
+1
+
+s
+5
+
+.
+
+.
+
+1
+
+2
+
+.
+
+9
+5
+4
+
+.
+
+.
+
+3
+6
+2
+
++
++
++
+
+0
+6
+1
+
+s
+5
+
+2
+
+.
+
+.
+
+5
+
+3
+
+.
+
+8
+2
+1
+
+.
+
+5
+3
+1
+
+s
+8
+
+.
+
+2
+
+.
+
+9
+7
+4
+
+s
+9
+
+6
+
+.
+
+.
+
+1
+
+2
+
++
++
++
+
+s
+9
+
+4
+
+.
+
+.
+
+2
+
+3
+
++
++
++
+
+s
+3
+
+s
+8
+
+.
+
+.
+
+1
+
+4
+
++
++
++
+
+Q2
+Q2
+Q2
+Q2
+
+0
+
+Q3
+Q3
+Q3
+Q3
+
+9
+
+Q4
+Q4
+Q4
+Q4
+
+4
+
+.
+
+.
+
+3
+2
+6
+
+2
+6
+6
+
+.
+
+.
+
+0
+7
+9
+
+3
+2
+2
+
+.
+
+3
+0
+2
+
+s
+3
+
+.
+
+1
+
+Q5
+Q5
+Q5
+Q5
+
+0
+
+3
+
+.
+
+.
+
+5
+3
+1
+
+5
+5
+2
+
+Q6
+Q6
+Q6
+Q6
+
+4
+
+9
+
+.
+
+.
+
+8
+9
+1
+
+7
+1
+2
+
+Q7
+Q7
+Q7
+Q7
+
+0
+
+0
+
+.
+
+.
+
+1
+3
+2
+
+2
+6
+3
+
+Q8
+Q8
+Q8
+Q8
+
+6
+
+3
+
+.
+
+.
+
+2
+1
+2
+
+7
+9
+4
+
+Q9
+Q9
+Q9
+Q9
+
+8
+
+5
+
+.
+
+.
+
+1
+6
+2
+
+4
+3
+6
+
+Q10
+Q10
+Q10
+Q10
+
+Q11
+Q11
+Q11
+Q11
+
+Q12
+Q12
+Q12
+Q12
+
+Q13
+Q13
+Q13
+Q13
+
+Q14
+Q14
+Q14
+Q14
+
+Q15
+Q15
+Q15
+Q15
+
+Q16
+Q16
+Q16
+Q16
+
+Q17
+Q17
+Q17
+Q17
+
+3
+
+3
+
+.
+
+6
+8
+4
+
+s
+5
+
+.
+
+1
+
+s
+1
+
+s
+6
+
+.
+
+.
+
+1
+
+2
+
+.
+
+6
+9
+2
+
++
++
++
+
+s
+4
+
+3
+
+.
+
+.
+
+2
+
+3
+
+.
+
+9
+1
+2
+
+s
+8
+
+.
+
+1
+
+s
+0
+
+3
+
+.
+
+.
+
+1
+
+3
+
+s
+9
+
+3
+
+.
+
+.
+
+4
+
+3
+
+s
+3
+
+s
+6
+
+.
+
+.
+
+1
+
+4
+
+Q2
+Q2
+Q2
+
+s
+7
+
+s
+0
+
+s
+5
+
+.
+
+.
+
+4
+
+7
+
+.
+
+3
+2
+3
+
+Q3
+Q3
+Q3
+
+Q4
+Q4
+Q4
+
+Q5
+Q5
+Q5
+
+Q6
+Q6
+Q6
+
+Q7
+Q7
+Q7
+
+Q8
+Q8
+Q8
+
+Q9
+Q9
+Q9
+
+Q10
+Q10
+Q10
+
+Q11
+Q11
+Q11
+
+Q12
+Q12
+Q12
+
+Q13
+Q13
+Q13
+
+Q14
+Q14
+Q14
+
+Q15
+Q15
+Q15
+
+Q16
+Q16
+Q16
+
+Q17
+Q17
+Q17
+
+0
+
+0
+
+.
+
+.
+
+3
+5
+1
+
+s
+6
+
+.
+
+2
+
+9
+1
+5
+
+0
+
+.
+
+6
+6
+7
+
+.
+
+s
+2
+6
+1
+
+s
+8
+0
+4
+
+.
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+.
+
+.
+
+2
+1
+2
+
+s
+6
+
+.
+
+2
+
+0
+8
+3
+
+.
+
+.
+
+7
+8
+2
+
+s
+6
+
+.
+
+2
+
+0
+6
+4
+
+.
+
+5
+0
+3
+
+s
+9
+
+s
+3
+
+.
+
+.
+
+1
+
+1
+
+.
+
+0
+6
+4
+
+s
+0
+
+s
+4
+
+.
+
+.
+
+2
+
+1
+
+.
+
+.
+
+7
+7
+3
+
+s
+2
+
+.
+
+2
+
+7
+0
+7
+
+.
+
+s
+5
+6
+1
+
+s
+5
+
+.
+
+1
+
+s
+1
+
+.
+
+6
+
+s
+5
+
+.
+
+1
+0
+1
+
+.
+
+s
+7
+7
+1
+
+s
+2
+
+.
+
+2
+
+0
+
+.
+
+5
+9
+8
+
++
++
++
+
+s
+8
+
+.
+
+2
+
+s
+7
+
+.
+
+4
+1
+5
+
+.
+
+s
+2
+0
+2
+
+s
+6
+
+.
+
+7
+
+.
+
+s
+5
+5
+5
+
+s
+9
+3
+7
+
+.
+
++
++
++
+
+.
+
+s
+5
+5
+5
+
+s
+5
+0
+6
+
+.
+
++
++
++
+
+.
+
+s
+9
+7
+4
+
+s
+2
+0
+5
+
+.
+
++
++
++
+
+.
+
+s
+6
+1
+4
+
+s
+0
+0
+4
+
+.
+
++
++
++
+
+18
+
+)
+g
+n
+
+i
+t
+
+n
+u
+o
+c
+(
+
+B
+M
+6
+1
+1
+
+)
+n
+o
+
+i
+t
+
+a
+z
+
+i
+l
+
+a
+i
+r
+e
+
+t
+
+a
+m
+
+(
+
+B
+M
+6
+1
+1
+
+)
+n
+o
+
+i
+t
+
+a
+z
+
+i
+l
+
+a
+i
+r
+e
+s
++
+
+.
+t
+
+a
+m
+
+(
+
+B
+M
+6
+1
+1
+
+)
+g
+n
+
+i
+t
+
+n
+u
+o
+c
+(
+
+B
+G
+1
+
+)
+n
+o
+
+i
+t
+
+a
+z
+
+i
+l
+
+a
+i
+r
+e
+
+t
+
+a
+m
+
+(
+
+B
+G
+1
+
+)
+n
+o
+
+i
+t
+
+a
+z
+
+i
+l
+
+a
+i
+r
+e
+s
++
+
+.
+t
+
+a
+m
+
+(
+
+B
+G
+1
+
+.
+
+.
+
+.
+
+5
+
+8
+
+3
+
+% of
+% of
+% of
+% of
+SXSI 1
+SXSI
+SXSI 6
+SXSI 3
+1000
+1000
+1000
+1000
+900
+900
+900
+900
+800
+800
+800
+800
+700
+700
+700
+700
+600
+600
+600
+600
+500
+500
+500
+500
+400
+400
+400
+400
+300
+300
+300
+300
+200
+200
+200
+200
+100
+100
+100
+100
+0
+0
+0
+0
+
+Q1
+Q1
+Q1
+Q1
+
+.
+
+.
+
+9
+
+1
+
+% of
+% of
+% of
+SXSI 1
+SXSI
+SXSI 5
+1000
+1000
+1000
+900
+900
+900
+800
+800
+800
+700
+700
+700
+600
+600
+600
+500
+500
+500
+400
+400
+400
+300
+300
+300
+200
+200
+200
+100
+100
+100
+0
+0
+0
+
+Q1
+Q1
+Q1
+
+0
+
+0
+
+.
+
+.
+
+.
+
+s
+9
+
+7
+9
+
+1
+9
+
+% of
+% of
+% of
+% of
+SXSI
+SXSI 3
+SXSI 4
+SXSI 3
+1000
+1000
+1000
+1000
+900
+900
+900
+900
+800
+800
+800
+800
+700
+700
+700
+700
+600
+600
+600
+600
+500
+500
+500
+500
+400
+400
+400
+400
+300
+300
+300
+300
+200
+200
+200
+200
+100
+100
+100
+100
+0
+0
+0
+0
+
+Q1
+Q1
+Q1
+Q1
+
+.
+
+.
+
+.
+
+5
+
+9
+
+2
+
+1
+
+% of
+% of
+% of
+% of
+SXSI
+SXSI 1
+SXSI 3
+SXSI 1
+1000
+1000
+1000
+1000
+900
+900
+900
+900
+800
+800
+800
+800
+700
+700
+700
+700
+600
+600
+600
+600
+500
+500
+500
+500
+400
+400
+400
+400
+300
+300
+300
+300
+200
+200
+200
+200
+100
+100
+100
+100
+0
+0
+0
+0
+
+Q1
+Q1
+Q1
+Q1
+
+.
+
+.
+
+5
+
+0
+5
+
+% of
+% of
+% of
+SXSI 1
+SXSI
+SXSI 1
+1000
+1000
+1000
+900
+900
+900
+800
+800
+800
+700
+700
+700
+600
+600
+600
+500
+500
+500
+400
+400
+400
+300
+300
+300
+200
+200
+200
+100
+100
+100
+0
+0
+0
+
+Q1
+Q1
+Q1
+
+.
+
+.
+
+.
+
+s
+8
+3
+
+s
+7
+
+s
+8
+
+% of
+% of
+% of
+% of
+SXSI
+SXSI 3
+SXSI 7
+SXSI 1
+1000
+1000
+1000
+1000
+900
+900
+900
+900
+800
+800
+800
+800
+700
+700
+700
+700
+600
+600
+600
+600
+500
+500
+500
+500
+400
+400
+400
+400
+300
+300
+300
+300
+200
+200
+200
+200
+100
+100
+100
+100
+0
+0
+0
+0
+
+Q1
+Q1
+Q1
+Q1
+
+SXSI query time
+
+Q3
+Q3
+Q3
+Q3
+
+Q2
+Q2
+Q2
+Q2
+SXSI serialization time MonetDB query time MonetDB serialization time Qizx query time Qizx query + serialization time
+
+Q11
+Q11
+Q11
+Q11
+
+Q12
+Q12
+Q12
+Q12
+
+Q13
+Q13
+Q13
+Q13
+
+Q14
+Q14
+Q14
+Q14
+
+Q15
+Q15
+Q15
+Q15
+
+Q16
+Q16
+Q16
+Q16
+
+Q10
+Q10
+Q10
+Q10
+
+Q17
+Q17
+Q17
+Q17
+
+Q7
+Q7
+Q7
+Q7
+
+Q8
+Q8
+Q8
+Q8
+
+Q9
+Q9
+Q9
+Q9
+
+Q4
+Q4
+Q4
+Q4
+
+Q5
+Q5
+Q5
+Q5
+
+Q6
+Q6
+Q6
+Q6
+
++++ : query could not be run or took more than 15 minutes
+Fig. 10 Running times for the tree based queries (in milliseconds or seconds and as percent of SXSI’s speed. Lower bars are better.)
+
+19
+
+Number of Nodes
+
+Visited Nodes
+Marked Nodes
+Result Nodes
+
+107
+106
+105
+104
+103
+102
+
+Fig. 11 Memory use in MB for XMark 116MB documents (excluding 
+the index)
+
+complex Boolean formulas corresponding to structural conditions 
+over subtrees of a given node, including negations of
+paths.
+
+Finally, Q12 to Q16 illustrate the robustness of our automata 
+model. Indeed while such queries might seem unrealistic,
+ the good performances that we obtain are the combination 
+of (i) using an automata based evaluator (which factors
+in the states of the automaton all the necessary computation
+and thus do not materialize unneeded intermediate results)
+and (ii) our implementation of lazy result sets, which shifts
+the burden of walking through the document as much as possible 
+to the serialization process.
+
+Memory use and precision While it is straightforward to
+predict the memory consumption of our engine with respect
+to the index part (the full index is mapped in memory excluding 
+the Auxiliary Text, see Figure 8), the behaviour of
+the automaton evaluation function is unclear. Indeed, to speedup 
+the computation we create memoization tables, we handle 
+partial result sets, and we perform recursive procedures
+which might be as deep as the binary encoding of the XML
+document (since we recurse on FirstChild and NextSibling
+move) thus increasing the size of the call stack. We report in
+Figure 11 the memory consumption for the automata evalutation 
+of materialization queries. This includes the size of
+the recursive call stack, the size of OCaml’s heap (which
+is grown dynamically by OCaml’s garbage collector to accomadate 
+the memory need). On the heap are allocated the
+memoization tables, intermediary structures and ﬁnal result
+sets. As one can see, the memory use is very modest, peaking 
+at 32 MB for query Q11. While we do not compare
+directly with MonetDB or QizX for memory consumption
+(since these engines try to max out the memory use to achieve
+better speed) we see that we can reach comparable (if not
+greater) speed while being very conservative memory wise.
+To gauge the precision of our automata based approach,
+
+we report in Figure 12 for each query:
+
+– the number of visited nodes (that is, the number of nodes
+that are given as argument to the top_down_run func-
+tion);
+
+10
+
+1
+Q1 Q2 Q3 Q4 Q5 Q6 Q7 Q8 Q9 Q10 Q11 Q12 Q13 Q14 Q15 Q16 Q17
+
+Query
+
+Fig. 12 Comparison of visited, marked and result nodes for each
+query (logarithmic scale)
+
+– the number of marked nodes (that is, the number of nodes
+that considered as potential results at some point during
+evaluation);
+
+– and ﬁnally the number of result nodes for the query.
+
+A ﬁrst observation is that the number of marked nodes
+is almost always the same as the number of result nodes
+(save for query Q5–10). This shows that using automata and
+early evaluation of Boolean formulas, we can decide early
+during query evaluation whether a node is indeed a result
+or not. Another point of interest is that for several queries
+(Q2, Q4, Q14–17) we only visit result nodes. While it might
+be expected for queries Q14–17 for which virtually every
+node is a result, queries such as Q2 or Q4 are very selective.
+However, these queries provide enough information for the
+runtime analysis of relevant nodes to be exact and therefore
+only touch result nodes. In general of course, the number of
+traversed node is larger than the number of resulting nodes
+but always far less than the whole document. Queries Q14 to
+Q17 show the impact of lazy result sets where we mark several 
+nodes (whole subtrees actually) in one function call, and
+therefore manage to return more nodes than we have actually 
+visited. Lastly, we can see that the shapes of the “Visited
+Nodes” curve in Figure 12 and the memory use (Figure 11)
+are quite similar (the former being ﬂattened by the logarithmic 
+scale). This (quite expectedly) show that the number of
+visited nodes (and not the number of result nodes or intermediary 
+results) impacts directly the memory consumption
+of our query engine.
+
+6.6 XPath Text Queries
+
+We tested the text capabilities of our XPath engine against
+the most advanced text oriented features of other query engines.
+
+
+Qizx/DB We use the newly introduced Full-Text extension
+of XQuery available in Qizx/DB v. 3.0. We try to formulate
+the queries as efﬁciently as possible while preserving the semantics 
+of our original queries. The query used always gave
+
+20
+
+better results than its pure XPath counterpart. In particular,
+we use the ftcontains text predicate [59] implemented by
+Qizx/DB. The ftcontains predicate allows to express not
+only contains-like queries but also Boolean operations on
+text predicates, regular expression matching and so on. It is
+more efﬁcient than the standard contains.
+
+MonetDB MonetDB supports some full-text capabilities
+through the use of the PF/Tijah text index [40]. However,
+this index only supports a complex about operator, which
+returns approximate matches and ranks results by order of
+relevance. Since about queries returned very different results 
+than standard contains one, we did not include them
+but rather used the standard (and un-optimized) fn:contains
+functions from the XPath standard library. Interestingly, while
+these text functions are unoptimized, they sometimes outperform 
+QizX/DB’s full-text implementation. However, the
+reader should keep in mind that MonetDB’s timing are given
+only for reference and are not used here as a direct comparison 
+(since they implement the full semantics of fn:contains
+itself relying on fn:string conversions as deﬁned in the
+XPath speciﬁcation, they are bound to be slower than the
+full-text alternative).
+
+Experiments are made on a 122MB Medline ﬁle. This
+ﬁle contains bibliographic information about life sciences
+and biomedical publications. This test ﬁle features 5,732,159
+text elements, for a total amount of 95MB of text content.
+Figure 13 shows the text queries that we test. We use count
+queries for all three engines. The table in Figure 13 summarizes 
+the running times for each query. As we target very selective 
+text queries, we also give, for each query, the number
+of results it returned. Since for these queries our automata
+worked in “bottom-up” mode, we detail the two following
+operations:
+– Calling the text predicate globally on the text collection,
+thus retrieving all the probable matches of the query (S
+Text column in the table of Figure 13)
+
+– Running the automaton bottom up from the set of probable 
+matches to keep those satisfying the path expression
+(S Auto in the table of Figure 13)
+
+As it is clear from the experiments, the bottom-up strategy
+pays off. The only down-side of this approach is that the
+automaton uses Parent moves, which are less efﬁcient than
+FirstChild and NextSibling. This can be seen in query T7
+where the increase in the number of results makes the relative 
+slowness of the automata more visible. However our
+evaluator still outperforms the other engines even in this
+case.
+
+6.7 Biological Sequence Queries
+
+<!ELEMENT chromosome (name, gene*) >
+<!ELEMENT name
+<!ELEMENT gene
+
+#PCDATA >
+(name, strand, biotype, status,
+description?, promoter, sequence, transcript*) >
+
+#PCDATA >
+<!ELEMENT strand
+#PCDATA >
+<!ELEMENT biotype
+<!ELEMENT status
+#PCDATA >
+<!ELEMENT description #PCDATA >
+<!ELEMENT promoter
+#PCDATA >
+<!ELEMENT sequence
+#PCDATA >
+<!ELEMENT transcript (name, start, end, exon*,
+
+<!ELEMENT start
+<!ELEMENT end
+<!ELEMENT exon
+
+sequence, protein?) >
+#PCDATA >
+#PCDATA >
+(name, start, end, sequence) >
+
+Fig. 14 DTD for bio-genetic data
+
+database, answering queries which make use of both the tree
+structure and a tailored text index. More precisely, we create
+XML ﬁles that combine gene annotations with their DNA
+sequences. A sample DTD for these ﬁles is given in Figure 
+14. In this DTD, the elements promoter and sequence
+are of particular interest: they store the DNA represented as
+long sequences of A, T, C, G characters. The other #PCDATA
+elements store the gene annotation data such as positions,
+names and so on.
+
+Our experiment data is composed from human chromosome 
+ﬁve3 which contains 2719 genes having in total 8330
+different transcripts. For each gene, we include 1000 base
+pairs of its upstream promoter sequence, the gene sequence
+itself (all exons and introns included), and annotation information 
+such as gene’s biotype and description. Additionally,
+ we include all known transcripts of each gene, that
+is, sequences of the exons they contain as well as the concatenation 
+of these exons. The resulting textual content is
+highly repetitive since each one of the exon sequences can
+appear in many transcripts. Highly repetitive data has been
+shown to compress well using certain run-length encoded
+text-indexes [42], thus, here the text-index implementation
+is switched to use RLCSA [42] instead of the FM-index.
+In this example, the ﬁnal XML ﬁle4 is 132 MB while the
+text-index requires only 63 MB of memory plus 59 MB for
+the samples array. The full index, including tree and text, is
+around 135 MB, that is only as big as the original document.
+The resulting XML document contains 323318 elements of
+which 65286 are either promoter or sequence nodes containing 
+genetic data.
+
+To do biologically relevant XML queries, we extend our
+engine to support PSSM queries (Position Speciﬁc Scoring 
+Matrix) which allows to search for transcription factor
+
+As a last experiment, we demonstrate the versatility of SXSI
+by showing that it can be used as a very efﬁcient Biological
+
+3 Ensemble Human genome release 59, August 2010.
+4 http://www.cs.helsinki.fi/group/suds/sxsi/data/
+
+21
+
+Query running time in ms
+
+# results S Text S Auto S Total Q
+41.2
+69.5
+48
+
+M
+224
+420
+230
+
+//Article[ .//AbstractText[ contains ( . , "plus") ] ]
+//Article[ .//AbstractText[ contains ( . , "brain") ] ]
+//Article[ .//Year[ . = "1997" ] ]
+//MedlineCitation/Article/AuthorList/Author[ LastName[starts-with( . , "Bar")]]
+//*[ .//LastName[ contains( . , "Nguyen") ] ]
+//*//*[ contains( . , "epididymis") ]
+//*[ .//PublicationType[ ends-with( . , "Article") ]]
+//MedlineCitation[ .//Country[ . = "AUSTRALIA" ]]
+
+2.8
+T1
+9.0
+T2
+8.7
+T3
+0.25
+T4
+0.4
+T5
+0.2
+T6
+170.7
+T7
+T8
+2.6
+S Text: SXSI’s text collection S Auto: SXSI’s Automata query engine S Total: Total running time for SXSI
+Q: total running time for Qizx/DB M: total running time for MonetDB/XQuery
+Fig. 13 Text oriented queries
+
+3.1
+5.2
+2.2
+2.24
+1.9
+2.0
+29.3
+2.0
+
+358
+1104
+1237
+630
+154
+88
+
+81187
+326
+
+5.9
+14.2
+10.9
+2.5
+2.3
+2.2
+200
+4.6
+
+111.25 167.85
+1433
+5218
+1531
+54
+
+765
+1221
+438
+38
+
+binding sites from genes’ promoter regions. Input for this
+query is an Position Frequency Matrix (PFM) and a minimum 
+threshold for a valid match. The matrices can be found
+from e.g. the Jaspar database [?].
+
+In a nutshell, PFM’s have one row for each symbol of
+the alphabet (in our case 4 rows A, T, C, G) and one column
+for each position in the pattern to search. For instance, the
+PFM:
+
+ A 0 20 10 1
+
+T 30 10 0 0
+C 0 0 10 20
+G 18 6 6 6
+
+
+
+query
+//promoter[ PSSM( ., M1)]
+//promoter[ PSSM( ., M2)]
+//promoter[ PSSM( ., M3)]
+//exon[ .//sequence[ PSSM( ., M1) ] ] 434
+//exon[ .//sequence[ PSSM( ., M2) ] ] 25
+//exon[ .//sequence[ PSSM( ., M3) ] ] 9
+//*[ PSSM(., M1) ]
+//*[ PSSM(., M2) ]
+//*[ PSSM(., M3) ]
+M1 : Jaspar ID = MA0031.1, length = 8, threshold = 5000
+M2 : Jaspar ID = MA0050.1, length = 12, threshold = 100000
+M3 : Jaspar ID = MA0017.1, length = 14, threshold = 300000
+Table 7 Running time for PSSM queries in ms
+
+# results Text Auto Total
+7.4
+134
+92.5
+1.15 5.51
+4
+0.38 6.97
+1
+7.5
+92.6
+1.28 5.6
+0.62 7.0
+92.6
+1.19 5.5
+0.58 6.9
+
+85.1
+4.35
+6.5
+85.5
+4.3
+6.4
+85.04 7.6
+4.3
+6.4
+
+1875
+184
+51
+
+denotes patterns of length four, and the substring AGCT
+would get the score 0 + 6 + 10 + 10 = 26. To form the PSSM
+query, the PFM matrix is ﬁrst converted into log-odds form
+to take into account the uneven background distribution of
+nucleotide frequences. Then the PSSM query takes such a
+matrix as well as a threshold and returns all text elements
+whose content scores more than the given threshold. Table 7
+gives the running times for XPath queries using the PSSM
+predicates and RLCSA, with block size 128 and sample rate
+16, as the text index. The table summarizes also the number
+of results, the length of the search pattern and the value of
+the threshold. It is interesting to remark that since the document 
+is a very ﬂat and shallow structure, the automaton/tree
+part of the query evaluates always very quickly (7ms or un-
+der). The PSSM scheme also allows to write biologically
+meaningful queries that would otherwise be impossible or
+very hard to write with regular expressions or a regular fulltext 
+extension. Yet, we did not have to modify our core engine,
+ only the text index was modiﬁed in isolation to add
+PSSM capabilities, the automata and tree machinery remaining 
+unchanged.
+
+7 Conclusions and Future Work
+
+We have presented SXSI, a system for representing an XML
+collection in compact form so that fast indexed XPath queries
+
+can be carried out on it. Even in its current prototype stage,
+SXSI is already competitive with well-known efﬁcient systems 
+such as MonetDB and Qizx. As such, a number of avenues 
+for future work are open. We mention the broadest
+ones here.
+
+Handling updates to the collections is possible in principle,
+ as there are dynamic data structures for sequences, trees,
+and text collections [9, 41, 53]. What remains to be veriﬁed
+is how practical those theoretical solutions really are.
+
+As seen, the compact data structures support several fancy
+operations beyond those actually used by our XPath evaluator.
+ A matter of future work is to explore other evaluation
+strategies that take advantage of those nonstandard capabilities.
+ As an example, the current XPath evaluator does not use
+the range search capabilities of structure Doc of Section 3.
+Another interesting challenge is to support XPath stringvalue 
+semantics, where strings spanning more than one text
+node can be searched for. This, at least at a rough level, is
+not hard to achieve with our FM-index, by removing the $-
+terminators and marking them on a separate bitmap instead.
+Beyond that, we would like to extend our implementation to
+full XPath 1.0, and add core functionalities of XQuery.
+
+22
+
+Acknowledgements
+
+We would like to thank Schloss Dagstuhl for the very pleasant 
+and stimulating research environment it provides; the
+work of this paper was initiated during the Dagstuhl seminar
+“Structure-Based Compression of Complex Massive Data”
+(Number 08261). We are grateful to Kunihiko Sadakane for
+making available to us his implementation of parentheses
+structure for succinct trees, and to Juha Karjalainen for composing 
+the BioXML data. Diego Arroyuelo and Francisco
+Claude were partially funded by NICTA, Australia. Francisco 
+Claude was partially funded by NSERC of Canada and
+the Go-Bell Scholarships Program. Francisco Claude and
+Gonzalo Navarro were partially funded by Fondecyt Grant
+1-080019, Chile. Gonzalo Navarro was partially funded by
+Millennium Institute for Cell Dynamics and Biotechnology
+(ICDB), Grant ICM P05-001-F, Mideplan, Chile. Veli Mäkinen 
+and Jouni Sirén were funded by the Academy of Finland 
+under grant 1140727. Niko Välimäki was funded by
+the Helsinki Graduate School in Computer Science and Engineering.
+
+
+References
+
+1. A.V. Aho, R. Sethi, and J.D. Ullman. Compilers: Principles, Techniques 
+and Tools. Addison Wesley, 1986.
+
+2. D. Arroyuelo. An improved succinct representation for dynamic
+
+k-ary trees. In CPM, LNCS 5029, pages 277–289, 2008.
+
+3. D. Arroyuelo, R. Cánovas, G. Navarro, and K. Sadakane. Succinct
+
+trees in practice. In ALENEX, pages 84–97, 2010.
+
+4. D. Arroyuelo, G. Navarro, and K. Sadakane. Reducing the space
+
+requirement of LZ-index. In CPM, pages 319–330, 2006.
+
+5. D. Benoit, E. Demaine, J. I. Munro, R. Raman, V. Raman, and
+S. S. Rao. Representing trees of higher degree. Algorithmica,
+43(4):275–292, 2005.
+
+6. Henrik Björklund, Wouter Gelade, Marcel Marquardt, and Wim
+Martens. Incremental XPath evaluation. In ICDT, pages 162–173,
+2009.
+
+7. P. A. Boncz, T. Grust, M. van Keulen, S. Manegold, J. Rittinger,
+and J. Teubner. MonetDB/XQuery: a fast XQuery processor powered 
+by a relational engine. In SIGMOD, pages 479–490, 2006.
+
+8. M. Burrows and D. J. Wheeler. A block-sorting lossless data compression 
+algorithm. Technical Report 124, Digital Equipment Corporation,
+ 1994.
+
+9. H.-L. Chan, W.-K. Hon, T.-W. Lam, and K. Sadakane. Compressed 
+indexes for dynamic text collections. ACM TALG, 3(2),
+2007.
+
+10. F. Claude and G. Navarro. Practical rank/select queries over arbitrary 
+sequences. In SPIRE, pages 176–187, 2008.
+
+11. H. Comon, M. Dauchet, R. Gilleron, F. Jacquemard, C. Löding,
+D. Lugiez, S. Tison, and M. Tommasi. Tree automata techniques
+and applications. http://www.grappa.univ-lille3.fr/tata, 2007.
+
+12. Sylvain Conchon and Jean-Christophe Filliâtre. Type-Safe Modular 
+Hash-Consing. In Proc. ACM SIGPLAN Workshop on ML,
+2006. http://www.lri.fr/∼ﬁlliatr/ftp/publis/hash-consing2.ps.
+
+13. O. Delpratt, N. Rahman, and R. Raman. Engineering the LOUDS
+
+succinct tree representation. In WEA, pages 134–145, 2006.
+
+14. A. Farzan and J. I. Munro. A uniform approach towards succinct
+representation of trees. In Proc. 11th Scandinavian Workshop on
+Algorithm Theory (SWAT), LNCS 5124, pages 173–184, 2008.
+
+15. M. F. Fernández, J. Siméon, B. Choi, A. Marian, and G. Sur. Implementing 
+XQuery 1.0: The Galax experience. In VLDB, pages
+1077–1080, 2003.
+
+16. P. Ferragina, F. Luccio, G. Manzini, and S. Muthukrishnan. StrucIn
+
+
+turing labeled trees for optimal succinctness, and beyond.
+FOCS, pages 184–196, 2005.
+
+17. P. Ferragina, F. Luccio, G. Manzini, and S. Muthukrishnan. Compressing 
+and searching XML data via two zips. In WWW, pages
+751–760, 2006.
+
+18. P. Ferragina and G. Manzini. Indexing compressed text. J. ACM,
+
+54(4):552–581, 2005.
+
+19. P. Ferragina, G. Manzini, V. Mäkinen, and G. Navarro. Compressed 
+representations of sequences and full-text indexes. ACM
+TALG, 3(2), 2007.
+
+20. M. Franceschet. Xpathmark: An xpath benchmark for the xmark
+
+generated data. In XSym, pages 129–143, 2005.
+
+21. M. Franceschet.
+tests for XPath.
+http://drops.dagstuhl.de/opus/volltexte/2007/892.
+
+XPathMark: Functional and performance
+In XQuery Implementation Paradigms, 2007.
+
+22. R. Geary, N. Rahman, R. Raman, and V. Raman. A simple optimal
+representation for balanced parentheses. In CPM, pages 159–172,
+2004.
+
+23. R. F. Geary, R. Raman, and V. Raman. Succinct ordinal trees with
+level-ancestor queries. In Proc. 15th Annual ACM-SIAM Symposium 
+on Discrete Algorithms (SODA), pages 1–10, 2004.
+
+24. P. Genevès and N. Layaïda. XML reasoning made practical. In
+
+ICDE, pages 1169–1172, 2010.
+
+25. A. Golynski, I. Munro, and S. Rao. Rank/select operations on
+In SODA, pages 368–
+
+large alphabets: a tool for text indexing.
+373, 2006.
+
+26. G. Gottlob, C. Koch, and R. Pichler. Efﬁcient algorithms for processing 
+XPath queries. ACM TODS, 30(2):444–491, 2005.
+
+27. T. J. Green, A. Gupta, G. Miklau, M. Onizuka, and D. Suciu. Processing 
+XML streams with deterministic automata and stream indexes.
+ ACM Trans. Database Syst., 29:752–788, 2004.
+
+28. R. Grossi, A. Gupta, and J. S. Vitter. High-order entropycompressed 
+text indexes. In SODA, pages 841–850, 2003.
+
+29. T. Grust, M. van Keulen, and J. Teubner. Staircase join: Teach a
+relational DBMS to watch its (axis) steps. In VLDB, pages 524–
+525, 2003.
+
+30. M. He, J. I. Munro, and S. S. Rao. Succinct ordinal trees based on
+
+tree covering. In ICALP, pages 509–520, 2007.
+
+31. H. Hosoya. Foundations of XML Processing: The Tree Automata
+
+Approach. Cambridge University Press, 2010.
+
+32. G. Jacobson. Space-efﬁcient static trees and graphs.
+
+In FOCS,
+
+33. M. Kay. Ten reasons why Saxon XQuery is fast. IEEE Data Eng.
+
+pages 549–554, 1989.
+
+Bull., 31(4):65–74, 2008.
+
+34. C. Koch, S. Scherzinger, and M. Schmidt. The GCX system: DyIn
+
+
+namic buffer minimization in streaming xquery evaluation.
+VLDB, pages 1378–1381, 2007.
+
+35. Christoph Koch. Efﬁcient processing of expressive node-selecting
+queries on XML data in secondary storage: a tree automata-based
+approach. In VLDB, pages 249–260, 2003.
+
+36. T. W. Lam, W. K. Sung, S. L. Tam, C. K. Wong, and S. M. Yiu.
+Compressed indexing and local alignment of DNA. Bioinformatics,
+ 24(6):791–797, 2008.
+
+37. Ben Langmead, Cole Trapnell, Maihai Pop, and Steven L.
+Salzberg. Ultrafast and memory-efﬁcient alignment of short DNA
+sequences to the human genome. Genome Biology, 10(3), 2009.
+R25.
+
+38. Heng Li and Richard Durbin. Fast and accurate short read alignment 
+with burrows-wheeler transform. Bioinformatics, 2009. Advance 
+access.
+
+39. L. Libkin and C. Sirangelo. Reasoning about XML with temporal
+
+logics and automata. J. Applied Logic, 8:210–232, 2010.
+
+23
+
+40. Johan A. List, Vojkan Mihajlovic, Georgina Ramírez, Arjen P.
+de Vries, Djoerd Hiemstra, and Henk Ernst Blok. TIJAH: Embracing 
+IR methods in XML databases. Inf. Retr., 8(4):547–570,
+2005.
+
+41. V. Mäkinen and G. Navarro. Dynamic entropy-compressed sequences 
+and full-text indexes. ACM TALG, 4(3), 2008.
+
+42. V. Mäkinen, G. Navarro, J. Siren, and N. Välimäki. Storage and retrieval 
+of highly repetitive sequence collections. Journal of Computational 
+Biology, 17(3):281–308, 2010.
+
+43. S. Maneth and K. Nguyen. XPath whole query optimization.
+
+PVLDB, 3(1):882–893, 2010.
+
+44. S. Maneth and T. Sebastian. Fast and tiny structural self-indexes
+
+for XML. CoRR, abs/1012.5696, 2010.
+
+45. G. Manzini. An analysis of the Burrows-Wheeler transform. J.
+
+ACM, 48(3):407–430, 2001.
+
+46. I. Munro and V. Raman. Succinct representation of balanced
+parentheses, static trees and planar graphs. In FOCS, pages 118–
+126, 1997.
+
+47. J. Munro and V. Raman. Succinct representation of balanced
+
+parentheses and static trees. SIAM J. Comp., 31:762–776, 2001.
+
+48. G. Navarro and V. Mäkinen. Compressed full-text indexes. ACM
+
+49. Frank Neven. Automata theory for XML researchers. SIGMOD
+
+Comp. Surv., 39(1), 2007.
+
+Record, 31:39–46, 2002.
+
+50. D. Okanohara and K. Sadakane. Practical entropy-compressed
+
+rank/select dictionary. In ALENEX, 2007.
+
+51. D. Olteanu. SPEX: Streamed and progressive evaluation of XPath.
+
+IEEE Trans. Knowl. Data Eng., 19(7):934–949, 2007.
+
+52. R. Raman, V. Raman, and S. S. Rao. Succinct indexable dictionaries 
+with applications to encoding k-ary trees and multisets. In
+SODA, pages 233–242, 2002.
+
+53. K. Sadakane and G. Navarro. Fully-functional static and dynamic
+
+succinct trees. In SODA, pages 134–149, 2010.
+
+54. A. Schmidt, F. Waas, M. L. Kersten, M. J. Carey, I. Manolescu,
+and R. Busse. XMark: A benchmark for XML data management.
+In VLDB, pages 974–985, 2002.
+
+55. T. Schwentick. Automata for XML - a survey. J. Comput. Syst.
+
+Sci., 73:289–315, 2007.
+
+56. Signum. Tauro. http://tauro.signum.sns.it/, 2008.
+57. Jouni Sirén. Compressed sufﬁx arrays for massive data. In SPIRE,
+
+pages 63–74, 2009.
+
+58. XML Mind
+
+products.
+
+Qizx XML query
+
+engine.
+
+http://www.xmlmind.com/qizx, 2007.
+59. XQuery and XPath Full Text 1.0.
+
+xpath-full-text-10.
+
+http://www.w3.org/TR/
+
+

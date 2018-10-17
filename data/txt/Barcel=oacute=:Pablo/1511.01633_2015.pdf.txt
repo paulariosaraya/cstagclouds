@@ -1,0 +1,2730 @@
+String Solving with Word Equations and Transducers:
+
+Towards a Logic for Analysing Mutation XSS (Full Version)
+
+Anthony W. Lin
+
+Yale-NUS College, Singapore
+anthony.w.lin@yale-nus.edu.sg
+
+Pablo Barcel´o
+
+Center for Semantic Web Research
+
+& Dept. of Comp. Science, Univ. of Chile, Chile
+
+pbarcelo@dcc.uchile.cl
+
+5
+1
+0
+2
+
+ 
+
+v
+o
+N
+5
+
+ 
+
+ 
+ 
+]
+
+O
+L
+.
+s
+c
+[
+ 
+ 
+
+1
+v
+3
+3
+6
+1
+0
+
+.
+
+1
+1
+5
+1
+:
+v
+i
+X
+r
+a
+
+Abstract
+We study the fundamental issue of decidability of satisﬁability
+over string logics with concatenations and ﬁnite-state transducers
+as atomic operations. Although restricting to one type of operations 
+yields decidability, little is known about the decidability of
+their combined theory, which is especially relevant when analysing
+security vulnerabilities of dynamic web pages in a more realistic 
+browser model. On the one hand, word equations (string logic
+with concatenations) cannot precisely capture sanitisation functions 
+(e.g. htmlescape) and implicit browser transductions (e.g. innerHTML 
+mutations). On the other hand, transducers suffer from
+the reverse problem of being able to model sanitisation functions
+and browser transductions, but not string concatenations. Naively
+combining word equations and transducers easily leads to an undecidable 
+logic. Our main contribution is to show that the “straightline 
+fragment” of the logic is decidable (complexity ranges from
+PSPACE to EXPSPACE). The fragment can express the program
+logics of straight-line string-manipulating programs with concatenations 
+and transductions as atomic operations, which arise when
+performing bounded model checking or dynamic symbolic executions.
+ We demonstrate that the logic can naturally express constraints 
+required for analysing mutation XSS in web applications.
+Finally, the logic remains decidable in the presence of length, lettercounting,
+ regular, indexOf, and disequality constraints.
+
+Categories and Subject Descriptors F.3.1 [Logics and Meanings 
+of Programs]: Specifying and Verifying and Reasoning about
+Programs—Logics of Programs
+
+Keywords String analysis, XSS, word equations, transducers
+
+Introduction
+
+1.
+The past decade has witnessed a signiﬁcant amount of progress in
+constraint solving technologies, thanks to the emergence of highly
+efﬁcient SAT-solvers (e.g. see [15, 43, 46]) and SMT-solvers (e.g.
+see [11, 25, 43]). The goal of SAT-solvers is to solve constraint
+satisfaction problem in its most basic form, i.e., satisﬁability of
+propositional formulas. Nowadays there are numerous highly efﬁcient 
+solvers including Chaff, Glucose, Lingeling, and MiniSAT,
+
+to name a few (e.g. see [3] for others). Certain applications, however,
+ require more expressive constraint languages. The framework
+of satisﬁability modulo theories (SMT) builds on top of the basic
+constraint satisfaction problem by interpreting atomic propositions
+as a quantiﬁer-free formula in a certain “background” logical theory,
+ e.g., linear arithmetic. Today fast SMT-solvers supporting a
+multitude of background theories are available including Boolector,
+CVC4, Yices, and Z3, to name a few (e.g. see [4] for others). The
+backbones of fast SMT-solvers are usually a highly efﬁcient SATsolver 
+(to handle disjunctions) and an effective method of dealing
+with satisﬁability of formulas in the background theory.
+
+In the past seven years or so there have been a lot of works
+on developing robust SMT-solvers for constraint languages over
+strings (a.k.a. string solvers). The following (incomplete) list of
+publications indicates the amount of interests in string solving
+(broadly construed): [7, 8, 16, 22, 24, 29–32, 35, 36, 39, 44, 48,
+53, 55, 57, 65–69, 71–76]. One main driving force behind this research 
+direction — as argued by the authors of [8, 24, 30, 36, 39,
+39, 48, 48, 57, 65–69, 75, 76] among others — is the application
+to analysis of security vulnerabilities in web applications against
+code injections and cross-site scripting (XSS), which are typically
+caused by improper handling of untrusted strings by the web applications,
+ e.g., leading to an execution of malicious JavaScript in the
+clients’ browsers.
+
+Despite the amount of recent progress in developing practical
+string solvers, little progress has been made on the foundational issues 
+of string solving including decidability, which is particularly
+important since it imposes a fundamental limit of what we can expect 
+from a solver for a given string constraint language (especially
+with respect to soundness and completeness). Perhaps the most important 
+theoretical result in string solving is the decidability of satisﬁability 
+for word equations (i.e. string logic with the concatenation 
+operator) by Makanin [45] (whose computational complexity
+was improved to PSPACE by Plandowski [51, 52]). It is known
+that adding regular constraints (i.e. regular-expression matching)
+preserves decidability without increasing the complexity [26, 52].
+Very few decidability results extending this logic are known.
+
+For such an application as detecting security vulnerabilities in
+web applications in a realistic browser model (e.g. see [70]), word
+equations with regular constraints alone are insufﬁcient. Firstly,
+browsers regularly perform implicit transductions. For example,
+upon innerHTML assignments or document.write invocations,
+browsers mutate the original string values by HTML entity decoding,
+ e.g., each occurrence of &#34; will be replaced by ". [Modern 
+browsers admit some exceptions including the HTML entity
+names &amp;, &lt;, and &gt; (among others), which will not
+be decoded.] Since such transductions involve only conversions
+of one character-set encoding to another, they can be encoded as
+ﬁnite-state (input/output) transducers, as has already been noted in
+
+[24, 36, 66, 70] (among others). Secondly, in an attempt to prevent 
+code injection and XSS attacks, most web applications will
+ﬁrst sanitise untrusted strings (e.g. obtained from an untrusted ap-
+plication) before processing them. Common sanitisation functions
+include JavaScript-Escape and HTML-Escape (an implementation
+can be found in The Closure Library [5]). HTML-Escape converts
+reserved characters in HTML such as &, <, and ’ to their respective 
+HTML entity names &amp;, &lt; and &#39;. On the other
+hand, JavaScript-Escape will backslash-escape certain metacharacters,
+ e.g., the character ’ and " are replaced by \’ and \". Again,
+such sanitisation functions can be encoded as ﬁnite-state transducers,
+ as has been noted in [36] (among others).
+Example 1. The following JavaScript code snippet adapted from
+a recent CACM article [38] is a simple example that uses both
+concatenations and ﬁnite-state transducers (both explicitly and im-
+plictly):
+
+var x = goog.string.htmlEscape(cat);
+var y = goog.string.escapeString(x);
+catElem.innerHTML = ’<button onclick=
+
+"createCatList(\’’ + y + ’\’)">’ + x + ’</button>’;
+
+The code assigns an HTML markup for a hyperlink to the DOM element 
+catElem. The hyperlink creates a category cat whose value
+is provided by an untrusted third party. For this reason, the code
+attempts to ﬁrst sanitise the value of cat. This is done via The Closure 
+Library [5] string functions htmlEscape and escapeString
+(implementing JavaScript-Escape). Inputting the value Flora &
+Fauna into cat gives the desired HTML markup:
+
+<button onclick="createCatList(’Flora &amp; Fauna’)">
+
+Flora &amp; Fauna</button>
+
+On the other hand, inputting the value ’);alert(1);// to cat,
+results in the HTML markup:
+
+<button onclick="createCatList(’&#39;);alert(1);//’)">
+
+&#39;);alert(1);//’)</button>
+
+When this is inserted into the DOM via innerHTML, an implicit
+browser transduction will take place, i.e., ﬁrst HTML-unescaping
+the value inside the onclick attribute and invoking the attacker’s
+script alert(1) after createCatList. This subtle XSS bug (a
+type of mutation XSS [33]) is due to calling the appropriate escaping 
+functions in the wrong order.
+
+It is well-known (e.g. see [8, 57, 75]) that string solving can
+be applied to detecting security vulnerabilities against a given injection 
+and XSS attack pattern1 P in the form of a regular expression.
+ After identifying certain “hot spot” variables in the program 
+where attacks can be performed (e.g. possibly via taint anal-
+ysis), a string constraint will be generated that is satisﬁable iff
+the program is vulnerable against a given attack pattern. In the
+above example, to analyse security vulnerabilities in the variable
+catElem.innerHTML against the following attack pattern (given
+in JavaScript regex notation; blank space inserted for readability):
+
+e1 = /<button onclick=
+
+"createCatList\(’ ( ’ | [^’]*[^’\\] ’ ) \);
+
+[^’]*[^’\\]’ )">.*<\/button>/
+
+one would express the program logic as a conjunction of:
+
+• x = R1(cat)
+
+• y = R2(x)
+• z = w1 · y · w2 · x · w3 for some constant strings w1, w2, w3,
+
+e.g., w1 is <button onclick="createCatList(’
+
+1 Attack patterns are identiﬁed from previous vulnerabilities, some of which
+have been well-documented, e.g., see [2, 6].
+
+• catElem.innerHTML = R3(z)
+• catElem.innerHTML matches e1.
+Here, R1 and R2 are, respectively,
+transducers implementing
+htmlEscape and escapeString, while R3 is a transducer implementing 
+the implicit browser transductions upon innerHTML
+assignments. Note that the above string constraint cannot be written 
+as word equations with regular constraints alone since the
+ﬁnite-state transducers replace each occurrence of a substring (e.g.
+&#39;) in a string by another string (e.g. the single character "). To
+the best of our knowledge, there is no known decidable logic which
+can express the above string constraint.
+
+Contribution: We study the decidability of satisﬁability over
+string logics with concatenations, ﬁnite-state transductions, and
+regex matching as atomic operations. Naively combining concatenations 
+and transducers easily leads to an undecidable logic (e.g.
+see [10, 16]). In fact, it was shown in [10] that restricting to string
+constraints of the form x = y · z ∧ x = R(z), where R ranges
+over ﬁnite-state transducers, is undecidable. [Actually, R can be
+restricted to a relatively weak class of ﬁnite-state transducers that
+express only regular relations (a.k.a. automatic relations [18]).]
+Our main contribution is to show that the “straight-line fragment”
+of the logic is decidable (in fact, is EXPSPACE-complete, but
+under a certain reasonable assumption the complexity reduces to
+PSPACE). In fact, our decidability results provide an upper bound
+for the maximum size of solutions that need to be explored to
+guarantee completeness for bounded-length string solvers whenever 
+the input constraint falls within our straight-line fragment. The
+fragment can express the program logics of straight-line stringmanipulating 
+programs with concatenations and transductions as
+atomic operations. This includes the program logic of Example
+1. In fact, straight-line programs naturally arise when performing
+bounded model checking2 or dynamic symbolic executions, which
+unrolls loops in the programs (up to a given depth) and converts
+the resulting programs into static single assignment form (i.e. each
+variable deﬁned once). Please consult [27, 43, 65] for more details.
+Example 1 is one example of analysis of mutation XSS vulnerabilities 
+that can be expressed in our logic. In this paper, we provide
+three other mutation XSS examples that can be expressed in our
+logic (adapted from [33, 38, 62]).
+
+Finally, the case study of [57] suggested that the use of length
+constraints (comparing lengths of different strings) and IndexOf
+constraints (IndexOf(x, y) outputs the position of an occurrence
+of a given string x in another string y) is prevalent in JavaScript
+programs. To this end, we show that our logic is still decidable
+(with the same complexity) when extended with:
+
+1. (linear) arithmetic constraints whose free variables are interpreted 
+as one of the following: integer variables in the program,
+length of a string variable, or the number of occurrences of a
+certain letter in a string variable.
+
+2. IndexOf constraints of the form h = IndexOf(w, y), where w
+is a constant string and h is an integer variable. This is the most
+frequent usage of IndexOf operator in JavaScript.
+
+All the examples in the benchmark examples of [57] were observed
+to belong to a class called solved forms [31], which is a subset
+of our string logic with linear arithmetic constraints. Lastly, we
+can also add unrestricted disequality constraints between string
+variables, while still preserving decidability.
+
+Organisation:
+Section 2 ﬁxes general mathematical notations
+and reviews the necessary concepts on automata and transducers
+that will be used throughout the paper. In Section 3, we deﬁne a
+
+2 Note that this does not mean restrictions to strings of bounded length.
+
+general string constraint language that combines concatenations,
+ﬁnite-state transductions, and regex matching. The language is undecidable 
+even after imposing various restrictions that have been
+proposed in the literature. In Section 4, we recover decidability for
+the straight-line fragment. In Section 5, we show that decidability 
+can be retained even when length and IndexOf constraints are
+incorporated. We conclude with the related work and possible future 
+works in Section 6. Additional material can be found in the
+appendix.
+
+2. Preliminaries
+General notations: Given two integers i, j, we write [i, j] to
+denote the set {i, . . . , j} of integers in between i and j. For each
+integer k, we write [k] to denote [0, k]. Given a binary relation
+R ⊆ S × S and a set A ⊆ S, we use R(A) to denote the set
+{s′ ∈ S | (s, s′) ∈ R for some s ∈ A}. In other words, R(A) is
+the post-image of A under R. We use R−1 to denote the reverse
+relation, i.e., (s, s′) ∈ R−1 iff (s′, s) ∈ R for each s, s′ ∈ S.
+Notice then that R−1(A) is the pre-image of A under R. The term
+DAG stands for directed acylic graphs.
+Regular languages: Fix a ﬁnite alphabet Σ. Elements in Σ∗
+are interchangeably called words or strings. For each ﬁnite word
+w = w1 . . . wn ∈ Σ∗, we write w[i, j], where 1 ≤ i ≤ j ≤ n, to
+denote the segment wi . . . wj. We use w[i] to denote w[i, i] = wi.
+In addition, the symbol |w| denotes the length n of w, while the
+symbol |w|a (a ∈ Σ) denotes the number of occurrences of a in w.
+Recall that a nondeterministic ﬁnite-state automaton (NFA) is
+a tuple A = (Σ, Q, δ, q0, F ), where Q is a ﬁnite set of states,
+δ ⊆ Q × Σ × Q is the transition relation, q0 ∈ Q is the initial state,
+and F ⊆ Q is the set of ﬁnal states. A run of A on w is a function
+ρ : {0, . . . , n} → Q with ρ(0) = q0 that obeys the transition
+relation δ, i.e., (ρ(i), wi, ρ(i+1)) ∈ δ for each i ∈ {0, . . . , n−1}.
+We write A[q,q′] to denote A but the initial state (resp. set of ﬁnal
+states) is replaced by q (resp. {q′}). We may also denote the run ρ
+by the word ρ(0) · · · ρ(n) over the alphabet Q. The run ρ is said
+to be accepting if ρ(n) ∈ F , in which case we say that the word
+w is accepted by A. The language L(A) of A is the set of words
+in Σ∗ accepted by A. Such a language is said to be regular. Recall
+that regular languages are precisely the ones that can be deﬁned
+by regular expressions. In the sequel, when the meaning is clear
+from the context, we will sometimes confuse an NFA or a regular
+expression with the regular language that it recognises/generates.
+Transducers and rational relations: A transducer (short for
+“ﬁnite-state input output transducer”) is a two-tape automaton that
+has two heads for the tapes and one additional ﬁnite control; at every 
+step, based on the state and the letters it is reading, the automaton 
+can enter a new state and move some (but not necessarily all)
+tape heads. Each transducer generates a binary relation over strings
+called rational relation.
+
+We will now make this deﬁnition more precise. A transducer
+over the alphabet Σ is a tuple A = (Γ, Q, δ, q0, F ), where Γ := Σ2
+ǫ
+and Σǫ := Σ ∪ {ǫ}, such that A is syntactically an NFA over Γ.
+The transducer A is said to be synchronised if A (viewed as an
+NFA) does not accept words w = (a1, b1) · · · (an, bn) ∈ (Σ2
+ǫ )∗
+such that there exist i, j ∈ [n] with i < j such that one of the
+following conditions holds: (1) (ai, bi) ∈ Σ × {ǫ} and bj ∈ Σ,
+(2) (ai, bi) ∈ {ǫ} × Σ and aj ∈ Σ. Intuitively, as soon as the
+two heads go out of sync, the head that is lagging behind is no
+longer allowed to move forward. The relation R ⊆ (Σ∗)2 that A
+recognises consists of all tuples ¯w for which there is a run
+
+π := q0
+
+σ1−→ q1
+
+σ2−→ · · · σn−→ qn
+
+of A (treated as an NFA) such that ¯w = σ1 ◦ σ2 ◦ · · · ◦ σn, where
+the string concatenation operator ◦ is extended to tuples over words
+
+component-wise (i.e. (v1, v2)◦(w1, w2) = (v1w1, v2w2)). A relation 
+is said to be rational if it is recognised by a transducer. A relation 
+is said to be synchronised rational (a.k.a. regular or automatic;
+see [10, 16, 17]) if it is recognised by a synchronised transducer.
+Rational relations satisfy some nice properties (e.g. see [14, 54]):
+(1) closure under union and concatenation, and (2) the pre/post image 
+of a regular language under a rational relation is regular. The
+transducers/automata witnessing the above two properties can also
+be constructed efﬁciently: taking union can be done in linear-time,
+while taking concatenation and pre/post image of a regular language 
+can be done in quadratic time (e.g. see [12–14]). Synchronised 
+rational relations are adequate for certain applications (e.g.
+see [9, 17, 64, 74]), while also satisfying effective closure under
+intersection and complementation (cf. [17]).
+
+Example 2. The operator replace-all replaces all occurrences
+of subwords matched by a regular expression e by a word in a
+regular expression e′, which in a Vim-like notation can be written
+as s/e/e′/g. There are various matching strategies that are used
+by real-world programming languages, e.g., ﬁrst match, longest
+match, etc. They can all be encoded as transducers (e.g. see [55]).
+One particular use of replace-all is to replace words that match
+a regular language L by ǫ (i.e. an erase operation). Such usage of
+replace-all can be found in sanitisation of PHP scripts, e.g., see
+[8, 29, 30, 73, 75]. For example, to thwart XSS attack patterns of the
+form <script>Σ∗</script> from a string variable x, one could
+erase each occurrence of < from x (e.g. see [8, 73, 75]).
+
+Let y = replace-all(x, ǫ/A) denote the operation of erasing
+each occurrence of letters a ∈ A (e.g. A = {<}) from x and assign
+it to y. The transducer T for this is simple. It has one state q, which
+is both an initial and ﬁnal state. It has |A| transitions, i.e., for each
+a ∈ A the transducer T has the transition (q, (a, ǫ), q).
+
+Computational complexity:
+In this paper, we study not only decidability 
+but also the complexity of string logics. Pinpointing the
+precise complexity of veriﬁcation problems is not only of fundamental 
+importance, but also it often suggests algorithmic techniques 
+that are most suitable for attacking the problem in practice.
+ In this paper, we deal with the following computational complexity 
+classes (see [61] for more details): P (problems solvable
+in polynomial-time), PSPACE (problems solvable in polynomial
+space and exponential time), and EXPSPACE (problems solvable
+in exponential space and double exponential time). Veriﬁcation
+problems that have complexity PSPACE or beyond — see [40, 60]
+for a few examples — have substantially beneﬁted from techniques
+like symbolic model checking [47]. As we shall see later, our complexity 
+upper bound also suggests the maximum lengths of words
+that need to be explored to guarantee completeness.
+
+3. The Core Constraint Language
+We start by deﬁning a general string constraint language that supports 
+concatenations, ﬁnite-state transducers, and regex matching.
+The language is a natural generalisation of three decidable string
+constraint languages: word equations, ﬁnite-state transducers, and
+regex matching. The generality of the language, however, quickly
+makes it undecidable. To delineate the border of undecidability, we
+shall show that the undecidability already holds for various restrictions 
+that have been proposed in the literature (e.g. restricting ﬁnitestate 
+transducers to replace-all). We will recover decidability in
+the next section.
+
+3.1 Language Deﬁnition
+We assume a ﬁnite alphabet Σ and countably many string variables 
+x, y, z, . . . ranging over Σ∗. We start by deﬁning relational
+constraints.
+
+Deﬁnition 1 (Relational constraints). An atomic relational constraint 
+over Σ is an expression ϕ deﬁned by the following grammar:
+
+ϕ ::= y = x1 ◦ · · · ◦ xn(n ∈ N) | y = w | R(x, y)
+
+where y, xi are string variables, w ∈ Σ∗ is a constant word, and R
+is a rational relation over Σ given as a transducer. Here, ◦ is used
+to denote the string concatenation operator, which we shall often
+omit (or simply replace by ·) to avoid notational clutter. A relational
+constraint is a conjunction of atomic relational constraints.
+
+In other words, an atomic relational constraint allows us to
+test equality of a string variable y with either a concatenation of
+string variables or a constant string, or whether the transducer R
+can transform x into y. Notice that the atomic constraint y =
+x1 ◦ · · · ◦ xn cannot be deﬁned as a rational relation R(x, y) (or
+in fact any binary relation) when n > 1. We now deﬁne regular
+constraints (i.e. regex matching constraints), which check whether
+a word belongs to a boolean combination of regular languages.
+Deﬁnition 2 (Regular constraints). An atomic regular constraint
+over Σ is an expression of the form P (x), for P a regular language
+over Σ given as an NFA and x a variable. A regular constraint over
+Σ is a boolean combination of atomic regular constraints over Σ
+deﬁned by the following grammar:
+
+ϕ ::= P (x) | ϕ ∧ ϕ | ϕ ∨ ϕ | ¬ϕ
+
+We ﬁnally deﬁne the class of string constraints by taking the
+
+conjunction of relational and regular constraints.
+Deﬁnition 3 (String constraints). A string constraint over ﬁnite
+alphabet Σ is a conjunction of a relational constraint and a regular
+constraint over Σ.
+
+String constraints allow us to express general word equations
+(i.e., x1 . . . xn = y1 . . . yn for not necessarily distinct variables)
+by a conjunction of y = x1 . . . xn and y = y1 . . . yn. In addition,
+when the word equation asserts that one of the xi’s or yj’s is the
+constant string w ∈ Σ∗, we simply add a regular constraint that
+enforces the variable to belong to the language {w}.
+
+An assignment for a string constraint ϕ over Σ is simply a
+mapping ι from the set of string variables mentioned in ϕ to Σ∗.
+It satisﬁes ϕ if the constraint ϕ becomes true under the substitution
+of each variable x by ι(x). We formalise this for atomic relational
+and regular constraints (boolean connectives are standard):
+
+1. ι satisﬁes the relational constraint y = x1 · · · xn, for string
+variables y, x1, . . . , xn, if and only if ι(y) = ι(x1) · · · ι(xn).
+2. ι satisﬁes the relational constraint y = w, for string variable y
+
+and word w ∈ Σ∗, if and only if ι(y) = w.
+
+3. ι satisﬁes the relational constraint R(x, y), for a rational relation 
+R, if and only if the pair (ι(x), ι(y)) belongs to R.
+
+4. ι satisﬁes the atomic regular constraint P (x), for P a regular
+
+language, if and only if ι(x) ∈ P .
+A satisfying assignment for ϕ is also called a solution for ϕ. If
+
+ϕ has a solution, then it is said to be satisﬁable.
+Example 3. In Introduction, we have expressed the program logic
+of the script in Example 1 and the attack pattern as a conjunction of
+four atomic relational constraints and one regular constraint.
+
+3.2 The Satisﬁability Problem
+The deﬁnition of the problem is given as follows.
+
+PROBLEM :
+INPUT :
+QUESTION :
+
+SATISFIABILITY.
+A string constraint ϕ over Σ.
+Is ϕ satisﬁable?
+
+The generality of the constraint language makes it undecidable,
+
+even in very simple cases.
+Proposition 1. SATISFIABILITY is undecidable.
+
+This is because checking satisﬁability of constraints of the form
+R(x, x) is already undecidable by a simple reduction from the Post
+Correspondence Problem (PCP), e.g., see [49, Proof of Proposition
+2.14]. For this reason, an acyclicity constraint is often imposed
+(e.g. see [10, 12, 13]) to obtain decidability for formulas that are
+conjunctions of constraints of the form P (x) or R(x, y), where P
+is a regular language and R is a rational constraint. This condition is
+deﬁned as follows. Let ϕ be a formula of the form above and G(ϕ)
+the undirected graph whose nodes are the variables in ϕ and there
+is an edge {x, y} if R(x, y) is a constraint in ϕ. Further, let AC be
+the class of those formulas ϕ such that G(ϕ) is acyclic. Then:
+Proposition 2 ([10]). Checking satisﬁability of formulas in AC is
+PSPACE-complete. In fact, if a formula ϕ ∈ AC is satisﬁable, then
+it has a solution of size at most exponential in |ϕ|.
+
+The authors of [10] refer to this problem as the generalised intersection 
+problem with acyclic queries (see Theorem 6.7 in [10]).
+[Decidability (in fact, in exponential time) of such a restriction already 
+follows from the classic result by Nivat in the study of rational 
+relations (e.g. see the textbook [14]) that the pre/post images of
+regular languages under a rational transducer is effectively regular
+and the complexity analysis in [12, 13].]
+
+Unfortunately, the positive result in Proposition 2 cannot be easily 
+extended to our constraint language, as taking the conjunction
+of a formula in AC (in particular, of a single rational constraint
+R(x, y)) with the very simple word equation x = y turns the satisﬁability 
+problem undecidable. This is because the undecidable constraint 
+R(x, x) can be expressed as: x = y ∧ R(x, y). Restricting
+R to synchronised rational relations does not help either: satisﬁability 
+of string constraints of the form x = yz ∧ R(x, z), where R
+is a synchronised rational relation, is undecidable [10].
+
+Another option is to restrict the use of ﬁnite-state transducers 
+to the replace-all operators. As we have argued in Example 
+2 this might be sufﬁcient to model some sanitisation functions
+that arise in practice. In fact, some string constraint languages that
+have been proposed in the literature (e.g. see [65, 75]) permit the
+use of the replace-all operator, but not ﬁnite-state transductions 
+in general. It turns out that this restriction is still undecidable 
+even for the very restricted use of replace-all of the form
+replace-all(x, ǫ/A) (deﬁned in Example 2) which erase all occurrences 
+of characters a ∈ A in x. The proof (see Appendix) is
+via a simple but tedious reduction from PCP.
+Proposition 3. Checking satisﬁability of a constraint of the form
+x = yz ∧ ϕ, where ϕ is a formula in AC that only mentions transducers 
+R(x, y) of the form replace-all(x, ǫ/A), is undecidable.
+
+4. The Straight-Line Fragment
+In Section 3, we have explored various syntactic restrictions of
+the core constraint language that still permit both concatenation
+and transducers, and saw that undecidability still held. In this section,
+ we will show that the “straight-line fragment” of the language 
+is decidable (in fact, solvable in exponential space). This
+straight-line fragment captures the structure of straight-line manipulating 
+programs with concatenations and ﬁnite-state transductions 
+as atomic string operations. Note that straight-line programs
+naturally arise when verifying string-manipulating programs using
+bounded model checking and dynamic symbolic executions (e.g.
+see [27, 43, 65]), which unrolls loops in the programs (up to a given
+depth) and converts the resulting programs into static single assignment 
+form (i.e. each variable deﬁned only once). For applications
+to detecting mutation XSS [33], we will see that the formula for
+analysing mutation XSS from Example 1 in Introduction can be
+expressed in the straight-line fragment. We will also see other such
+examples in this section.
+Convention.
+In the sequel, we will treat an atomic relational
+constraint of the form y = w, for a word w ∈ Σ∗, as an atomic
+regular constraint, i.e., simply treat w as regular expression and
+assert y ∈ L(w).
+
+To deﬁne the straight-line fragment of the core constraint language,
+ we ﬁrst write R(x, y) as y = R(x). This notation is quite
+natural since R can be viewed as a string transformation from the
+input x to the output y. [However, a word of caution is necessary:
+it is important to remember that R is a relation that need not be a
+function in general.] We also say that a variable x is a source variable 
+in the relational constraint ϕ if there is no conjunct in ϕ of the
+form x = x1 · · · xn or x = R(y) for some transducer R.
+Deﬁnition 4 (Straight-line constraints). A relational constraint ϕ
+is said to be straight-line if it can be rewritten (by reordering the
+conjuncts) as a relational constraint of the form Vm
+i=1 xi = Pi
+such that:
+(SL1) x1, . . . , xm are different variables
+(SL2) Each Pi uses only source variables in ϕ or variables from
+
+{x1, . . . , xi−1}.
+
+We say that a string constraint is straight-line if it is a conjunction
+of a straight-line relational constraint with a regular constraint. Let
+SL be the set of all straight-line string constraints.
+
+An example of a straight-line string constraint is y = R(x) ∧
+z = yyz′. Another example is the constraint from Example 1.
+Straight-line restrictions also rule out all the undecidable constraints 
+from Section 3, e.g., formulas of the form x = y ∧ R(x, y)
+and x = yz ∧ R(z, x).
+
+The literal deﬁnition of straight-line constraints does not give
+an efﬁcient algorithm for checking whether a constraint is straightline.
+ This, however, can be done efﬁciently.
+Proposition 4. There is a linear-time algorithm for checking
+whether a relational constraint ϕ can be made a straight-line constraint 
+(by reordering equations) and, if so, outputs the reordered
+constraint Vm
+
+i=1 xi = Pi satisfying (SL1) and (SL2).
+
+The proof of this proposition is standard. Straight-line relational
+constraints can be visualised by drawing a “dependency graph”
+of the variables in the constraints. Formally, given a relational
+constraint ϕ, the dependency graph G(ϕ) of ϕ is the directed graph
+whose nodes are the string variables appearing in ϕ and there is an
+edge from variable x to y iff (a) ϕ contains a conjunct of the form
+R(x, y), for a rational relation R, or (b) an equation of the form y =
+x1 . . . xn for some string variables x1 . . . xn which include x. It is
+easy to see that straight-line constraints have acyclic dependency
+graphs. In fact, the converse is also true provided that the relational
+constraint ϕ is uniquely deﬁnitional (i.e. there are no two conjuncts
+x = P and x = P ′ in ϕ with the same left-hand side variable).
+A linear-time algorithm for Proposition 4, then, ﬁrst checks if the
+given constraint ϕ is uniquely deﬁnitional by sequentially going
+through each conjunct while maintaining m bits in memory (one
+for each variable in the left-hand side of an equation). Once unique
+deﬁnitionality has been checked, the algorithm checks whether the
+directed graph G(ϕ) is acyclic and, if so, output a topological sort,
+which is well-known to be solvable in linear-time (e.g. see [23]).
+The topological sort corresponds to a reordering of the conjuncts in
+ϕ so that (SL1) and (SL2) are both satisﬁed.
+
+Our main result states that satisﬁability for SL is decidable.
+
+Theorem 5. SATISFIABILITY for the class SL is EXPSPACEcomplete.
+
+
+Recall that EXPSPACE problems require double-exponential
+time algorithms in the worst case. An important corollary of the
+proof of Theorem 5 is a bounded model property.
+Theorem 6. If a string constraint ϕ in SL is satisﬁable, then it
+has a solution with each word of length at most 22p(|ϕ|) , for some
+polynomial p(x).
+
+In Theorem 10 and Theorem 11 below, we identify a natural
+restriction of SL that yields an upper bound for satisﬁability —
+PSPACE (i.e., a single-exponential time) and satisfying models of
+size at most single-exponential — and seems sufﬁciently expressive
+in practice (e.g. it subsumes all our examples).
+Remark. The reader might be wondering whether Theorem 5 and
+Theorem 6 immediately follow from Proposition 2? This is not
+the case since AC does not permit equalities and concatenations
+(therefore, expressions of the form x = y.z cannot be expressed).
+Similarly, the theorems also do not immediately follow from the
+effective closure of regular languages under (1) pre/post images
+under rational relations (see discussion below Proposition 2), and
+(2) concatenation. For example, consider the constraint x = yy ∧
+y ∈ L(a∗ + b∗) ∧ x ∈ L(ab) over the alphabet Σ = {a, b}. This
+is unsatisﬁable. Instead, naively applying the two aforementioned
+closure, we would deduce that x matches (a∗ + b∗).(a∗ + b∗),
+which can be matched by ab, i.e., a false positive. As we shall
+see later, multiple occurrences of variables in an assignment yield
+constraints with “dimensions” > 1 (deﬁnition below), instances of
+which include all the mutation XSS examples in the paper.
+
+4.1 Application to Detecting Mutation XSS
+Before proving Theorems 5 and Theorem 6, we will mention that
+the logic SL is sufﬁciently powerful for expressing string constraints 
+that arise from analysis of mutation XSS vulnerability in
+web applications. By Theorem 5, such a vulnerability analysis can
+be performed automatically. We have seen one such example (i.e.
+Example 1). We will now provide other examples of mutation XSS
+attacks that can be expressed within the framework of SL.
+Example 4. We have seen that the script in Example 1 contains an
+XSS bug. As suggested in [38], the corrected version of the script
+swaps the order of the sanitisation functions escapeString and
+htmlEscape resulting in the following script:
+
+var x = goog.string.escapeString(cat);
+var y = goog.string.htmlEscape(x);
+catElem.innerHTML = ’<button onclick=
+
+"createCatList(\’’ + y + ’\’)">’ + x + ’</button>’;
+
+This script is no longer vulnerable to the attack pattern e1 provided
+in Example 1. The program logic of the corrected script can be
+expressed in SL using the same formula as for Example 1 (see
+Introduction) except that the transducers R1 and R2 are swapped.
+The algorithm from Theorem 5 will be able to automatically point
+out that the script is secure against the attack pattern e1.
+Example 5. This example is an adaptation of vulnerable code
+patterns from [33, Listing 1.12] applied to the previous example.
+After the JavaScript from Example 1 has been corrected in Example
+4, suppose now that a programmer wishes to introduce a new
+“title” HTML element into the HTML document in which the new
+catalogue category name will be displayed. The following code
+snippet contains two lines in this HTML ﬁle:
+
+<h1>New catalogue category:
+
+<span id="node1">TBA</span></h1>
+
+<div id="node2"></div>
+
+The following JavaScript code snippet is a modiﬁcation of the
+JavaScript from Example 4 which additionally puts the new catalogue 
+category name in the title (i.e. ID node1):
+
+var titleElem = document.getElementById("node1");
+var catElem = document.getElementById("node2");
+
+var x = goog.string.escapeString(cat);
+titleElem.innerHTML = x;
+var y = goog.string.htmlEscape(titleElem.innerHTML);
+catElem.innerHTML = ’<button onclick=
+
+"createCatList(\’’ + y + ’\’)">’ + x + ’</button>’;
+
+This JavaScript now contains a subtle mXSS vulnerability. Consider 
+the value cat = ’&#39;);alert(1);//’. The value x
+will be the same as cat since the metacharacters ’ and " do
+not occur in cat. The value of titleElem.innerHTML is, however,
+ ’);alert(1);// since an implicit browser transduction occurs 
+upon writing into the DOM via innerHTML. HTMLescaping 
+’);alert(1);// results in the string &#39;);alert(1);//,
+which is the value of y. Another implicit browser transduction takes
+place when assigning a value to catElem.innerHTML. The DOM
+element catElem now contains the HTML markup:
+
+<button onclick="createCatList(’’);alert(1);//’)">
+
+’);alert(1);//’)</button>
+
+Upon clicking the button, the browser executes the attacker’s script
+alert(1) after createCatList has been invoked. The XSS bug
+is due to the programmer’s wrong assumption that the value of
+titleElem.innerHTML is the same as x after the assignment.
+
+Let us now encode the program logic of the above JavaScript
+as a straight-line string constraint. Let e1 be the attack pattern
+from Example 1. As in Example 1, let R1 and R2 be transducers
+implementing htmlEscape and escapeString, and let R3 be the
+transducer implementing the implicit browser transductions upon
+innerHTML assignments. The desired formula can now be written
+as a conjunction of
+
+• x = R2(cat)
+• titleElem.innerHTML = R3(x)
+• y = R1(titleElem.innerHTML)
+• z = w1 · y · w2 · x · w3 for some constant strings w1, w2, w3
+• catElem.innerHTML = R3(z)
+• catElem.innerHTML matches e1.
+
+Observe that this is a straight-line string constraint. Therefore, the
+algorithm from Theorem 5 will be able to automatically detect a
+vulnerability against the attack pattern e1.
+
+In the appendix, we will provide another example of mXSS bug
+from adapted from [62] and show how it can be analysed within the
+framework of SL.
+
+Remark. At this stage, the reader might be wondering about
+the security implication when the above formulas ϕ are satisﬁable 
+or unsatisﬁable. Unsatisﬁability rules out speciﬁc vulnerability 
+pattern. In the case of satisﬁability, since attack patterns
+(including e1) generally overapproximate a set of bad strings, a
+solution to ϕ might not correspond to an actual attack. There
+are multiple proposals to address this problem (e.g. see [8, 75]).
+One method (e.g. see [8]) is to supply each attack pattern (e.g.
+Σ∗<script>Σ∗) with a set of test cases in the form of actual
+strings (e.g. <script>alert(1);</script>). Replacing e1 by
+a speciﬁc test case, ϕ can be checked again for satisﬁability.
+
+4.2 Proofs of Theorem 5 and Theorem 6
+We start by proving the upper bound of Theorem 5. Then we
+explain how Theorem 6 follows from it. Finally, we sketch the
+proof of the lower bound of Theorem 5.
+
+4.2.1 Upper Bound of Theorem 5
+Let SLr denote the restriction of SL to formulas which do not involve 
+any concatenation, i.e., constraints of the form y = y1 . . . yn.
+The crux of the algorithm witnessing Theorem 5 is that we transform 
+the input constraint ϕ in SL into one in the class SLr. After
+this, in Step 3 we will apply a classic result in the theory of rational
+relations to obtain decidability (or a recent result [10] for a better
+complexity). We now provide the details of our algorithm for the
+satisﬁability problem for SL.
+
+Step 1: simpliﬁcation of regular constraints Recall that a regular 
+constraint is a boolean combination of constraints of the form
+P (x), where P is a regular language given as an NFA over a ﬁnite
+alphabet Σ. Given a regular constraint ψ, there exists an equivalent 
+constraint in disjunctive normal form (DNF) of exponential
+size, where each disjunct θ is a conjunction of literals involving
+the atoms from ψ of the form P (x) (so θ has size linear in |ψ|).
+From propositional logic, we know that there is a standard enumeration 
+of these disjuncts, i.e., enumerate satisfying assignments of
+ψ treated as a propositional formula (i.e. each atom P (x) is now
+a proposition). Such an enumeration runs in polynomial space and
+exponential time.
+
+Next, each disjunct θ in the aforementioned enumeration can
+
+now be converted into a conjunction
+
+P1(x1) ∧ · · · ∧ Pn(xn)
+
+(1)
+of positive literals, where each string variable xi is constrained only
+by precisely one atomic regular constraint Pi. This can be done
+by complementing each NFA that occurs as a negative literal in
+θ, and by computing a single NFA for the intersection of regular
+languages by a standard product automata construction in the case
+when a string variable is constrained by several literals in θ. This
+construction runs in exponential time.
+
+Let ϕ be the given constraint in SL, consisting of the conjunction 
+of a relational constraint χ and a regular constraint ψ. In order
+for ϕ to be satisﬁable, it is sufﬁcient and necessary that χ ∧ θ is
+satisﬁable, for some disjunct θ in the enumeration of disjuncts of
+ψ in DNF. In this step, our algorithm simply guesses such disjunct
+θ (which is of polynomial size). The remaining steps of the algorithm 
+then check whether χ ∧ θ is satisﬁable. From our previous
+remarks, we may assume then that θ is of the form (1), where each
+string variable xi is uniquely constrained by a literal Pi(xi). We
+also assume, without loss of generality, that each variable y in χ is
+constrained by some literal P (y) in θ. Otherwise, we simply add to
+θ a literal which states that y belongs to Σ∗.
+Step 2: Removing concatenation For this step, we will transform
+a given constraint ϕ in SL into a constraint ϕ′ that uses only
+atomic string constraints of the form x = R(y), i.e., all string
+constraints of the form x = y1 . . . yn are removed. Since word
+equations of the form w = yy cannot in general be expressed as
+a transducer, our transformation cannot possibly express the same
+property that ϕ expresses, i.e., it is impossible that ϕ and ϕ′ have
+the same set of satisfying assignments in general. However, as we
+shall see later, by introducing extra variables and allowing both
+conjunctions/disjunctions for our string constraints it is possible
+to produce the formula ϕ′ without concatenation operators whose
+satisfying assignments can be easily transformed into satisfying
+assignments of ϕ and vice versa (see Lemma 7 below).
+
+The structure of the straight-line relational constraint ϕ immediately 
+gives us a topological sort x1 ≺ . . . ≺ xm on G(ϕ). We
+
+may assume without loss of generality that all the source nodes are
+at the beginning of the topological sort, i.e., it is not the case that
+xi ≺ xi+1 for some non-source node xi and some source node
+xi+1 (which might happen if they are incomparable in G(ϕ) construed 
+as a partial order). Next, for each variable y in ϕ, we will
+deﬁne a relational constraint λrel(y) involving only rational relations 
+(but with conjunctions and disjunctions), a regular constraint
+λreg(y), and fresh variables y(1), . . . , y(maxy), where maxy is a
+positive integer. We will deﬁne these by induction on the position
+of y with respect to the order ≺.
+
+Base cases: A source node y with a regular constraint P (y).
+For this, we set λrel(y) := ⊤ and λreg(y) := P (y). We also set
+maxy = 1 and deﬁne a fresh variable y(1).
+
+First inductive case: A non-source node y with an assignment 
+y = y1 . . . yn and a regular constraint P (y), for some
+y1, . . . , yn ≺ y. By induction, we assume that maxyi ∈ Z>0
+and new string variables yi(1), . . . , yi(maxyi ) have all been deﬁned 
+(for each 1 ≤ i ≤ n). The main idea behind our construction
+is to interpret each assignment for yi (1 ≤ i ≤ n) as the “concate-
+nation” of an assignment for yi(1), . . . , yi(maxyi ), respectively.
+
+Formally, let maxy = Pn
+
+j=1 maxyj and S = {1, . . . , maxy}.
+We deﬁne a selector function ν : S → Z2
+>0 as follows: For
+each k ∈ S it is the case that ν(k) is a pair of numbers (i, l),
+where i is the smallest number i such that k ≤ Pi
+j=1 maxyj and
+l := k−Pi−1
+j=1 maxyj . Intuitively, if ν(k) = (i, l), then ν “selects”
+the variable yi for the fresh variable y(k), and l further “reﬁnes”
+this selection to yi(l).
+
+In the set λrel(y) we “deﬁne” the fresh variables y(k), for each
+k ∈ S. We do so by setting λrel(y) to be the conjunction of all
+formulas of the form y(k) = yi(l), where k ∈ S and (i, l) = ν(k).
+Notice that we can express each such conjunct as a transducer
+R(yi(l), y(k)), where R is the identity transducer, i.e., the one that
+outputs its input without modiﬁcation.
+
+We now deﬁne λreg(y). To this end, we ﬁrst observe that an
+accepting run of the automaton P on a word w = w1 · · · wN ,
+can be split into N subruns. To make this notion more precise, we
+deﬁne an N-splitting σ of an automaton A with states Q to be a
+sequence q0, . . . , qN ∈ Q such that each state qi (i ∈ {1, . . . , N })
+is reachable from the state qi−1 in A. Recall that A[q,q′] is the NFA
+A whose initial (resp. set of ﬁnal states) is replaced by q (resp.
+{q′}). Then λreg(y) is deﬁned as:
+
+The output formula ϕ′: We have now deﬁned λrel(y) and
+λreg(y) for each node y in G(ϕ). The output of our transformation 
+is the formula
+
+ϕ′
+
+:= ^
+
+(λrel(y) ∧ λreg(y)),
+
+y
+
+where y ranges over all variables in ϕ.
+
+Notice that ϕ′ is not necessarily a string constraint, as λrel(y)
+might be a disjunction of relational constraints for some y’s. The
+notion of satisﬁability extends to this class of formulas in the
+standard way. In particular, an assignment ι for the variables in
+λrel(y) satisﬁes this formula iff it satisﬁes one of its disjuncts. The
+formula ϕ′ is satisﬁable iff there is an assignment ι for the variables
+of ϕ′ that satisﬁes λrel(y) ∧ λreg(y) for each string variable y in ϕ.
+Correctness: The following lemma shows that our transformation 
+is satisﬁability preserving; in fact, there is an easy way to obtain 
+satisfying assignments for ϕ from those of ϕ′ and vice versa.
+Lemma 7 (Correctness). ϕ is satisﬁable iff ϕ′ is satisﬁable.
+
+y := Vx∈Zy
+
+λrel(x) ∧ λreg(x). That is, ϕ′
+
+The proof is done by induction on the position of nodes in the
+topological sort ≺ of G(ϕ). To this end, given a node y in G(ϕ),
+we deﬁne ϕy to be the set of conjuncts in ϕ involving only y and
+variables that precede y in ≺. That is, the conjuncts in ϕy are the
+ones that only mention variables in the set Zy := {x : x (cid:22) y}. For
+example, if ϕ contains the constraint z = yy, then this constraint
+cannot be a conjunct of ϕy (but it is a conjunct of ϕz). Similarly,
+we deﬁne ϕ′
+y is the set
+of conjuncts in ϕ′ of the form λrel(x) ∧ λreg(x) involving only
+variables in the set Z′
+y := {x(i) : x ∈ Zy, 1 ≤ i ≤ maxx}.
+We will prove the following technical lemma, which is a stronger
+formulation of Lemma 7.
+Lemma 8. For each node y in G(ϕ) and every assignment ι :
+Zy → Σ∗ of variables in ϕy, the following are equivalent:
+(i) ι is a satisfying assignment for the formula ϕy.
+(ii) There is a satisfying assignment ι′ : Z′
+
+y → Σ∗ for ϕ′
+ι(x) = ι′(x(1)) ◦ · · · ◦ ι′(x(maxx)) for each x (cid:22) y.
+The proof of Lemma 8 is by induction on the position of y in the
+topological sort ≺ of G(ϕ). Due to lack of space we relegate this
+proof to the appendix. Since Lemma 8 is a stronger formulation of
+Lemma 7, the correctness of our construction in Step 2 follows.
+
+y such that
+
+_
+
+σ=q0,...,qmaxy
+
+P[q0,q1](y(1)) ∧ · · · ∧ P[qmaxy −1,qmaxy ](y(maxy)),
+
+where σ ranges over maxy-splittings of P . That is, λreg(y) states
+that there is some maxy-splitting q0, . . . , qmaxy of P such that
+each y(k) (1 ≤ k ≤ maxy) is accepted by P[qk−1,qk ]. This
+amounts to y being accepted by P (since y is interpreted as the
+“concatenation” of y(1), . . . , y(maxy), respectively).
+
+Second inductive case: A non-source node y with an assignment 
+y = R(x) and a regular constraint P (y), for some x ≺ y.
+By induction, we assume that maxx ∈ Z>0 and new string variables 
+x(1), . . . , x(maxx) have all been deﬁned. The crux of the
+construction is to replace y = R(x) by “splitting” it into maxx
+different constraints. This is achieved by splitting the transducer R
+(syntactically seen as an NFA over Σε × Σe). More precisely, let
+maxy = maxx. Then λrel(y) is:
+
+_
+
+maxy
+^
+
+σ=p0,...,pmaxy
+
+i=1
+
+y(i) = R[pi−1,pi](x(i)),
+
+where σ ranges over all maxy-splittings of R. We may deﬁne
+λreg(y) precisely in the same way as in the ﬁrst inductive case.
+
+Step 3: Solving the ﬁnal formula After applying the transformation 
+from Step 2, the size of the resulting formula ϕ′ could be
+exponential in |ϕ| due to repeated applications of constraints of the
+form y = y1 . . . yn, where some variable yi occurs several times
+on the right-hand side of the equation. In particular, there are exponentially 
+many conjuncts of the form λrel(x) ∧ λreg(x) in ϕ′, More
+precisely, the resulting formula ϕ′ is a conjunction of multiple formulas 
+of two types:
+
+• conjunctions of atomic formulas of the form R(x, y), for some
+
+transducer R, or a disjunction of several such formulas.
+
+• atomic formulas of the form P (x), for some regular language
+
+P , or a disjunction of several such formulas.
+
+So, except for the disjunctions, the formula ϕ′ satisﬁes the shape
+of the fragment SLr of SL. In fact, it is not difﬁcult to remove
+these disjunctions without too much additional computational overhead.
+ Recall that disjunctions were caused by splitting automata or
+transducers. Although in this case a conjunct can have exponentially 
+many disjuncts, we may simply nondeterministically guess
+one of the disjuncts (in effect, guessing one of the splittings of the
+automata/transducers). Nondeterministic algorithms can be determinised 
+at the cost of quadratically extra space [56]. The resulting
+
+formula ϕ′′ is now a conjunction of atomic formulas of the form
+R(x, y) or P (x). Moreover, it is easy to prove that the undirected
+graph G(ϕ′′) deﬁned in Section 3 is acyclic:
+Lemma 9. G(ϕ′′) is acyclic. Thus, ϕ′′ ∈ AC.
+
+Proof. By construction of ϕ′ = Vy(λrel(y) ∧ λreg(y)), for each
+variable y in ϕ′ there is at most one x such that λrel(y) (and,
+therefore, ϕ′) contains an atom of the form y = R(x), for R a
+rational transducer. From this it is clear that G(ϕ′′) is acyclic.
+
+Decidability in EXPSPACE can now be easily obtained by
+Proposition 2, i.e., we apply Proposition 2 on the formula ϕ′′ of
+size at most exponential in |ϕ| and so our resulting algorithm runs
+in exponential space, as desired.
+
+4.2.2 Proof of Theorem 6
+Suppose that ϕ ∈ SL is satisﬁable. The previous algorithm computes 
+a formula ϕ′′ in AC such that ϕ is satisﬁable iff ϕ′′ is satisﬁable 
+(cf. Lemma 7). This implies that ϕ′′ is satisﬁable and, so by the
+bounded model property from Proposition 2, ϕ′′ has a solution of
+size at most exponential in |ϕ′′|. Now, the size |ϕ′′| is O(Dim(ϕ)×
+|ϕ|), where Dim(ϕ) is the dimension of ϕ which is deﬁned to be
+the maximum maxx over all string variables x in ϕ. The value
+Dim(ϕ) is at most exponential in |ϕ|. This implies that ϕ′′ has a
+= 22|ϕ|O(1)
+solution of size at most F (|ϕ|) := 2(Dim(ϕ)×|ϕ|)O(1)
+.
+Then, by Lemma 8, ϕ has a solution of size Dim(ϕ) × F (|ϕ|) =
+2(Dim(ϕ)×|ϕ|)O(1)
+, giving us the desired upper bound
+on the maximum solution size for ϕ that we need to explore.
+
+= 22|ϕ|O(1)
+
+4.2.3 Lower Bound of Theorem 5
+In order to prove that checking satisﬁability of string constraints in
+SL is EXPSPACE-hard, we reduce from the acceptance problem
+for a deterministic Turing machine M that works in space 2cn, for
+c > 1. That is, we provide a polynomial time reduction that, given
+an input w to M, it constructs a constraint ϕ(w) in SL such that
+w is accepted by M if and only if ϕ(w) is satisﬁable. Due to lack
+of space, the complete proof is relegated to the appendix. We only
+sketch the main ideas below.
+
+The reduction starts by constructing a regular constraint of the
+form P1(x) ∧ · · · ∧ Pm(x), in such a way that a word w satisﬁes
+this constraint if and only if it codiﬁes a sequence of conﬁgurations 
+of M, the ﬁrst such conﬁguration corresponds to the initial
+conﬁguration of M on input w, and the ﬁnal such conﬁguration
+corresponds to a ﬁnal conﬁguration of M. The we only require to
+check that each non-initial conﬁguration in w is obtained from its
+preceding conﬁguration by applying the transition function of M.
+This is done by adding a set of relational constraints that creates
+an exponential number of copies of x (with equations of the form
+y = xx), but deletes certain distinguished parts of each such copy
+(with suitable transducers).
+
+4.3 A PSPACE Restriction
+We mention a natural restriction of SL that yields a PSPACE upper
+bound and seems to be sufﬁciently expressive in practice. Recall
+that the dimension of a string constraint ϕ is the maximum maxx
+over all string variables x in ϕ. [Incidentally, this notion is closely
+related to the notion of dimension from the study of context-free
+grammars (e.g. see [28]).]
+Theorem 10. For any ﬁxed k ∈ N, satisﬁability for the class of
+formulas in SL of dimension k is PSPACE-complete.
+
+The lower bound follows since our logic can easily encode in
+dimension one the PSPACE-complete problem of checking emptiness 
+of the intersection of m regular languages given as NFA [42].
+
+[In fact, when k = 1, the logic still subsumes SLr.] An easy corollary 
+of the proof of Theorem 6 is the following improved bound.
+Theorem 11. For any ﬁxed k ∈ N, if a formula ϕ of dimension
+k is satisﬁable, then it has a solution with each word of length at
+most 2p(|ϕ|) for some polynomial p(x).
+
+This bound can be derived by noticing from the proof of Theorem 
+6 that the maximal solution size of ϕ that one needs to explore 
+is F (x) := 2(Dim(ϕ)×|ϕ|)O(1) , which is exponential in |ϕ| if
+Dim(ϕ) is a ﬁxed constant. Note that the dimension of the scripts
+in all our examples is 2 (in fact the dimensions of the examples in
+the benchmark of [72] are all 1, except for one with dimension 4).
+
+5. Adding Integer and Character Constraints
+In this section we extend the language SL from Section 4 with
+integer and character constraints, and show that the satisﬁability
+problem remains decidable in EXPSPACE. We also show that this
+bound continues to hold in the presence of two other important
+features: the IndexOf constraints and disequalities between strings.
+Our language will use two types of variables, str and int. The
+type str consists of the string variables we considered in the previous 
+sections. In particular, a constraint in SL only uses variables
+from str. On the other hand, a variable of type int (also called an
+integer variable) ranges over the set N of all natural numbers. The
+choice of omitting negative integers is only for simplicity, but our
+results easily extend to the case when int includes negative integers.
+ For each T ∈ {str, int}, we use V(T ) to denote the set of
+variables of type T .
+
+We start by deﬁning integer constraints, which allow us to
+express bounds for linear combinations of lengths or number of
+occurences of symbols in words.
+Deﬁnition 5 (Integer constraints). An atomic integer constraint
+over Σ is an expression of the form
+
+a1t1 + · · · + antn ≤ d,
+
+where a1, . . . , an, d ∈ Z are constant integers (represented in
+binary) and each ti is either (i) an integer variable u ∈ V(int),
+(ii) |x| for a string variable x ∈ V(str), or (iii) |x|a for x ∈
+V(str) and some constant letter a ∈ Σ. Here, |x| (resp. |x|a)
+denotes the length of x (resp. the number of occurrences of a in x).
+An integer constraint over Σ is a Boolean combination af atomic
+integer constraints over Σ.
+
+Character constraints, on the other hand, allow us to compare
+
+symbols from different strings. They are formally deﬁned below.
+Deﬁnition 6 (Character constraints). A atomic character constraint
+over Σ is an expression of the form x[u] = y[v], where: (1)
+x and y are either a variable in V(str) or a word in Σ∗, and
+(2) u and v are either integer variables in V(int) or constant
+positive integers. Here, the interpretation of the symbol x[u] is
+consistent with our notation from Section 2, i.e., the u-th letter in x.
+A character constraint over Σ is a Boolean combination af atomic
+character constraints over Σ.
+
+Next, we deﬁne the extension of the class SL with integer and
+
+character constraints.
+Deﬁnition 7 (The class SLe). The class SLe consists of all formulas 
+ϕ ∧ θint ∧ θchar such that (i) ϕ is a constraint in SL, (ii) θint is
+an integer constraint, and (iii) θchar is a character constraint.
+
+Since constraints in SLe are two-sorted, we have to slightly
+reﬁne the notion of assignment. Formally, an assignment for a
+constraint ϕ in SLe is a mapping ι from each variable x ∈ V(T )
+in ϕ to an object of type T (i.e. either a string or an integer). We
+
+also assume for safety that for each term of the form x[u] in ϕ
+it is the case that ι(u) ≤ |ι(x)| (i.e., ι(u) is in fact a position
+in ι(x)). [If this assumption is not met, we can simply deﬁne
+that the assignment does not satisfy the formula ϕ.] As before, ι
+satisﬁes ϕ if the constraint ϕ becomes true under the substitution
+of each variable x by ι(x). We formalise this for atomic integer and
+character constraints (as Boolean connectives are standard):
+
+1. ι satisﬁes the atomic integer constraint Pn
+
+i=1 aiti ≤ d if and
+only if Pn
+i=1 aiι(ti) ≤ d, where for each 1 ≤ i ≤ n we
+have that (i) ι(ti) = |ι(x)|, if t = |x| for x ∈ V(str), and (ii)
+ι(ti) = |ι(x)|a, if t = |x|a for x ∈ V(str) and a ∈ Σ.
+
+2. ι satisﬁes the atomic character constraint x[u] = y[v] if and
+only if ι(x)[ι(u)] = ι(y)[ι(v)], where (i) ι(x) = x (resp.,
+ι(y) = y), if x (resp., y) is a constant word over Σ, and (ii)
+ι(u) = u (resp., ι(v) = v), if u (resp., v) is a positive integer.
+
+The constraint ϕ is satisﬁable if there exists a satisfying assignment 
+for it. The satisﬁability problem for SLe is the problem of
+deciding if ϕ is satisﬁable, for a given constraint ϕ in SLe.
+
+5.1 The Satisﬁability Problem for SLe
+In this section, we will show that our EXPSPACE upper bound for
+the satisﬁability of SL extends to SLe.
+
+Theorem 12. The satisﬁability problem for the class SLe is solvable 
+in EXPSPACE. Furthermore, if SLe has a solution, then it has
+a solution of size at most 22p(x) , for some polynomial p(x).
+
+The rest of the section is dedicated to proving the theorem. Let
+SLe
+r be the extension of SLr with integer constraints and character
+constraints. Given a formula ϕ ∈ SLe, we ﬁrst transform ϕ into
+a constraint ϕ′ in SLe
+r by using (an extension of) the satisﬁabilitypreserving 
+transformation from Section 4.2. We will then show that
+the formula ϕ′ has a bounded model property (cf. Lemma 13 be-
+low). More precisely, if ϕ′ is satisﬁable, then it has a satisfying assignment 
+of size at most exponential in |ϕ′|. This immediately provides 
+a decision procedure for checking satisﬁability of ϕ, though a
+naive algorithm only yields a triple-exponential procedure. We will
+show, however, that this yields a polynomial-space procedure for
+checking satisﬁability of ϕ′, and hence a single exponential space
+procedure for checking satisﬁability for ϕ.
+
+5.1.1 Transforming SLe into SLe
+r
+Suppose that ϕ = ϕstr ∧ ϕint ∧ ϕchar ∧ ϕreg ∈ SLe, where ϕstr is a
+relational constraint in SL, ϕreg a regular constraint, ϕint an integer
+constraint, and ϕchar a character constraint.
+
+We apply the transformations from Step 1 and 2 in Section
+4.2 on the formula ψ := ϕstr ∧ ϕreg ∈ SL, yielding an acyclic
+string/regular constraint ψ′ = Vy λrel(y) ∧ λreg(y) with no concatenation 
+(but possibly some disjunctions), where each variable
+x in ψ is replaced by several variables x(1), . . . , x(maxx) in ψ′.
+Recall that Lemma 7 states that ψ is satisﬁable iff ψ′ is satisﬁable.
+ In fact, following the notation in Step 2 of Section 4.2,
+Lemma 8 shows that for each node y in G(ψ) and every assignment 
+ι : Zy → Σ∗ of (string) variables in the constraint ψy (associated 
+with the node y in G(ψ)), the following two conditions are
+equivalent:
+
+• ι is a satisfying assignment for the formula ψy.
+• There exists a satisfying assignment ι′
+: Z′
+
+y → Σ∗ for the
+λrel(y) ∧ λreg(y) such that for each
+
+formula ψ′
+x (cid:22) y:
+
+y := Vy∈Zy
+
+ι(x) = ι′(x(1)) ◦ · · · ◦ ι′(x(maxx)).
+
+(*)
+
+Handling the integer constraint is now easy. Because of (*),
+we simply replace each occurrence of |y| (resp. |y|a, where a ∈
+Σ) in ϕint by Pmaxy
+int be
+the resulting formula. [Note that y is not a variable in ψ′.] This
+transformation preserves satisﬁability, even in the above stronger
+sense.
+
+|y(i)| (resp. Pmaxy
+
+|y(i)|a). Let ψ′
+
+i=1
+
+i=1
+
+Let us now show how to deal with the character constraint ϕchar.
+Without loss of generality, we may assume that the term t which
+occurs on left/right hand side of atomic character constraint is of
+the form x[u] (for an integer variable u), which denotes the u-th
+character in x. [If t is a string variable x, we can replace x by
+x[u], where u is a fresh int variable, and add the integer constraint
+|x| = 1 ∧ u = 1. Similarly, if t is of the form x[c], where c is
+an integer constant, we could simply replace this by x[u], for a
+fresh int variable u, and add the integer constraint u = c.] Now
+the u-th character x[u] in x must fall within precisely one of the
+word segments x(1), . . . , x(maxx). Therefore, we simply make a
+nondeterministic guess on which segment x(i) the position x[u]
+belongs to, and replace every occurrence of x[u] by x(i)[u′], where
+u′ is a fresh int variable, and add an integer constraint of the form
+u = u′ + Pi−1
+j=1 |x(j)|. Observe that the constraint θ that we
+generate from ϕchar involves both integer constraint and character
+constraints. Then, the formula ϕ is satisﬁable iff, for some formula
+θ obtained from the aforementioned nondeterministic construction,
+the formula ψ′ ∧ ψ′
+
+int ∧ θ is satisﬁable.
+
+Note, however, that ψ′ still has some disjunctions and so strictly
+speaking it is not a formula in SLr. So, to complete our transformation 
+of ϕ into SLe
+r, we use Step 3 from Section 4.2 on ψ′ to make
+further nondeterministic guesses to eliminate the disjunctions. Let
+us call a possible resulting formula ψ′′. Therefore, ϕ is satisﬁable
+iff, for some ψ′′ and θ, the formula ψ′′ ∧ ψ′
+
+int ∧ θ is satisﬁable.
+
+5.1.2 Bounded Model Property for SLe
+r
+We will prove a bounded model property for SLe
+r.
+Lemma 13 (Bounded Model). Given a formula ϕ in SLe
+r, if it
+is satisﬁable, then there exists a satisfying assignment of whose
+strings are of length at most exponential in |ϕ| and whose integers
+are of size (in binary) at most polynomial in |ϕ|.
+
+Before proving this lemma, we will ﬁrst show how this can be
+
+used to obtain Theorem 12.
+
+5.1.3 Lemma 13 Implies Theorem 12
+As mentioned in Section 5.1.1, the problem of checking whether
+an SLe formula ϕ is satisﬁable can be reduced in nondeterministic
+exponential time to checking whether an SLe
+r formula ϕ′ is satisﬁable.
+ Next we construct an algorithm that solves this problem in
+PSPACE in the size of ϕ′, and, therefore, in EXPSPACE in the size
+of ϕ (since ϕ′ might be exponentially bigger than ϕ). Theorem 12
+then follows from the fact that nondeterministic exponential time is
+contained in EXPSPACE and EXPSPACE computable functions
+are closed under composition.
+
+In order to do this, the ﬁrst step is to restate a stronger form of
+Proposition 2. To this end, we ﬁrst recall the standard generalisation
+of the notion of transducers to allow an arbitrary number of tracks
+(e.g. see [21]). An m-track (rational) transducer over the alphabet
+Σ is a tuple A = (Γ, Q, δ, q0, F ), where Γ := Σm
+ǫ and Σǫ :=
+Σ ∪ {ǫ}, such that A is syntactically an NFA over Γ. In addition,
+we deﬁne the m-ary relation R ⊆ (Σ∗)m that A recognises to
+consist of all tuples ¯w for which there is an accepting run
+
+π := q0
+
+σ1−→ q1
+
+σ2−→ · · · σn−→ qn
+
+of A (treated as an NFA) such that ¯w = σ1 ◦ σ2 ◦ · · · ◦ σn,
+where the string concatenation operator ◦ is extended to tuples
+over words component-wise (i.e. (v1, . . . , vk) ◦ (w1, . . . , wk) =
+
+(v1w1, . . . , vkwk)). An m-ary relation is said to be rational if it
+is recognised by an m-ary transducer. To avoid notational clutter,
+we shall confuse an m-ary transducer and the m-ary relation that it
+recognises. In the following proposition, the set of solutions (i.e.
+satisfying assignments) to a formula ϕ in SLe — i.e. mappings
+from variables x in ϕ to strings, integers, or characters depending
+on the type of x — is interpreted as a relation (i.e. a set of tuples)
+by ﬁxing any ordering to the variables occuring in ϕ.
+Proposition 14 ([10]). There exists an exponential-time algorithm
+for computing an m-track transducer A = (Γ, Q, δ, q0, F ) for
+the set of solutions of an input formula ϕ ∈ SLr with variables
+x1, . . . , xm, where each state in Q is of size polynomial in |ϕ|.
+Furthermore, there exists a polynomial space algorithm for:
+
+1. Computing q0.
+2. Checking whether a string is a state of Q.
+3. Checking whether a state q belongs to F .
+4. Checking whether (q, ¯a, q′) ∈ δ, for some given states q and q′
+
+and a symbol ¯a ∈ Γ.
+
+This proposition is a stronger version of Proposition 2, which
+
+follows from the proof of Theorem 6.7 in [10].
+
+Obtaining a PSPACE algorithm for checking satisﬁability of a
+given formula ϕ′ in SLe
+r is now almost immediate. Our nondeterministic 
+algorithm guesses an assignment to each character variable 
+in ϕ, whose size is linear in |ϕ|. By virtue of Lemma 13, our
+algorithm needs to guess an assignment to each integer variable in
+ϕ of size polynomial in |ϕ| (i.e. numbers represented in binary).
+In effect, if |x| (resp. |x|a) appears in the integer constraint of ϕ,
+our algorithm also guesses the length of (resp. number of occurrences 
+of a in) the string variable x. Our algorithm now checks that
+the integer constraints and character constraints in ϕ are satisﬁed.
+Next our algorithm guesses assignments to the string variables in ϕ.
+However, since they are of exponential size in the worst case, our
+algorithm will have to construct the assignment on the ﬂy. By using
+Proposition 14, we will have to simultaneously construct the string
+assignments to all string variables in ϕ. To this end, for each string
+variable x, we keep track of |Σ| + 1 extra integer counters (counting 
+in binary) l(x) and la(x), respectively, for each a ∈ Σ. The
+counter l(x) (resp. la) keeps track of the length of (resp. number of
+occurrences of a in) the partially constructed string assignment for
+x. Putting this all together, if A = (Γ, Q, δ, q0, F ) is the m-track
+transducer for the set of solutions for ϕ (as in Proposition 14), our
+algorithm ﬁrst computes q0 and let q = q0. It then repeats the following 
+step until (i) q ∈ F , and (ii) l(x) = |x| and la(x) = |x|a,
+for each string variable x and letter a ∈ Σ:
+1. Guess a state q′ of Q and a symbol ¯a ∈ Γ = Σm
+
+ǫ of A, and
+
+check that (q, ¯a, q′) ∈ δ in polynomial space.
+
+2. If ¯a = (a1, . . . , am), then set l(xi) := l(xi) + 1 and la(xi) :=
+la(xi) + 1 for each i ∈ {1, . . . , m} and a ∈ Σ satisfying
+ai = a.
+
+3. Set q := q′
+
+This is a nondeterministic algorithm that uses polynomial space.
+Nondeterministic algorithms can be determinised at the cost of
+quadratically extra space [56]. As for the bounded model property
+part of Theorem 12, it can be derived in precisely the same way as
+Theorem 6.
+
+5.1.4 Proving Lemma 13
+Our proof idea goes as follows. Given a satisﬁable formula ϕ ∈
+SLe
+r with m variables, we suppose that ι is a satisfying assignment
+of ϕ. It assigns each character variable x[u] to a certain character
+ι(x[u]) ∈ Σ. So, we will only have to ensure the existence of a satisfying 
+assignment that assigns each string (resp. integer) variable
+to a small enough string (resp. integer). To this end, Proposition 14
+gives an m-track transducer A = (Γ, Q, δ, q0, F ) that recognises
+the set of solutions of ϕ. The number of states in A is exponential
+in |ϕ|. Next we erase the input tape of A, while equipping it with
+nonnegative integer-valued counters that cannot be decremented.
+The resulting machine is a monotonic (Minsky’s) counter machine,
+whose set of ﬁnal conﬁgurations captures the set of solutions for ϕ.
+Monotonic counter machines are restrictions of reversal-bounded
+counter machine [37] (i.e. counter machines whose counters can
+switch between non-incrementing and non-decrementing modes
+only for a ﬁxed r ∈ N number of times). [In the case of monotonic
+counter machines, we have r = 0]. Such a computation model is
+not Turing-complete. In fact, their sets of reachable conﬁgurations
+are effectively semi-linear, as was ﬁrst shown in [37]. We will use a
+recent result from [41, 63] to analyse the size of the smallest reachable 
+conﬁguration, which will give us the bounded model property
+of SLe
+r.
+
+We now formalise the notion of monotonic counter machine
+with k ∈ N counters. A monotonic counter machine is a tuple
+A = (Q, δ, q0, F, P ), where: (1) Q is a ﬁnite set of states, (2)
+q0 ∈ Q is an initial state, (3) F ⊆ Q is a set of ﬁnal states,
+(4) P = {p1, . . . , pk} is a set of k counters, and (5) δ ⊆ (Q ×
+ConsP ) × (Q × {0, 1}k) is the transition relation, where ConsP
+is the set of counter tests of the form Vk
+i=1 pi ∼i 0 such that
+∼i ∈ {=, >} for each 1 ≤ i ≤ k. A vector ¯v ∈ {0, 1}k such
+that (q, ψ, q′, ¯v) ∈ δ, for q, q′ ∈ Q and ψ ∈ ConsP , is called an
+update vector. In the sequel we shall also denote this vector by its
+characteristic set, i.e., the one which consists of all counters pi ∈ P
+such that ¯v[i] = 1.
+
+A conﬁguration of A is a pair (q, ¯v), where q ∈ Q and ¯v ∈ Nk.
+
+A run π of A is a sequence of the form
+
+(q0, ¯v0), (q1, ¯v1), . . . , (qn, ¯vn)
+
+such that:
+
+• qi ∈ Q for each 1 ≤ i ≤ n,
+• ¯v0 = (0, . . . , 0) (i.e., counters are initially empty),
+• for each 1 ≤ i ≤ n there exists a transition (qi−1, ψ(¯x), qi, ¯c) ∈
+
+δ such that ψ(¯vi−1) is true, and ¯vi = ¯vi−1 + ¯c.
+
+The conﬁguration (qn, ¯vn) is said to be accepting if qn ∈ F . The
+set of accepting conﬁgurations of A is denoted by L(A).
+
+From our transducer A = (Γ, Q, δ, q0, F ), we construct our
+monotonic counter machine B = (Q, δ′, q0, F, P ), where P consists 
+of the following counters:
+
+• c|x|a for each string variable x in ϕ and each letter a ∈ Σ;
+• cu for each integer variable u in ϕ;
+• yx[u] and zx[u] for each x[u] occuring in a character constraint
+
+of ϕ.
+
+The counter c|x|a records the number of a’s seen so far in in the
+transducer’s track corresponding to the variable x. The counter cu
+records the guessed value for the variable u. To avoid notational
+clutter, we shall confuse c|x|a (resp. cu) with |x|a (resp. u). The
+counter yx[u] records a guess for the position of u in x, which has
+to be recorded separately due to the different tracks in A. The value
+of zx[u] is a boolean variable (i.e., either 0 or 1) that acts as a ﬂag
+whether the guess for the variable yx[u] is complete.
+
+We now specify the transitions in δ′. In doing so, we will ensure
+that once a variable of the form zx[u] is set to 1, the value of yx[u]
+can no longer be incremented. Let W be the set of all character
+variables x[u] in ϕ. For each Y ⊆ W , let ψY denote the formula
+of the form Vx[u]∈Y zx[u] = 0 ∧ Vx[u]∈W \Y zx[u] > 0. Then:
+
+1. If (q, ¯a, q′) ∈ δ, where ¯a = (a1, . . . , am), then for each subset
+
+Y ⊆ W we add to δ′ each transition of the form
+
+(q, ψY , q′, Z),
+
+where Z consists of: (1) each |x|ai with ai 6= ǫ, (2) yx[u] for
+each x[u] ∈ Y , and (3) if zxi[u] = 0 and ai = ι(xi[u]), the set
+Z may (nondeterministically) contain zxi[u].
+
+2. (q, ⊤, q, {u}) for each integer variable u in ϕ.
+In other words, the ﬁrst transition above simply simulates a transition 
+of A, while the second transition nondeterministically increments 
+the integer counter u.
+
+Recall that ϕ is our initial formula in SLe
+
+r and ι is a satisfying 
+assignment for it. Now, let ϕint be the conjunct of ϕ containing 
+the integer constraint. We use ϕ′
+int to denote a conjunction of
+(i) the constraint ϕint but substituting every occurrence of |x| by
+Pa∈Σ |x|a, (ii) a conjunction of constraints of the form u = yx[u]
+for each x[u] ∈ W (i.e. all positions yx[u] equal u), and (iii) a conjunction 
+of constraints of the form zx[u] = 1 for each x[u] ∈ W
+(i.e. all yx[u] have been completely guessed). The following lemma
+is immediate from our construction and Proposition 14.
+Lemma 15. Given a conﬁguration (q, ¯v) of B, the following are
+equivalent:
+• (q, ¯v) ∈ L(B) and ¯v satisﬁes ϕ′
+• There exists a satisfying assignment ι′ of ϕ whose integer values
+
+int.
+
+agree with ¯v and whose character values agree with ι.
+
+We now use the following proposition, which is a result of [41]
+
+(see the proof of [63, Proposition 7.5.5]):
+Proposition 16. Given a monotonic k-counter machine A with
+n states, the set of reachable conﬁgurations can be represented
+as a disjunction of existential Presburger formulas, each of size
+polynomial in k + log(n) and at most O(k) variables.
+
+Indeed, in the above proposition the number of disjuncts is polynomial 
+in n, but this is not important for our purpose. It is now easy
+to obtain a satisfying assignment for ϕ given our original satisfying
+assignment ι. By the above proposition, the set of reachable conﬁgurations 
+of the monotonic counter machine B that we constructed is
+a disjunction of existential Presburger formulas each of size polynomial 
+in k + log(n) and with O(k) variables, where k = O(|ϕ|)
+and n = 2|ϕ|O(1) . By Lemma 15 and our assumption that ϕ is
+satisﬁable with assignment ι, it follows that one of these disjuncts
+ψ is satisﬁable. Scarpellini [59, Theorem 6(a)] proved that a satisﬁable 
+existential Presburger formula θ with c variables has solutions 
+where each variable is assigned a number that is at most
+2(|θ|+c)O(1) (and thus can be represented with at most (|θ| + c)O(1)
+bits). Applying Scarpellini’s result on ψ now gives us a satisfying
+assignment of ϕ which assigns numbers of polynomially many bits
+to integer variables of ϕ and lengths of string variables. This completes 
+the proof of Lemma 13.
+
+5.2 Extensions with Disequalities and IndexOf
+Finally, we show that two important features can be added to the
+language while retaining decidability in EXPSPACE: Disequalities
+between strings and IndexOf constraints.
+
+Disequalities: Assume that constraints in SLe are now extended
+with disequalities of the form x 6= y, for x, y ∈ V(str), which state
+that x and y are interpreted as different strings. The disequality
+relation is regular, and thus can be expressed as a transducer y =
+R(x). The problem is that the addition of this transducer may yield
+a constraint that is no longer uniquely deﬁnitional. To solve this,
+we use integer and character constraints; in fact, the disequality
+
+6= |y|) ∨ (x[u]
+
+6= y[u]), for a
+x 6= y is equivalent to (|x|
+fresh variable u ∈ V(int). More formally, if ϕ is a constraint
+in SLe and x 6= y is a disequality between string variables, then
+ϕ ∧ (x 6= y) is satisﬁable if and only if either the SLe constraint
+6= y[u]) is
+ϕ ∧ (|x|
+satisﬁable. Checking if any of these constraints is satisﬁable can
+be solved in EXPSPACE from Theorem 12. Clearly, adding more
+disequalities does not increase the computational cost if we use a
+nondeterministic algorithm that chooses to check either |x| 6= |y|
+or x[u] 6= y[u] for each disequality x 6= y.
+
+6= |y|) or the SLe constraint ϕ ∧ (x[u]
+
+Expressing the IndexOf method: One reason we introduced the
+character constraints is, besides the use of the JavaScript string
+method charAt (which is used rather frequently in JavaScript
+according to the benchmark [57]), they can also be used to deﬁne
+IndexOf(w, x) for any word w ∈ Σ∗, which is the most standard
+usage of IndexOf method in practice. We consider both the ﬁrstoccurrence 
+semantics (i.e., for an integer variable u, the constraint
+u = IndexOf(w, x) says that u is the ﬁrst position in x where w
+occurs), or the anywhere semantics (i.e., u = IndexOf(w, x) says
+that u is any position in x where w occurs).
+
+Formally, an IndexOf constraint is a conjunction of expressions
+of the form u = IndexOf(w, x), where w ∈ Σ∗, x is a string
+variable/constant, and u is either an integer variable or a positive
+integer. The satisfaction of an expression of this form (under any of
+the two semantics) with respect to an assignment of the variables
+is the expected one (following the intuition given in the previous
+paragraph). The next proposition states that IndexOf constraints do
+not increase the “expressiveness” of SLe.
+Proposition 17. Let ϕ be the conjunction of a constraint in SLe
+and the IndexOf constraint u = IndexOf(w, x). The satisﬁability
+of ϕ can be checked in EXPSPACE.
+
+Proof. Let w = a1 . . . ap ∈ Σ∗. For the anywhere semantics, every
+occurrence of u = IndexOf(w, x) in ϕ is replaced by the formula
+
+x[u1] = a1 ∧ · · · ∧ x[up] = ap
+
+u = u1 ∧ u2 = u1 + 1 ∧ · · · ∧ up = up−1 + 1,
+
+where u1, . . . , up are fresh integer variables. The resulting formula 
+is an SLe constraint whose satisﬁability can be checked in
+EXPSPACE from Theorem 12.
+
+The ﬁrst-occurrence semantics could be handled by replacing
+u = IndexOf(w, x) with a relational constraint x = x1x2x3
+and regular constraints stating that w does not occur in x1 and
+w = x2. This would allow us to use the anywhere semantics to
+express u = IndexOf(w, x2), which can be done as before. The
+problem with this approach is that the introduction of the word
+equation x = x1x2x3 may yield a constraint that is no longer
+uniquely deﬁnitional. To avoid this, we make a nondeterministic
+guess (as we did for formula ϕchar in Section 5.1.1) as to how
+x1 overlaps with x(1), . . . , x(maxx), e.g., it might overlap with
+x(1)x(2)x(3). We will then simply assert that x(1)x(2)x(3) ∈ L,
+where L is the regular language of words v that contains no w
+as a (contiguous) subword. We then have to apply the splitting
+technique for the regular constraint just as in Step of Section 4
+to express x(1)x(2)x(3) ∈ L as V3
+i=1 x(i) ∈ Li. This can
+all be done by nondeterministic guesses while incurring only a
+polynomial blowup.
+
+6. Related Work and Future Work
+In this section, we mention a few related works and discuss their
+connections with our work in more detail. Roughly speaking, they
+can be classiﬁed into three categories: (1) decidability results, (2)
+heuristics and string solver implementations, (3) benchmarking
+
+examples. We shall also mention a few possible research avenues
+in passing.
+
+Decidability results:
+In §Introduction, we have mentioned the
+results of Makanin’s and Plandowski’s [45, 50–52] on the decidability 
+and complexity of satisﬁability for word equations (a conjunction 
+of equations of the form v = w, where v and w are a
+concatenation of string constants and variables). We should also remark 
+that the decidability (with the same PSPACE complexity) extends 
+to quantiﬁer-free ﬁrst-order theory of strings with concatenations 
+and regular constraints [20]. Since extending word equations
+with ﬁnite-state transducers yields undecidability (see Section 3),
+the straight-line fragment SL of our core string constraint language
+is incomparable to word equations with regular constraints (neither
+subsumes the other). The fragment SL is, in a sense, more complex
+since its computational complexity is EXPSPACE, though for constraints 
+of small dimensions the complexity reduces to PSPACE
+(cf. Theorem 10). In addition, it is still a long-standing open problem 
+whether word equations with length constraints is decidable,
+though it is known that letter-counting (i.e. counting the number of
+occurrences of 0s and the number of occurrences of 1s separately)
+yields undecidability [20]. On the other hand, the extension SLe of
+our straight-line fragment SL is decidable (with the same complex-
+ity) and yet admits general letter-counting.
+
+In our decidability proof of Theorem 5, we have also used the
+result of Barcelo et al. [10] (see Proposition 2) that acyclic conjunctions 
+of rational relation constraints (with regular constraints)
+is decidable in PSPACE. Their logic AC, however, supports neither 
+string concatenations nor letter-counting constraints. In fact, it
+is easy to show by a standard pumping lemma argument that the
+constraint x = y · y cannot be expressed in AC. For this reason, our
+logics SL and SLe are not subsumed in AC.
+
+Abdulla et al. [7] studied acyclic constraints over systems of
+word equations with a length predicate (without transducers) and
+disequality constraints, for which they showed decidability. Our
+decidable logics are incomparable to their logic. On the one hand,
+SLe supports ﬁnite-state transducers, letter-counting, and IndexOf
+constraints, which are not supported by their logic. Our logic also
+supports unrestricted disequality constraints, whereas their logic
+supports only restricted (acyclic) disequalities. On the other hand,
+the string logic of [7] supports string equations of the form x · y =
+z · z′ (i.e. both sides of the equations contain different variables),
+which they showed could be reduced to a boolean combination of
+regular constraints. Using this reduction, we can incorporate this
+feature into SLe, yielding a more expressive decidable string logic.
+
+Heuristics and string solver implementation:
+In §Introduction,
+we have mentioned the large amount of works in the past seven
+years or so towards developing practical string solvers (e.g. [7, 8,
+16, 22, 24, 29–32, 35, 36, 39, 44, 48, 53, 55, 57, 65–69, 71–76]).
+We are not aware of existing string solvers that support both concatenations 
+and ﬁnite-state transductions. However, string solvers
+that support concatenations and the replace-all operator (i.e. a
+subset of ﬁnite-state transductions) are available, e.g., [16, 65, 75].
+Since the focus of our work is on the fundamental issue of decidability,
+ we consider our work to be complementary to these works.
+In fact, our results may be construed as providing some completeness 
+guarantee for existing string solvers. Practical string solvers
+do not implement Makanin’s or Plandowski’s algorithms, but instead 
+rely on certain heuristics (e.g. bounding the maximum length
+k of solutions [16, 39, 57]). For this reason, none of the above
+solvers have a completeness guarantee for the entire class of word
+equations. However, when the input string constraint ϕ falls within
+the logic SLe, the bounded model properties of SL and SLe (e.g.
+Theorem 6 and Theorem 12) imply that string solvers need only
+look for solutions of size at most 22p(|ϕ|) for some polynomial
+
+p(x). Double exponential size is of course only an extremely crude
+estimate, so in practice one could devise an algorithm for computing 
+a better estimate f (ϕ) ≤ 22p(|ϕ|) by looking at the structure
+of the formula ϕ. A rough estimate of f (ϕ) could, for example, be
+obtained by ﬁrst computing the dimension of ϕ (which could be
+computed quickly); as we have seen in Theorem 11, when the dimension 
+is small the double exponential bound actually reduces to
+exponential size.
+Future Work 1. Give a better algorithm for computing a better
+estimate f (ϕ) of the maximum size of the solutions for straightline 
+formulas ϕ that need to be explored.
+
+Veanes et al. (e.g. see [24, 34, 36, 66]) have observed that, in
+practice, the number of transitions of ﬁnite-state transducers for encoding 
+web sanitisation functions could become large fairly quickly
+(due to large alphabet size, e.g., utf-8). For this reason, they introduce 
+extensions of ﬁnite-state transducers that allow succinct representations 
+by allowing transitions to take an arbitrary formula in
+a decidable logical theory, while taking advantage of state-of-theart 
+SMT solvers for the theory. As a simple example, consider the
+ﬁnite-state transducer that converts a sequence of digits (over the
+alphabet Σ = {0, . . . , 9}) to its HTML character numbers (over
+the alphabet Σ′ = {&, ;, #, 0, 9}). The general formula for this is
+that a digit i is converted to &#(48+i);. Using the standard ﬁnitestate 
+transducers, we would require about 2 + 10 × 3 = 32 states,
+whereas representing using symbolic ﬁnite-state transducers only
+∼ 4 states and ∼ 4 transitions are required. There are real-world
+examples where this compression would be enormous (e.g. see the
+encoding of HTMLdecode in [66] as a symbolic transducer). For
+this reason, for future work, it would make sense to consider an extension 
+of our work that uses symbolic ﬁnite-state transducers (or
+extensions thereof) both from practical and theoretical viewpoints.
+Future Work 2. Study the extension of SL and SLe with symbolic
+(ﬁnite-state) transducers.
+
+In order to be able to apply string solvers to analyse injection 
+and XSS vulnerabilities, it is paramount to develop realistic
+browser models, which would model implicit browser transductions.
+ Preliminary works in this direction are available (e.g. see
+[58, 70]). We believe that an interesting (but perhaps extremely
+challenging) line of future work is to develop a formal and precise 
+browser transductions and their transductions (e.g. for a particular 
+version of Firefox) as ﬁnite-state transducers (or extensions
+thereof). Although some such transducers are already available
+(e.g. see [1, 24, 36, 66]), much work remains to be done to develop 
+full-ﬂedged browser models that can capture all the subtlety
+of browser behaviors (e.g. those that can be found in [6, 33]).
+
+Benchmarking examples:
+In this paper, we have provided four
+examples of analysis of mutation-based XSS vulnerabilities that
+can be expressed in SL. A few other interesting XSS vulnerability 
+examples from [33, 62] and [6] can actually be expressed in
+our logic, though the vulnerabilities only exist in older browsers
+(e.g. IE8). We also note that the ﬁve benchmarking examples of
+PHP programs from [72] that exhibit SQL injection and XSS vulnerabilities 
+(cf. http://www.cs.ucsb.edu/~vlab/stranger/)
+can also be expressed in SL. As we have argued in §Introduction,
+the benchmarking examples from Kaluza [57] are in solved forms,
+and therefore expressible in SLe. To the best of our knowledge, the
+benchmarking examples from [72] and [57] do not contain mutation 
+XSS test cases.
+
+Acknowledgments
+We thank Leonid Libkin and anonymous referees for their helpful
+feedback. We also thank Lukas Holik and Joxan Jaffar for the fruitful 
+discussion. Lin was supported by Yale-NUS College through the
+MoE Tier-1 grants R–607–265–056–121 and IG15–LR001. Bar-
+cel´o is funded by the Millenium Nucleus Center for Semantic Web
+Research under grant NC120004.
+
+References
+[1] BEK website
+
+(referred
+
+in Nov 2015). http://research.
+
+microsoft.com/en-us/projects/bek/.
+
+[2] OWASP XSS cheat
+
+sheet
+
+(referred in Nov 2015). https:
+//www.owasp.org/index.php/XSS_(Cross_Site_Scripting)
+_Prevention_Cheat_Sheet.
+(referred
+
+http://www.
+
+in Nov
+
+[3] SAT competition
+
+2015).
+
+satcompetition.org/.
+
+[4] SMT competition (referred in Nov 2015). http://www.smtcomp.
+
+org/.
+
+[24] L. D’Antoni and M. Veanes. Static analysis of string encoders and
+
+decoders. In VMCAI, pages 209–228, 2013.
+
+[25] L. De Moura and N. Bjørner. Satisﬁability modulo theories: introduction 
+and applications. Commun. ACM, 54(9):69–77, 2011.
+
+[26] V. Diekert. Makanin’s Algorithm. In M. Lothaire, editor, Algebraic
+Combinatorics on Words, volume 90 of Encyclopedia of Mathematics
+and its Applications, chapter 12, pages 387–442. Cambridge University 
+Press, 2002.
+
+[27] V. D’Silva, D. Kroening, and G. Weissenbacher. A survey of autoIEEE 
+Trans. on
+
+mated techniques for formal software veriﬁcation.
+CAD of Integrated Circuits and Systems, 27(7):1165–1178, 2008.
+
+[28] J. Esparza, P. Ganty, S. Kiefer, and M. Luttenberger. Parikh’s theorem:
+A simple and direct automaton construction. Inf. Process. Lett., 111
+(12):614–619, 2011.
+
+[29] X. Fu and C. Li. Modeling regular replacement for string constraint
+
+solving. In NFM, pages 67–76, 2010.
+
+[5] Google Closure Library (referred in Nov 2015). https://
+
+developers.google.com/closure/library/.
+
+[30] X. Fu, M. C. Powell, M. Bantegui, and C. Li. Simple linear string
+
+constraints. Formal Asp. Comput., 25(6):847–891, 2013.
+
+[6] HTML5 Security cheat sheet (referred in Nov 2015). http://
+
+html5sec.org/.
+
+[7] P. A. Abdulla, M. F. Atig, Y. Chen, L. Hol´ık, A. Rezine, P. R¨ummer,
+In CAV, pages
+
+and J. Stenman. String constraints for veriﬁcation.
+150–166, 2014.
+
+[8] D. Balzarotti, M. Cova, V. Felmetsger, N. Jovanovic, E. Kirda,
+C. Kruegel, and G. Vigna. Saner: Composing static and dynamic
+analysis to validate sanitization in web applications.
+In S&P, pages
+387–401, 2008.
+
+[9] P. Barcel´o, L. Libkin, A. W. Lin, and P. T. Wood. Expressive languages
+for path queries over graph-structured data. ACM Trans. Database
+Syst., 37(4):31, 2012.
+
+[10] P. Barcel´o, D. Figueira, and L. Libkin. Graph logics with rational
+
+relations. Logical Methods in Computer Science, 9(3), 2013. .
+
+[11] C. W. Barrett, R. Sebastiani, S. A. Seshia, and C. Tinelli. Satisﬁability
+
+modulo theories. In Biere et al. [15], pages 825–885. .
+
+[12] W. Bekker and V. Goranko. Symbolic model checking of tense logics
+on rational Kripke models. In Inﬁnity in Logic and Computation, International 
+Conference, ILC 2007, Cape Town, South Africa, November
+3-5, 2007, Revised Selected Papers, pages 2–20, 2007. .
+
+[13] W. Bekker and V. Goranko. Symbolic model checking of tense logics
+
+on rational Kripke models. CoRR, abs/0810.5516, 2008.
+
+[14] J. Berstel. Transductions and Context-Free Languages. TeubnerVerlag,
+ 1979.
+
+[15] A. Biere, M. Heule, H. van Maaren, and T. Walsh, editors. Handbook
+of Satisﬁability, volume 185 of Frontiers in Artiﬁcial Intelligence and
+Applications, 2009. IOS Press.
+
+[16] N. Bjørner, N. Tillmann, and A. Voronkov. Path feasibility analysis
+
+for string-manipulating programs. In TACAS, pages 307–321, 2009.
+
+[17] A. Blumensath and E. Gr¨adel. Automatic structures. In LICS, pages
+
+51–62, 2000. .
+
+[18] A. Blumensath and E. Gr¨adel. Finite Presentations of Inﬁnite Struc-
+tures: Automata and Interpretations. Theory Comput. Syst., 37(6):641–
+674, 2004.
+
+[19] E. B¨orger, E. Gr¨adel, and Y. Gurevich. The Classical Decision Problem.
+ Perspectives in Mathematical Logic, Springer, 1997.
+
+[20] J. R. B¨uchi and S. Senger. Deﬁnability in the existential theory
+of concatenation and undecidable extensions of this theory.
+In The
+Collected Works of J. Richard B¨uchi, pages 671–683. Springer, 1990.
+[21] O. Carton, C. Choffrut, and S. Grigorieff. Decision problems among
+the main subfamilies of rational relations. ITA, 40(2):255–275, 2006.
+[22] A. S. Christensen, A. Møller, and M. I. Schwartzbach. Precise analysis
+
+of string expressions. In SAS, pages 1–18, 2003.
+
+[23] T. H. Cormen, C. E. Leiserson, R. L. Rivest, and C. Stein. Introduction
+to Algorithms, Third Edition. The MIT Press, 3rd edition, 2009. ISBN
+0262033844, 9780262033848.
+
+[31] V. Ganesh, M. Minnes, A. Solar-Lezama, and M. Rinard. Word
+equations with length constraints: whats decidable? In Hardware and
+Software: Veriﬁcation and Testing, pages 209–226. Springer, 2013.
+
+[32] C. Gould, Z. Su, and P. T. Devanbu. Static checking of dynamically
+generated queries in database applications. In ICSE, pages 645–654,
+2004.
+
+[33] M. Heiderich, J. Schwenk, T. Frosch, J. Magazinius, and E. Z. Yang.
+mxss attacks: attacking well-secured web-applications by using innerhtml 
+mutations. In CCS, pages 777–788, 2013.
+
+[34] P. Hooimeijer and M. Veanes. An evaluation of automata algorithms
+
+for string analysis. In VMCAI, pages 248–262, 2011.
+
+[35] P. Hooimeijer and W. Weimer. StrSolve: solving string constraints
+
+lazily. Autom. Softw. Eng., 19(4):531–559, 2012.
+
+[36] P. Hooimeijer, B. Livshits, D. Molnar, P. Saxena, and M. Veanes.
+Fast and precise sanitizer analysis with BEK.
+In USENIX Security
+Symposium, 2011. URL http://static.usenix.org/events/
+sec11/tech/full_papers/Hooimeijer.pdf.
+
+[37] O. H. Ibarra. Reversal-bounded multicounter machines and their
+
+decision problems. J. ACM, 25(1):116–133, 1978.
+
+[38] C. Kern. Securing the tangled web. Commun. ACM, 57(9):38–47,
+
+Sept. 2014.
+
+[39] A. Kiezun et al. HAMPI: A solver for word equations over strings,
+regular expressions, and context-free grammars. ACM Trans. Softw.
+Eng. Methodol., 21(4):25, 2012.
+
+[40] N. Klarlund, A. Møller, and M. I. Schwartzbach. MONA implementation 
+secrets. International Journal of Foundations of Computer Science,
+ 13(04):571–586, 2002.
+
+[41] E. Kopczynski and A. W. To. Parikh images of grammars: Complexity
+
+and applications. In LICS, 2010.
+
+[42] D. Kozen. Lower bounds for natural proof systems. In FOCS, pages
+. URL http://dx.doi.org/10.1109/SFCS.
+
+254–266, 1977.
+1977.16.
+
+[43] D. Kroening and O. Strichman. Decision Procedures. Springer, 2008.
+[44] T. Liang, A. Reynolds, C. Tinelli, C. Barrett, and M. Deters. A
+DPLL(T) theory solver for a theory of strings and regular expressions.
+In CAV, pages 646–662, 2014.
+
+[45] G. S. Makanin. The problem of solvability of equations in a free
+
+semigroup. Sbornik: Mathematics, 32(2):129–198, 1977.
+
+[46] S. Malik and L. Zhang. Boolean satisﬁability from theoretical hardness 
+to practical success. Commun. ACM, 52(8):76–82, 2009.
+
+[47] K. L. McMillan. Symbolic model checking. Kluwer, 1993.
+[48] Y. Minamide. Static approximation of dynamically generated web
+
+pages. In WWW, pages 432–441, 2005.
+
+[49] C. Morvan. On rational graphs. In FoSSaCS, pages 252–266, 2000.
+[50] W. Plandowski. Satisﬁability of word equations with constants is in
+
+PSPACE. In FOCS, pages 495–500, 1999.
+
+[51] W. Plandowski. Satisﬁability of word equations with constants is in
+
+PSPACE. J. ACM, 51(3):483–496, 2004.
+
+[52] W. Plandowski. An efﬁcient algorithm for solving word equations. In
+
+STOC, pages 467–476, 2006.
+
+[53] G. Redelinghuys, W. Visser, and J. Geldenhuys. Symbolic execution
+
+of programs with strings. In SAICSIT, pages 139–148, 2012.
+
+[54] J. Sakarovitch. Elements of automata theory. Cambridge University
+
+Press, 2009.
+
+[55] Y. Sakuma, Y. Minamide, and A. Voronkov. Translating regular
+expression matching into transducers. J. Applied Logic, 10(1):32–51,
+2012.
+
+[56] W. J. Savitch. Relationships between nondeterministic and deterministic 
+tape complexities. J. Comput. Syst. Sci., 4(2):177–192, 1970.
+
+[57] P. Saxena, D. Akhawe, S. Hanna, F. Mao, S. McCamant, and D. Song.
+A symbolic execution framework for javascript. In S&P, pages 513–
+528, 2010.
+
+[58] P. Saxena, D. Molnar, and B. Livshits. SCRIPTGARD: automatic
+context-sensitive sanitization for large-scale legacy web applications.
+In CCS, pages 601–614, 2011.
+
+[59] B. Scarpellini. Complexity of subcases of presburger arithmetic.
+
+Trans. of AMS, 284(1):203–218, 1984.
+
+[60] S. Schwoon. Model-Checking Pushdown Systems. PhD thesis, Technischen 
+Universit¨at M¨unchen, 2002.
+
+[61] M. Sipser. Introduction to the Theory of Computation. PWS Publishing 
+Company, 1997.
+
+[62] B. Stock, S. Lekies, T. Mueller, P. Spiegel, and M. Johns. Precise 
+client-side protection against dom-based cross-site scripting. In
+USENIX Security, pages 655–670, 2014.
+
+[63] A. W. To. Model Checking Inﬁnite-State Systems: Generic and Speciﬁc 
+Approaches. PhD thesis, LFCS, School of Informatics, University
+of Edinburgh, 2010.
+
+[64] A. W. To and L. Libkin. Algorithmic metatheorems for decidable LTL
+
+model checking over inﬁnite systems. In FOSSACS, 2010.
+
+[65] M. Trinh, D. Chu, and J. Jaffar. S3: A symbolic string solver for
+vulnerability detection in web applications. In CCS, pages 1232–1243,
+2014.
+
+[66] M. Veanes, P. Hooimeijer, B. Livshits, D. Molnar, and N. Bjørner.
+In
+
+Symbolic ﬁnite state transducers: algorithms and applications.
+POPL, pages 137–150, 2012.
+
+[67] G. Wassermann and Z. Su. Sound and precise analysis of web applications 
+for injection vulnerabilities. In PLDI, pages 32–41, 2007.
+
+[68] G. Wassermann and Z. Su. Static detection of cross-site scripting
+
+vulnerabilities. In ICSE, pages 171–180, 2008.
+
+[69] G. Wassermann, D. Yu, A. Chander, D. Dhurjati, H. Inamura, and
+Z. Su. Dynamic test input generation for web applications. In ISSTA,
+pages 249–260, 2008.
+
+[70] J. Weinberger, P. Saxena, D. Akhawe, M. Finifter, E. C. R. Shin, and
+D. Song. A systematic analysis of XSS sanitization in web application
+frameworks. In ESORICS, pages 150–171, 2011.
+
+[71] F. Yu, T. Bultan, and O. H. Ibarra. Symbolic string veriﬁcation:
+Combining string analysis and size analysis. In TACAS, pages 322–
+336, 2009.
+
+[72] F. Yu, M. Alkhalaf, and T. Bultan. Stranger: An automata-based string
+analysis tool for PHP. In TACAS, pages 154–157, 2010. Benchmark
+can be found at http://www.cs.ucsb.edu/~ vlab/stranger/.
+
+[73] F. Yu, M. Alkhalaf, and T. Bultan. Patching vulnerabilities with
+
+sanitization synthesis. In ICSE, pages 251–260, 2011.
+
+[74] F. Yu, T. Bultan, and O. H. Ibarra. Relational string veriﬁcation using
+multi-track automata. Int. J. Found. Comput. Sci., 22(8):1909–1924,
+2011.
+
+[75] F. Yu, M. Alkhalaf, T. Bultan, and O. H. Ibarra. Automata-based
+symbolic string analysis for vulnerability detection. Formal Methods
+in System Design, 44(1):44–70, 2014.
+
+[76] Y. Zheng, X. Zhang, and V. Ganesh. Z3-str: a Z3-based string solver
+for web application analysis. In ESEC/SIGSOFT FSE, pages 114–124,
+2013.
+
+Appendix
+Proof of Proposition 3:
+We use a reduction from PCP. Recall that an input to PCP are two
+equally long lists a1, a2, . . . , an and b1, b2, . . . , bn of words over
+alphabet Σ. We want to decide whether there exists a solution for
+this input, i.e., a nonempty sequence of indices i1, i2, . . . , ik such
+that 1 ≤ ij ≤ n (1 ≤ j ≤ k) and ai1 ai2 · · · aik = bi1 bi2 · · · bik .
+Before explaining how our reduction works, we introduce some
+notation. Assume without loss of generality that Σ is disjoint from
+N. With every input a1, a2, . . . , an and b1, b2, . . . , bn for PCP over
+alphabet Σ, we deﬁne an alphabet Σ(n) := Σ ∪ {1, 2, . . . , n}. We
+also deﬁne regular expressions Li over Σ(n), for 1 ≤ i ≤ 6, as
+follows: (1) L1 := (S1≤i≤n ai · i)+, (2) L2 = L3 = L5 =
+Σ(n)+, (3) L4 := (S1≤j≤n bj · j)+, and (4) L6 = ǫ.
+
+Further, deﬁne A = C = {1, . . . , n} and B = D = Σ. Thus, if
+w is a word over Σ(n) it is the case that replace-all(w, ǫ/A) =
+replace-all(w, ǫ/C) corresponds to the word obtained from w
+by deleting every symbol from {1, . . . , n}. On the other hand,
+replace-all(w, ǫ/B) = replace-all(w, ǫ/D) corresponds to
+the string obtained from w by deleting every symbol from Σ.
+
+We now explain our reduction. Consider an input to PCP given
+by lists a1, a2, . . . , an and b1, b2, . . . , bn of words over Σ. We then
+construct a string constraint ϕ as follows:
+
+x2 = replace-all(x1, ǫ/A) ∧
+x3 = replace-all(x1, ǫ/B) ∧
+x2 = replace-all(x4, ǫ/C) ∧
+x3 = replace-all(x5, ǫ/D) ∧
+x4 = x6.x5 ∧
+
+6
+
+^
+
+i=1
+
+xi ∈ Li,
+
+(2)
+
+where A, B, C, D are the subsets of Σ(n) deﬁned above, and
+correspondingly for the regular expressions L1, . . . , L6. Clearly,
+ϕ is of the form required by the statement of the proposition.
+
+Assume ﬁrst that the constraint ϕ is satisﬁable via some mapping 
+σ : {x1, . . . , x6} → Σ(n)∗. Then σ(x1) is a word in the
+language (S1≤i≤n ai · i)+ and σ(x4) is a word in the language
+(S1≤j≤n bj · j)+. Furthermore, σ(x4) = σ(x5) due to the fact
+that σ(x4) = σ(x6).σ(x5) and σ(x6) is the empty word (since
+σ(x6) belongs to L6 = ǫ).
+
+Assume that σ(x1) = ai1 i1 · · · aik ik, where 1 ≤ iℓ ≤ n for
+each 1 ≤ ℓ ≤ k, and σ(x4) = bj1 j1 · · · bjp jp, where 1 ≤ jℓ ≤ n
+for each 1 ≤ ℓ ≤ p. Since
+
+σ(x2) = replace-all(σ(x1), ǫ/A)
+= replace-all(σ(x4), ǫ/C)
+= replace-all(σ(x4), ǫ/A),
+
+it is the case that ai1 · · · aik = bj1 · · · bjp. Similarly, since
+
+σ(x3) = replace-all(σ(x1), ǫ/B)
+= replace-all(σ(x5), ǫ/D)
+= replace-all(σ(x4), ǫ/D)
+= replace-all(σ(x4), ǫ/B),
+
+we have that i1 · · · ik = j1 · · · jp. We conclude that i1, . . . , ik is a
+solution for the PCP instance deﬁned by a1, . . . , an and b1, . . . , bn.
+
+Assume on the other hand that i1, . . . , ik is a solution for this
+PCP instance. Then it is easy to check that the constraint ϕ deﬁned
+above is satisﬁable via the mapping σ : {x1, . . . , x6} → Σ(n)∗
+which is deﬁned as follows: (1) σ(x1) = ai1 i1 · · · aik ik, (2)
+σ(x2) = ai1 · · · aik = bi1 · · · bik , (3) σ(x3) = i1 · · · ik, (4)
+σ(x4) = σ(x5) = bi1 i1 · · · bik ik, and (5) σ(x6) = ǫ.
+Another Mutation XSS example:
+Example 6. This example is an adaptation of [62, Listing 7].
+[The original example no longer works on modern browsers.] This
+example has the same spirit as Example 5. Consider the following
+JavaScript.
+
+var title = document.getElementById("node1");
+var x = document.getElementById("node");
+
+z = goog.string.escapeString(z); // sanitise
+title.innerHTML = z;
+var name="blah";
+var code = ’<iframe id="’ + title.innerHTML + ’"’;
+code += ’ name="’ + name +’"’;
+code += ’src="http://www.w3schools.com"></iframe>’;
+x.innerHTML = code;
+
+The HTML ﬁle contains the following two lines:
+
+<div id="node1" style="font-size: h1">Title</div>
+<div id="node">iFrame to add</div>
+
+The purpose of the JavaScript is to add a user-speciﬁed title
+(speciﬁed in the variable z) to the page, and modiﬁes the id attribute 
+of the iframe element accordingly. Since the variable z
+is untrusted, it is ﬁrst sanitised before use. Consider the value
+&#34; onload=&#34;alert(1) of the variable z. In this case,
+it would remain unmodiﬁed by escapeString and is decoded
+into " onload="alert(1) by innerHTML mutation. The browser
+would execute the code alert(1), which was unintended by the
+developer.
+
+To analyse such a vulnerability within SL, we need to analyse
+
+whether x.innerHTML could take any string value of the form:
+
+e2 = /<iframe id="("|[^"]*[^"\\]")
+
+[a-zA-Z][a-zA-Z0-9]*="("|[^"]*[^"\\]")
+name="("|[^"]*[^"\\]")
+src="http:\/\/www.w3schools.com"><\/iframe>/
+
+The regular expression essentially implies that the constructed
+string has an extra attribute. [The reader could use https://
+regex101.com/ to experiment.] Notice that the above script is
+not a stright-line program. To this end, we ﬁrst convert it into the
+static-single assignment form in the standard way:
+
+var title = document.getElementById("node1");
+var x = document.getElementById("node");
+
+newz = goog.string.escapeString(z); // sanitise
+title.innerHTML = newz;
+var name="blah";
+var code = ’<iframe id="’ + title.innerHTML + ’"’;
+code1 = code + ’ name="’ + name +’"’;
+code2 = code1+’src="http://www.w3schools.com"></iframe>’;
+x.innerHTML = code2;
+
+Analysis against the attack pattern e2 can then be expressed in SL
+as a conjunction of the following constraints:
+
+• newz = R2(z)
+• title.innerHTML = R3(newz)
+• name = newz
+• code = w1 · title.innerHTML · w2
+
+• code1 = code · w3 · name · w4
+• code2 = code1 · w4
+• x.innerHTML = R3(code2)
+• x.innerHTML matches e2
+
+Here R2 is the transducer implementing escapeString, while
+R3 is a transducer implementing the implicit browser transductions 
+upon innerHTML assignments. Observe that the resulting constraint 
+is in SL.
+
+Proof of Lemma 8:
+The proof of Lemma 8 is by induction on the position of y in the
+topological sort ≺ of G(ϕ).
+
+Base cases: A source node y in G(ϕ). In which case, by
+construction the formula ϕ′
+y is exactly the same formula as ϕy
+except that the variable y is replaced by y(1). (In particular,
+ϕy = {P (y)}, for P a regular language, and therefore ϕ′
+y =
+{P (y(1))}). So, the claim holds.
+
+First inductive case: A non-source node y, where y = y1 . . . yn
+is the relational constraint witnessing the incoming edge to y and
+P (y) is the regular constraint for y. In this case, let z be the immediate 
+predecessor of y in the topological sort ≺. Among others,
+observe that y1, . . . , yn (cid:22) z. To prove the desired claim for y, we
+will now apply the induction hypothesis on z.
+
+In one direction, if ι : Zy → Σ∗ is a satisfying assignment for
+of ι to Zz is a satisfying assignment
+ϕy, then the restriction ι|Zz
+for ϕz (since ϕy = ϕz ∧ y = y1 . . . yn ∧ P (y)). By induction then,
+there exists a satisfying assignment ι′ : Z′
+z such that
+
+z → Σ∗ for ϕ′
+
+ι|Zz
+
+(u) = ι′(u(1)) ◦ · · · ◦ ι′(u(maxu))
+
+for each u ∈ Zz. Therefore:
+
+ι(y) = ι(y1) . . . ι(yn) =
+ι′(y1(1)) . . . ι′(y1(maxy1 )) . . . ι′(yn(1) . . . ι′(yn(maxyn)).
+
+: Z′
+
+For each k ∈ {1, . . . , maxy} and integers i, l satisfying ν(k) =
+(i, l), the formula ϕ′
+y contains the constraint y(k) = yi(l), and
+so we will simply extend the assignment ι′
+z → Σ∗ to Z′
+y
+by setting ι′(y(k)) := ι′(yi(l)). This shows that ι(u) = ι′(u(1)) ◦
+· · ·◦ι′(u(maxu)) for each u ∈ Zy. It also shows that ι′ : Z′
+y → Σ∗
+satisﬁes λrel(y). In addition, if π is an accepting run of P on ι(y),
+then we may split π into maxy segments π1, . . . , πmaxy , where the
+initial (resp. ﬁnal) state of each πi is a state qi−1 (resp. qi), such
+that the run πi is also an accepting run of P[qi−1,qi] on ι′(y(i)).
+This shows that ι′ : Z′
+i=1 P[qi−1,qi](y(i)) for
+some maxy-splitting q0, . . . , qmaxy of P , and hence that it satisﬁes
+λreg(y). We conlude then that ι′ : Z′
+
+y → Σ∗ satisﬁes Vmaxy
+
+y → Σ∗ satisﬁes ϕ′
+y.
+
+The converse case can be proven by noticing that the chain of
+
+reasoning in the previous paragraph can be reversed.
+
+Second inductive case: A non-source node y, where R(x, y)
+is the string constraint witnessing the incoming edge to y and
+P (y) is the regular constraint for y. Again, let z be the immediate
+predecessor of y in the topological sort ≺. Thus, x (cid:22) z. To prove
+the desired claim for y, we apply the induction hypothesis on z.
+
+In one direction, assume ι : Zy → Σ∗ is a satisfying assignment
+for ϕy. As in the previous case, we can conclude by induction
+hypothesis that there exists a satisfying assignment ι′ : Z′
+z → Σ∗
+for ϕ′
+
+(u) = ι′(u(1)) ◦ · · · ◦ ι′(u(maxu))
+
+z such that
+ι|Zz
+
+for each u ∈ Zz (and, in particular, for u = x). Since ι is a
+satisfying assignment for ϕy, it also follows that there exists a
+run π of R witnessing (ι(x), ι(y)) ∈ R. We may split this run
+π into maxx segments π1, . . . , πmaxx, where the initial (resp. ﬁ-
+nal) state of πi is some state pi−1 (resp. pi), such that for some
+
+a/bb
+−→ p1
+1 = p0
+
+b/ab
+−→ p3, then the splitting π′
+ǫ/a
+−→ p2
+
+w1, . . . , wn ∈ Σ∗ such that ι(y) = w1 . . . wn, the run πi witnesses 
+that (ι′(xi), wi) ∈ R[pi−1,pi]. (Note that there might be
+more than one way to split π and ι(y) while satisfying the afore-
+ǫ/a
+mentioned condition, e.g., if π1 = p0
+−→ p2 and
+a/bb
+−→ p1 and
+π2 = p2
+b/ab
+π′
+−→ p3 will also satisfy the aforementioned
+2 = p1
+condition). We will simply extend the assignment ι′ to Z′
+y by setting 
+ι′(y(k)) = wk for each k ∈ {1, . . . , maxx}. Clearly then,
+ι(u) = ι′(u(1)) ◦ · · · ◦ ι′(u(maxu)) for each u ∈ Zy. Also,
+by deﬁnition ι′ satisﬁes Vmaxy
+i=1 y(i) = R[pi−1,pi](x(i)) for some
+maxy-splitting p0, . . . , pmaxy of R, and hence it satisﬁes λrel(y).
+Now, let π be an accepting run of of P on ι(y) = w1 . . . wn. As in
+the ﬁrst inductive case, we take the segment πi of π that operates
+on wi. If pi−1 (resp. pi) is the initial (resp. ﬁnal) state in the run
+segment πi, then ι′ satisﬁes Vmaxy
+i=1 P[pi−1,pi](y(i)). This shows
+that ι′ satisﬁes λrel(y). We conclude that ι′ satisﬁes ϕ′
+y.
+
+As in the ﬁrst inductive case, the converse case can be proven
+by noticing that the chain of reasoning in the previous paragraph
+can be reversed.
+
+Proof of the lower bound of Theorem 5:
+We prove that checking satisﬁability of string constraints in SL
+is EXPSPACE-hard. We reduce from the acceptance problem for
+a deterministic Turing machine M that works in space 2cn, for
+c > 1. That is, we provide a polynomial time reduction that, given
+an input w to M, it constructs a constraint ϕ(w) in SL such that w
+is accepted by M if and only if ϕ(w) is satisﬁable.
+
+Let us assume that M = (Σ, Q, q0, qf , δ), where (i) Σ is a ﬁnite
+alphabet which contains the blank symbol ♭, (ii) Q is the ﬁnite set
+of states, (iii) q0 is the initial state, (iv) F is the set of ﬁnal states,
+and (v) δ : Q × Σ → Q × Σ × {−1, 0, 1} is the transition function.
+We assume without loss of generality that (a) Σ ∩ {0, 1} = ∅, (b)
+F = {qf } is a singleton, and (c) before accepting the machine
+erases its tape leaving the head in the ﬁrst position.
+
+We deﬁne Σ(Q) := Σ ∪ (Σ × Q) ∪ {0, 1}. We use this alphabet
+to represent conﬁgurations of M. Consider, for instance, that M
+is in a conﬁguration c in which the i-th cell of the tape contains
+symbol ai ∈ Σ, for each 0 ≤ i ≤ 2cn − 1, the head is scanning
+cell 0 ≤ j ≤ 2cn − 1, and the machine is in state q ∈ Q. Then c is
+represented as the following word over Σ(Q):
+
+[0] a0 [1] a1 [2] · · · [j] (aj, q) [j + 1] . . . [2cn − 1]a2cn−1,
+
+where for each 0 ≤ i ≤ 2cn − 1 we have that [i] is the cn-bit
+representation of the integer i over alphabet {0, 1}.
+
+Let w be an input to M (i.e., a word over Σ) of length n ≥
+0. We now explain how to construct ϕ(w). To start with, ϕ(w)
+contains a regular constraint V1≤i≤m Li(x) such that L1(x)∧· · ·∧
+Lm(x) is satisﬁable by a word x if and only the following holds:
+
+1. The word x satisﬁes the regular expression:
+
+(cid:0)[0] Σ(Q) [1] Σ(Q) [2] · · · [2cn − 1] Σ(Q) $(cid:1)∗.
+
+In other words, x represents the concatenation of several cn-bit
+counters separated by the delimiter $. Each address [i] in one of
+these bit couters is followed by a symbol from Σ(Q).
+
+2. The ﬁrst counter in x encodes the initial conﬁguration of M
+with input w. That is, if w = a0a1 · · · an−1 then the following
+word is a preﬁx of x:
+
+[0] (a0, q0) [1] a1 · · · [n − 1] an−1 [n] ♭ · · · [2cn − 1] ♭ $
+
+Recall that q0 is the initial state of M and ♭ is the blank symbol.
+
+3. The last counter of x encodes a ﬁnal conﬁguration of M. That
+
+is, the following word is a sufﬁx of x:
+
+[0] (♭, qf ) [1] ♭ [2] ♭ · · · [2cn − 1] ♭.
+
+Using standard ideas on how to enconde n-bit counters (see, e.g.,
+[19, 42]), it is possible to show that a set {L1, . . . , Lm} of NFAs
+that satisfy the conditions speciﬁed above can be constructed in
+polynomial time from M and w.
+
+The intuitive idea of the reduction is to codify in the word x an
+accepting run of M on input w. Let us assume that x is of the form
+c0$c!$ · · · $cp$, for p ≥ 0, where for each 0 ≤ i ≤ p we have that
+ci encodes a cn-bit counter. We know that c0 and cp represent an
+initial and ﬁnal conﬁguration, respectively, of M on input w. Thus,
+in order to check that x in fact represents an accepting run of M
+on w we only need to verify that for each 0 ≤ j ≤ p − 1 it is the
+case that cj+1 encodes the conﬁguration which is obtained from cj
+by one application of the transition function δ.
+
+As usual, we check this locally for each block of three consecutive 
+addresses in the cj’s. Formally, for each 0 ≤ i ≤ 2cn − 1
+and 0 ≤ j ≤ p, we deﬁne cj [i] to be the unique substring of cj of
+the form [i]a, for a ∈ Σ(Q). Clearly then, checking whether the
+word x = c0$c1$ · · · $cp$ codiﬁes an accepting run of M on input
+w is equivalent to checking that for each 1 ≤ i ≤ 2cn − 2 and
+0 ≤ j < p the block cj+1[i − 1]cj+1[i]cj+1[i + 1] follows from
+cj [i − 1]cj [i]cj [i + 1] according to the transition function δ. For
+instance, if
+
+cj[i − 1]cj [i]cj [i + 1] = [i − 1] a [i] (b, q) [i + 1] c,
+where a, b, c ∈ Σ and q ∈ Q, and δ(q, b) = (q′, b′, −1), then
+
+cj+1[i − 1]cj+1[i]cj+1[i + 1] = [i − 1] (a, q′) [i] b′ [i + 1] c.
+
+This is precisely the role of the remaining constraints in ϕ(w),
+which we deﬁne next.
+
+First, we add to the constraint ϕ(w) the string constraint
+
+y = x#x#x#x#x#x
+
+that takes six copies of the word x, separates them with a new
+delimiter #, and assigns the result to the variable y. We then apply
+a transducer R to y to deﬁne a new variable z. Let us recall that
+x is of the form c0$c1$ . . . $cp$, where each ci encodes a cn-bit
+counter. The transducer R then converts y = x#x#x#x#x#x
+into z = x1#x2#x3#x4#x5#x6, where:
+
+1. x1 is exactly as x except that now we have replaced each
+j that only preserves from cj
+
+counter cj with a new counter c1
+information about addresses [0], [1], [2], [6], [7], [8], . . .
+
+2. Same for x2 and cj
+
+2, but now cj
+
+2 preserves information about
+
+addresses [1], [2], [3], [7], [8], [9], . . .
+
+3. Same for x3 and cj
+
+3, but now cj
+
+3 preserves information about
+
+addresses [2], [3], [4], [8], [9], [10], . . .
+
+4. Same for x4 and cj
+
+4, but now cj
+
+4 preserves information about
+
+addresses [3], [4], [5], [9], [10], [11], . . .
+
+5. Same for x5 and cj
+
+5, but now cj
+
+5 preserves information about
+
+addresses [4], [5], [6], [10], [11], [12], . . .
+
+6. Same for x6 and cj
+
+6, but now cj
+
+6 preserves information about
+
+addresses [5], [6], [7], [11], [12], [13], . . .
+
+We also assume that transducer R deletes from each counter cl
+j in
+ul (0 ≤ j ≤ p and 1 ≤ l ≤ 6) the “incomplete” blocks before a
+delimiter $, i.e., the sufﬁxes that do not form a complete block of
+three consecutive addresses. (For instance, if 2cn = 8 then each c2
+j
+is of the form [1]a[2]b[3]c[7]d. In this case, R simply deletes the
+sufﬁx [7]d completely).
+
+suitably separated by delimiters #, #1, . . . , #l+1 according to the
+structure provided by the constraints that deﬁne the zl’s and ul’s –
+in such a way that vj corresponds to the restriction of x to addresses
+[i − 1], [i], [i + 1] (1 ≤ i ≤ 2cn − 2) for which the remainder of i
+divided by 6 · 2i+1 is precisely j. This proves our inductive case.
+
+In particular then, zcn consists of words v1, v2, . . . , v6·2cn over
+Σ(Q) ∪ {$} – suitably separated by delimiters #, #1, . . . , #cn
+according to the structure provided by the constraints that deﬁne
+the zl’s and ul’s – in such a way that vj, for 1 ≤ j ≤ 2cn − 2,
+corresponds to the restriction of x to addresses [j − 1], [j], [j + 1]
+(and nothing else). That is, vj is of the form
+
+c0[j − 1]c0[j]c0[j + 1]$c1[j − 1]c1[j]c1[j + 1]$ · · ·
+
+$ cp[j − 1]cp[j]cp[j + 1],
+
+Further, the vj’s such that j > 2cn − 2 also correspond to the
+restriction of x to addresses [i − 1], [i], [i + 1] (and nothing else),
+for some 1 ≤ i ≤ 2cn − 2.
+
+Finally, we only have to check in each subword vj (1 ≤ j ≤
+
+6 · 2cn) of zcn of the form
+
+c0[i − 1]c0[i]c0[i + 1]$c1[i − 1]c1[i]c1[i + 1]$ · · ·
+
+$ cp[i − 1]cp[i]cp[i + 1],
+
+for 1 ≤ i ≤ 2cn − 2, that cl+1[i − 1]cl+1[i]cl+1[i + 1] is obtained
+from cl[i − 1]cl[i]cl[i + 1] by applying the transition function δ, for
+each 0 ≤ l < p. It is easy to see how to construct an NFA L which
+veriﬁes this for each subword vj of the form above (see, e.g., [42]).
+We then add to ϕ(w) a regular constraint A∗(zcn), where A∗ is the
+NFA that checks that each subword vj in zcn is accepted by A. The
+NFA A∗ simply “restarts” A if A is in an acceptance state while
+reading one of the delimiters #i or #; otherwise it rejects.
+
+Clearly, ϕ(w) is in SL and can be constructed in polynomial
+time from the input. Furthermore, M accepts w if and only if ϕ(w)
+is satisﬁable. This concludes the proof.
+
+Notice that each block of three consecutive addresses appears
+in one, and only one, of the words xl, for 1 ≤ l ≤ 6. In particular,
+the information from x about addresses [i − 1], [i], [i + 1], for
+1 ≤ i ≤ 2cn − 2, is preserved in xj, where j is the remainder
+obtained by dividing i by 6 (assuming that if i is divisible by 6 then
+this remainder is 6). Further, it is not hard to see how the transducer
+R can be constructed in polynomial time from our input.
+
+We now extend the formula ϕ(w) by including the conjunction
+
+of the following atomic string constraints:
+
+ui = zi−1#izi−1
+zi = Si(ui−1)
+
+(1 ≤ i ≤ cn − 1)
+(1 ≤ i ≤ cn),
+
+where z0 = z, the symbol #i is a fresh delimiter, and Si is a
+transducer we deﬁne below. That is, ui consists of two copies of
+zi−1 separated by the delimiter #i and zi is obtained from ui−1 by
+applying the transducer Si. We stop this process after cn steps.
+
+For the sake of readability, we will keep the explanation at
+the intuitive level. We start by explaining how the transducer S1
+is deﬁned. By deﬁnition, u1 = z0#1z0 = z#1z and z =
+x1#x2#x3#x4#x5#x6. Then S1 takes the the copy of xl =
+cl
+0$ . . . $cl
+p, for 1 ≤ l ≤ 6, that appears before the delimiter #1
+in u1, and turns it into a new word x′
+p, where each
+dl
+j is obtained by performing the following modiﬁcations over cl
+j:
+If cl
+j consists only of a block of three consecutive addresses, then
+leave as it is (i.e., dl
+j); otherwise, remove every other block of
+three consecutive addresses from cl
+j. For the copy of xl that occurs
+after #1, the transducer S1 transforms it into a new word x′′
+l by
+doing the opposite: If cl
+j contains more than one block of three
+consecutive addresses, then it removes the ﬁrst block, keeps the
+second one, removes the third one, etc. It is not hard to see that S1
+can be constructed in polynomial time from our input.
+
+0$ . . . $dl
+
+l = dl
+
+j = cl
+
+Notice then that
+2#x′
+
+1#x′
+
+5#x′
+
+4 #x′′
+
+2 #x′′
+
+1 #x′′
+
+3 #x′′
+
+6#1x′′
+
+4#x′
+5 #x′′
+z1 = x′
+3#x′
+6 ,
+where, for instance, x′
+1 corresponds to the restriction of x to
+addresses [0], [1], [2], [12], [13], [14], . . . , while x′′
+1 corresponds
+to the restriction of x to [6], [7], [8], [18], [19], [20], . . . . In the
+same way, x′
+2 corresponds to the restriction of x to addresses
+[1], [2], [3], [13], [14], [15], . . . , while x′′
+2 corresponds to the restriction 
+of x to addresses [7], [8], [9], [19], [20], [21], . . . . In general,
+ the restriction of x to addresses [i − 1], [i], [i + 1], for
+1 ≤ i ≤ 2cn − 2, is contained in (i) x′
+j if and only if the remainder 
+of i divided by 12 is 1 ≤ j ≤ 6, and in (ii) x′
+j if and only
+if the remainder of i divided by 12 is j + 6, for 1 ≤ j ≤ 6.
+
+In general, we will assume inductively that zl, for 1 ≤ l ≤ cn−
+1, is constructed from words w1, w2, . . . , w6·2i over Σ(Q) ∪ {$}
+– suitably separated by delimiters #, #1, . . . , #i according to the
+structure provided by the constraints that deﬁne the zl’s and ul’s
+– in such a way that wj corresponds to the restriction of x to
+addresses [i − 1], [i], [i + 1] (1 ≤ i ≤ 2cn − 2) for which the
+remainder of i divided by 6 · 2i is precisely j.
+
+j = t′
+
+0$ . . . $t′
+
+Then ul+1 = zl#l+1zl, and we deﬁne Sl+1 similarly to S1.
+That is, Sl+1 takes the copy of wj = t0$ . . . $tp (where each th
+is a word over Σ(Q)) that appears before the delimiter #l+1 in
+ul+1, and turns it into a new word w′
+p, where each
+t′
+h is obtained by performing the following modiﬁcations over th:
+If th consists only of a block of three consecutive addresses, then
+leave as it is (i.e., t′
+h = th); otherwise, remove every other block of
+three consecutive addresses from th. For the copy of wj that occurs
+after #l+1, the transducer Sl+1 transforms it into a new word w′′
+j
+by doing the opposite: If th contains more than one block of three
+consecutive addresses, then it removes the ﬁrst block, keeps the
+second one, removes the third one, etc. It is not hard to see then
+that zl+1 consists of words v1, v2, . . . , v6·2i+1 over Σ(Q) ∪ {$} –
+
+

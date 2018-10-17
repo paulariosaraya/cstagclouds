@@ -1,0 +1,1176 @@
+Storage and Retrieval of Individual Genomes
+
+Veli M¨akinen1,(cid:2), Gonzalo Navarro2,(cid:2)(cid:2), Jouni Sir´en1,(cid:2) (cid:2) (cid:2), and Niko V¨alim¨aki1,†
+
+1 Department of Computer Science, University of Helsinki, Finland
+
+{vmakinen,jltsiren,nvalimak}@cs.helsinki.fi
+
+2 Department of Computer Science, University of Chile, Chile
+
+gnavarro@dcc.uchile.cl
+
+Abstract. A repetitive sequence collection is one where portions of a
+base sequence of length n are repeated many times with small variations,
+forming a collection of total length N . Examples of such collections are
+version control data and genome sequences of individuals, where the
+diﬀerences can be expressed by lists of basic edit operations. Flexible
+and eﬃcient data analysis on a such typically huge collection is plausible
+using suﬃx trees. However, suﬃx tree occupies O(N log N ) bits, which
+very soon inhibits in-memory analyses. Recent advances in full-text selfindexing 
+reduce the space of suﬃx tree to O(N log σ) bits, where σ is the
+alphabet size. In practice, the space reduction is more than 10-fold, for
+example on suﬃx tree of Human Genome. However, this reduction factor
+remains constant when more sequences are added to the collection.
+
+We develop a new family of self-indexes suited for the repetitive sequence 
+collection setting. Their expected space requirement depends only
+on the length n of the base sequence and the number s of variations in its
+repeated copies. That is, the space reduction factor is no longer constant,
+but depends on N/n.
+
+We believe the structures developed in this work will provide a fundamental 
+basis for storage and retrieval of individual genomes as they
+become available due to rapid progress in the sequencing technologies.
+
+Keywords: Comparative genomics, full-text indexing, suﬃx tree, compressed 
+data structures.
+
+1 Introduction
+
+1.1 Motivation
+
+Self-indexing [15] is a new proposal for storing and retrieving sequence data. It
+aims to represent the sequence (a.k.a. text or string) compressed in a way that
+not only random access to the sequence is possible, but also pattern searches are
+supported [4,7,20].
+
+(cid:2) Funded by the Academy of Finland under grant 119815.
+(cid:2)(cid:2) Partially funded by Millennium Institute for Cell Dynamics and Biotechnology
+
+(ICDB), Grant ICM P05-001-F, Mideplan, Chile.
+
+(cid:2) (cid:2) (cid:2) Funded by the Research Foundation of the University of Helsinki.
+
+†
+
+Funded by the Helsinki Graduate School in Computer Science and Engineering.
+
+S. Batzoglou (Ed.): RECOMB 2009, LNCS 5541, pp. 121–137, 2009.
+c(cid:2) Springer-Verlag Berlin Heidelberg 2009
+
+122
+
+V. M¨akinen et al.
+
+A special case of a text collection is one which contains several versions of one
+or more base sequences. Such collections are soon becoming reality in the ﬁeld of
+molecular biology. As the DNA sequencing technologies become faster and more
+cost-eﬀective, the sequencing of individual genomes will become a feasible task
+[3,10,17]. This is likely to happen in the near future, see for example the 1000
+Genomes project1. With such data in hand, many fundamental issues become of
+top concern, like how to store, say, one million Human Genomes, not to speak
+about analyzing them. For the analysis of such collections, one would clearly
+need to use some variant of a generalized suﬃx tree [9], which provides a variety
+of algorithmic tools to do analyses in linear or near-linear time. The memory
+requirement of such a solution, however, is unimaginable with current random
+access memories, and also challenging in permanent storage.
+
+Self-indexes should, in principle, cope well with genome sequences, as genomes
+contain high amounts of repetitive structure. In particular, as the main building
+blocks of compressed suﬃx trees [21,19,18,6], self-indexes enable compressing sequence 
+collections close to their high-order entropy and enabling ﬂexible analysis
+tasks to be carried out2. Those indexes have been successful in bringing down
+the space requirement of the suﬃx tree of one Human Genome to ﬁt the capabilities 
+of a desktop computer. However, they suﬀer from a fundamental limit: The
+high-order entropies they achieve are deﬁned by the frequencies of symbols in
+their ﬁxed-length contexts, and these contexts do not change at all when more
+identical sequences are added to the collection. Hence, these self-indexes are not
+at all able to exploit the fact that the texts in the collection are highly similar.
+
+1.2 Content
+In this paper we propose a new family of self-indexes that are suitable for storing 
+highly repetitive collections of sequences, and a new compressed suﬃx tree
+based on it. Our scheme can also be thought of as a self-index for a given multiple 
+alignment of a sequence collection, where one can retrieve any part of any
+sequence as well as make queries on the content of all the aligned sequences. The
+main technical contribution is a new strategy to store suﬃx array samples that
+uses and improves a classical solution for persistent selection.
+
+We show analytically that the expected space requirement of our new selfindexes 
+improves upon the existing ones on highly repetitive collections. We also
+provide experiments on a collection of resequenced yeast genomes, showing that
+our indexes behave in practice as predicted by our analysis.
+
+1.3 Deﬁnitions and Background
+A string S = S1,n = s1s2 ··· sn is a sequence of symbols (a.k.a. characters or
+letters). Each symbol is an element of an alphabet Σ = {1, 2, . . . , σ}. A substring
+1 http://www.1000genomes.com
+2 For a concrete example, the SUDS Genome Browser at http://www.cs.helsinki.
+fi/group/suds/cst, runs a compressed suﬃx tree of the Human Genome using 8.8
+GB of main memory.
+
+Storage and Retrieval of Individual Genomes
+
+123
+
+of S is written Si,j = sisi+1 . . . sj. A preﬁx of S is a substring of the form S1,j,
+and a suﬃx is a substring of the form Si,n. If i > j then Si,j = ε, the empty string
+of length |ε| = 0. A text string T = T1,n is a string terminated by the special
+symbol tn = $ (cid:2)∈ Σ, smaller than any other symbol in Σ. The lexicographical
+order “<” among strings is deﬁned in the obvious way.
+
+We use the standard notion of empirical k-th order entropy Hk(T ). For formal
+deﬁnition, see e.g. [14]. For our purposes, it is enough to know the basic property
+0 ≤ Hk(T ) ≤ Hk−1(T ) ≤ ··· ≤ H0(T ) ≤ log σ.
+
+The compressors to be discussed are derivatives of the Burrows-Wheeler transform 
+(BWT) [2]. The transform produces a permutation of T , denoted by T bwt,
+as follows: (i) Build the suﬃx array [13] SA[1, n] of T , that is an array of pointers
+to all the suﬃxes of T in the lexicographic order; (ii) The transformed text is
+T bwt = L, where L[i] = T [SA[i]− 1], taking T [0] = T [n]. The BWT is reversible,
+that is, given T bwt = L we can obtain T as follows: (a) Compute the array C[1, σ]
+storing in C[c] the number of occurrences of characters {$, 1, . . . , c−1} in the text
+T ; (b) Deﬁne the LF mapping as follows: LF (i) = C[L[i]] + rankL[i](L, i), where
+rankc(L, i) is the number of occurrences of character c in the preﬁx L[1, i]; (c)
+Reconstruct T backwards as follows: set s = 1, for each n− 1, . . . , 1 do ti ← L[s]
+and s ← LF [s]. Finally put the end marker tn ← $.
+
+k=1
+
+(cid:2)r
+
+Let a point mutation (or just mutation) denote the event of a symbol changing
+into another symbol inside a string. We study the following problem (other types
+of mutations are considered later).
+Deﬁnition 1. Given a collection C of r sequences T k ∈ C such that |T k| = n for
+1 ≤ k ≤ r and
+|T k| = N, where T 2, T 3, . . . , T r are mutated copies of the
+base sequence T 1 containing overall s point mutations, the repetitive collection
+indexing problem is to store C in as small space as possible such that the following
+operations are supported as eﬃciently as possible: count(P ) (how many times
+P appears as a substring of the texts in C?); locate(P ) (list the occurrence
+positions of P in C); and display(k, i, j) (return T k
+The above is an extension of the well-known basic indexing problem, where the
+collection only has one sequence T . We call a solution to the basic indexing
+problem a self-index if it does not need T to solve the three queries above. Thus
+a self-index replaces T .
+
+i,j).
+
+A classical solution to the basic indexing problem uses T and the suﬃx array
+SA[1, n]. Two binary searches ﬁnd the interval SA[sp, ep] pointing to all the
+suﬃxes of T starting with P , that is, to all the occurrences of P in T (this
+solves count and locate) [13], and T is at hand for display. The solution is
+not space-eﬃcient, since array SA requires n log n bits (compared to n log σ bits
+used by T ), and it is not a self-index, since T is needed.
+
+The FM-index [4] is a self-index based on the BWT. It solves count by ﬁnding
+the interval SA[sp, ep] that contains the occurrences of P . The FM-index uses
+the array C and function rankc(L, i) in the so-called backward search algorithm,
+calling function rankc(L, i) O(|P|) times. The two other basic queries are solved
+using sampling of SA and its inverse SA−1, and the LF -mapping to derive the
+unsampled values from the sampled ones. Many variants of the FM-index have
+
+124
+
+V. M¨akinen et al.
+
+been derived that diﬀer mainly in the way the rankc(L, i)-queries are solved [15].
+For example, on small alphabets, it is possible to achieve nHk + o(n log σ) bits
+of space, for moderate k, with constant time support for rankc(L, i) [5].
+Now, the repetitive collection indexing problem can be solved using the normal
+self-index for the concatenation T 1$T 2$ ··· T r$. However, the space requirement
+achieved, even with a high-entropy compressed index, is not attractive for the
+case of repetitive collections. For example, an FM-index [5] requires N Hk(C) +
+o(N log σ) bits. Notice that with the collection of Def. 1 and even with s = 0, it
+holds Hk(C) ≈ Hk(T 1), and hence the space is about r times that for the base
+sequence, not taking any advantage of repetitiveness.
+
+In the sequel, we derive solutions whose space requirements depend on n and s
+instead of N. Let us ﬁrst consider a natural lower bound that takes into account
+these speciﬁc problem parameters. Consider a two-part compression scheme that
+compresses T 1 with a high-order compressor, and the rest of the sequences by
+encoding the mutations needed to convert each other sequence into T 1. The
+lower bound for any such compressor is
+
+nHk(T 1) + log
+
+(cid:3)
+
+N − n
+
+(cid:4)
+
+s
+
++ s log σ ≈ nHk(T 1) + s log
+
+N
+s + s log σ
+
+(1)
+
+where the ﬁrst part is the lower bound of encoding T 1 with any high-order
+compressor, the second part is the lower bound for telling the positions of the
+mutations among the N − n possibilities, and the third part is the lower bound
+for listing the s mutated values.
+
+Notice that it is not diﬃcult to achieve just plain compression approaching
+the bound of Eq. (1) (omitting alphabet-dependent factors), but we aim higher:
+Our goal is to solve the repetitive collection indexing problem within the same
+space. We do not yet achieve that goal, but the space of our indexes can be
+expressed in similar terms; we encourage the reader to compare our ﬁnal result
+with Eq. (1) to see the connection.
+
+The abstract problem with point mutations studied here is much simpler than
+the real variations occurring in genome sequences. However, all the techniques
+introduced can be extended to the full set of mutation events, as is done in our
+implementation. This will be discussed in Sect. 3.
+
+2 Methods
+
+2.1 Analysis of Runs
+
+Self-repetitions are the fundamental source of redundancy in suﬃx arrays, enabling 
+their compression. A self-repetition is a maximal interval SA[i, i+l] of sufﬁx 
+array SA having a target interval SA[j, j +l] such that SA[j +r] = SA[i+r]+1
+for all 0 ≤ r ≤ l. Let Ψ(i) = SA−1[SA[i] + 1]. The intervals of Ψ corresponding
+to self-repetitions in the suﬃx array are called runs. The name stems from the
+fact that Ψ(i + 1) = Ψ(i) + 1 when both Ψ(i) and Ψ(i + 1) are contained in the
+same run (see [12,15] for more details).
+
+Storage and Retrieval of Individual Genomes
+
+125
+
+Fig. 1. An example of the signiﬁcant preﬁx concept. Let (a repeated collection with)
+base text S1 = T 1 contain a signiﬁcant preﬁx X. Substring X becomes repeated in
+the mutated copies T 2, T 3, T 4, T 5, and T 7, of T 1. Text T 6 has a mutation inside X.
+Due to other mutations, texts T 5 and T 7 now contain X in some other positions, and
+hence X is no longer a signiﬁcant preﬁx of the mutated collection. However, extending
+X with string α makes Xα unique to the original position of X, while the other two
+occurrences of X are succeeded by string β (cid:2)= α. Hence, Xα is a signiﬁcant preﬁx,
+being α the shortest extension having the required property. The signiﬁcant preﬁxes
+starting at the eﬀect zones shown are aﬀected by the mutations.
+
+Let RΨ (T ) be the number of runs in Ψ of text T = T1,n and Rbwt(T ) the
+number of equal-letter runs in T bwt, the BWT of T . If the text is evident from
+the context, we will usually drop T and write just RΨ and Rbwt. It is known that
+RΨ ≤ Rbwt ≤ RΨ + σ, making the two types of runs almost equal [12]. Hence,
+we may simplify the notation further by denoting just R = Rbwt(T ). In addition
+to the trivial bound R ≤ n, we also have R ≤ nHk + σk for all k [12].
+
+We will now prove some further bounds for texts obtained by repeating and
+mutating substrings of a base sequence. To simplify the analysis, we add a new
+character # such that # < $ < c for all c ∈ Σ. We use # as a separator between
+texts in the collection, and assume that the ordering between two occurrences of
+character # is decided by their positions in the sequence, making each occurrence
+of # a diﬀerent character in practice.
+Deﬁnition 2. The r times repeated collection of base text S = S1,n is Sr =
+S1S2 ··· Sr, where Sr = S = S1,n−1$ and Si = S1,n−1# for all i < r.
+Deﬁnition 3. Let T r be a collection of r texts, each derived by mutations from
+a base sequence T = T 1. The signiﬁcant preﬁx SPi,j of the suﬃx starting at
+position j of sequence T i is the shortest preﬁx not occurring anywhere else in
+T r as a substring except possibly as a preﬁx of some T k
+Notice that signiﬁcant preﬁx concept is well-deﬁned also a repeated collection,
+since it is a collection with no mutations. In that case, signiﬁcant preﬁxes are
+identical to those of a collection consisting only of the base text. Figure 1 illustrates 
+the deﬁnitions.
+
+j,n, k (cid:2)= i.
+
+We now show some basic results concerning the number of runs in repeated
+and mutated texts. Proofs are sketched here for conciseness. Full proofs
+
+126
+
+V. M¨akinen et al.
+
+will appear in the full version. Expected case proofs extend those in
+[23, pp.263–265].
+Lemma 1. For all texts S and all r ≥ 1, RΨ (S) = RΨ (Sr).
+Proof. (Sketch) All suﬃxes corresponding to the same suﬃx of S are grouped
+together in the suﬃx array of Sr. Each group is further ordered from the suﬃx
+of S1 to the suﬃx of Sr. Hence there is one-to-one correspondence between the
+self-repetitions of suﬃx arrays of S and Sr.
+Lemma 2. Let Sr = S1S2 ··· Sr be a repeated collection and T r the collection
+j, for some 1 < i ≤ r and 1 ≤ j < n, into another
+created by transforming si
+character. Then RΨ (T r) ≤ RΨ (Sr) + 2c + 2 = RΨ (S) + 2c + 2, where c is the
+number of signiﬁcant preﬁxes covering ti
+j.
+
+Proof. (Sketch) The relative position of a suﬃx in the suﬃx array can change
+only if its signiﬁcant preﬁx has mutated. Each such suﬃx can interfere with a
+constant number of runs. The ordering of suﬃxes sharing a signiﬁcant preﬁx can
+change, but this does not create additional runs.
+
+Lemma 3. Let S = S1,n be a random text. The expected length of the longest
+repeated substring is O(logσ n).
+
+Proof. (Sketch) The expected number of non-overlapping repeats of length l is
+O(n2/σl). Markov’s inequality bounds the probability of having a repeat of length
+c·logσ n exponentially in c−1. Overlapping repeats are handled in a similar manner.
+Lemma 4. Let Sr be the repeated collection of random text S = S1,n with total
+length N = nr. Let T r be Sr after s point mutations at random positions in
+S2S3 ··· Sr. The expected value of RΨ (T r) is at most RΨ (S) + O(s logσ N).
+The above analysis can be extended to other types of mutations. When we insert
+a new copy of an existing substring, the signiﬁcant preﬁxes completely within the
+new copy remain unchanged. Only the signiﬁcant preﬁxes covering either end of
+the inserted copy change. Hence the insertion is essentially equivalent to two point
+mutations. Similarly the deletion of a substring is equivalent to one point mutation.
+
+2.2 Backward Search for Repetitive Collections
+
+Our prior work [22] introduced three solutions to the repetitive collection indexing 
+problem, restricted to count(P ) query. The three indexes are Run-Length
+Compressed Suﬃx Array (RLCSA), Run-Length Encoded Wavelet Tree (RLWT),
+and Improved Run-Length FM-Index (RLFM+). They achieve diﬀerent space vs.
+time trade-oﬀs. For example, RLFM+ requires space (R log σ + 2R log N
+R )(1 +
+bits. Query rankc(T bwt, i), and retrieving symbol tbwt
+o(1)) + O
+,
+are solved in O(tLF) time, where tLF = O(log R).3 Hence, RLFM+ supports
+count(P ) in time O(|P|tLF). Lemma 4 can be used to bound R with
+
+(cid:5)
+R log log N
+R
+
+(cid:6)
+
+i
+
+3 One can achieve o((log log N )2) time by adding O(R log N
+
+log R ) further bits of space [8].
+
+Storage and Retrieval of Individual Genomes
+
+127
+
+n+O(s logσ N) in the expected case (even for an incompressible T 1), which gives
+a space bound close to the terms of Eq. (1).
+
+2.3 Suﬃx Array Samples
+Supporting the other two functions of the repetitive collection indexing problem,
+namely, display() and locate(), is the main contribution of this paper. We
+address this now.
+
+We need to be able to map the suﬃxes of the text into suﬃx array indexes
+and vice versa. The standard solution [15] in self-indexes is to sample every
+d-th suﬃx of each text in the collection in an array D[1, N/d + 1], such that
+D[i] = SA−1(i · d), mark the locations D[i] in a bit-vector B[1, N], such that
+B[D[i]] = 1 for all 1 ≤ i ≤ N/d + 1, and store the samples in the suﬃx array
+order in a table S[1, N/d + 1], such that S[rank1(B, D[i])] = i · d.
+Then display(k, i, j) works as follows. Let St[k] be the starting position of
+T k in the concatenated sequence T = T 1T 2 ··· T r. Value D[(St[k]+ j)/d+2] = e
+tells us that the nearest sampled suﬃx after TSP [k]+j,N is pointed from SA[e].
+Following LF -mapping from position e reveals us backwards a substring that
+covers T k
+
+i,j in time O(tLF(d + j − i)).
+
+Function locate(P) works as follows. First, backward search ﬁnds the range
+SA[sp, ep] containing the occurrences of P , and then and SA[i] is computed for
+each sp ≤ i ≤ ep as follows. If suﬃx SA[i] is not sampled (B[i] = 0), then LF -
+mapping is applied until an index j is found where SA[j] is sampled (B[j] = 1).
+Then SA[i] = S[rank1(B, j)]+c, where c < d is the number of times LF -mapping
+was applied. This takes time tSA = O(tLF · d).
+
+The space required by the standard solution is O((N/d) log N +N) bits, which
+can be reduced to O((N/d) log N) by using the binary searchable dictionary
+(BSD) representation [8]; this changes the time for locate() into tSA = O((tLF +
+tSA)d), where tSA = O(log d).
+
+Our objective is to have all time requirements in O(polylog(N)), which holds
+only with the above approaches if we assume r = O(polylog(N)); then d can be
+chosen as r log N to make O((N/d) log N) = O(n), i.e., independent of N as we
+wish.
+
+Improving Space for display(). We will store samples only for T 1, that is,
+table D[1, n/d + 1] has the suﬃx array entry of every d-th suﬃx T 1
+i·d,n stored at
+D[i] = SA−1[i · d].
+To be able to use the same samples for other texts in the collection, we mark
+the locations of mutations into bit-vectors. Let M k[1,|T k|] be a bit-vector where
+the locations of the mutations inside T k are marked. The mutated symbols are
+stored in another array M Sk[1, rank1(M k,|T k|)] in their order of occurrence in
+T k.
+
+Consider now a query display(k, i, j). The substring T 1
+
+i,j is extracted using
+the samples just like in the standard approach. It is easy to see that while
+i,j, the mutations stored for T k can also be extracted using rankextracting 
+T 1
+function on M k. Table M Sk occupies overall s log σ bits. Bit-vectors M k can be
+
+128
+
+V. M¨akinen et al.
+
+represented using BSD [8] in overall s log N−n
+What we gain is that O((N/d) log N) becomes O((n/d) log n).
+
+(1 + o(1)) + O
+
+s
+
+s
+
+(cid:5)
+s log log N−n
+
+(cid:6)
+
+bits.
+
+Improving Space for locate(). We use the same strategy as for display(),
+sampling only T 1, but this time we need to sample also parts of the other texts,
+as discussed next.
+
+p,n, . . . , T r
+
+Let us ﬁrst consider the case of r identical texts. We know that the suﬃxes
+p,n will all be consecutive and in the same order in SA. Assume
+p,n, T 2
+T 1
+every d-th suﬃx of T 1 is sampled and those sampled SA positions are marked in
+a bit vector B. Then we can reveal any SA[i] by applying LF -mapping at most
+d times until ﬁnding an entry j such that SA[j(cid:3)] is sampled for some j(cid:3) < j and
+j − j(cid:3) ≤ r. The candidate j(cid:3) < j to check is j(cid:3) = select1(B, rank1(B, j)), where
+select1(B, x) gives the position of the x-th 1 in B. Then SA[j] corresponds to
+suﬃx T k
+S[rank1(B,j(cid:2))]+c,n, where S is the table storing the sampled suﬃxes in the
+order they appear in SA, c < d is the number of times LF -mapping was applied,
+and k = j − j(cid:3) + 1.
+
+Generalizing the scheme to work under mutations is non-trivial. We introduce
+a strategy that splits the suﬃxes into two classes A and B such that class A
+suﬃxes are computed via T 1 samples and for class B we add new samples from
+all the texts. Recall Lemma 2; Class B contains the c suﬃxes whose signiﬁcant
+preﬁxes overlap one or more mutations. Class A contains all other suﬃxes.
+Let us ﬁrst consider the case when SA[i] is a class B suﬃx. Class B suﬃxes
+form at most s disjoint regions in texts T k, 2 ≤ k ≤ r. We sample every d-th
+suﬃx inside each of these regions. The suﬃx array indexes containing these sampled 
+suﬃxes are marked in a bit-vector E[1, N], and a table SB[1, rank1(E, N)]
+stores these sampled suﬃxes in the order they appear in SA. Retrieving SA[i]
+is completely analogous to the standard sampling scheme by using SB in place
+of S and E in place of B. The space is bounded by O((c/d) log N), which is
+O(((s logσ N)/d) log N) in the average case.
+
+Computing SA[i] for class A suﬃxes is more challenging than in the case
+of r identical texts, when all suﬃxes were class A. The problem can be divided 
+into the following subproblems: (i) Not all sampled suﬃxes of T 1 will
+have counterparts in all the other texts. Hence, we need to store explicitly a list
+Q[rank1(B, SA−1[i · d])] = k1k2 ··· kp denoting texts T k1, T k2, . . . , T kp, p ≤ r,
+that correspond to a sampled suﬃx T 1
+i·d,n. However, this takes too much space.
+(ii) Class B suﬃxes break the order of the suﬃxes aligned to the same sampled
+T 1 suﬃx, making it diﬃcult to know, once at SA[j], whether there is a sampled
+suﬃx of T 1 at some close enough position SA[j(cid:3)].
+
+Let us consider subproblem (ii) ﬁrst. A solution is to explicitly mark all class B
+suﬃxes in SA into a bit-vector F [1, N], and to store for each sampled suﬃx T 1
+i·d,n
+its lexicographic rank e among the suﬃxes in the list Q[rank1(B, SA−1[i· d])] =
+k1k2 ··· kp, that is, e such that ke = 1. Now, consider again the situation where
+SA[i] belongs to class A and LF mapping has brought us to entry SA[j]. Let
+us compute prev = select1(B, rank1(B, j)), succ = select1(B, rank1(B, j) + 1),
+dprev = (j − prev) − (rank1(F, j) − rank1(F, prev)), and dsucc = (succ − j) −
+(rank1(F, succ) − rank1(F, j)). Let Q[rank1(B, prev)] = k1k2 ··· kp and e be
+
+Storage and Retrieval of Individual Genomes
+
+129
+
+k
+
+1
+
+pt
+
+k
+
+pt
+
+such that ke = 1. If dprev ≤ p − e then ke+dprev is the number of the text
+where suﬃx SA[j] belongs to. This follows from the fact that the eﬀect of class
+B suﬃxes is eliminated using rank, so it remains to calculate how many class
+A suﬃxes there are between the sampled suﬃx and current position. If this
+number is smaller than (or equal to the) the number of suﬃxes with rank higher
+than that of SA[prev] in the list Q[rank1(B, prev)], then (and only then) SA[j]
+belongs to the same list. Analogously, one can check whether SA[j] belongs to
+the list Q[rank1(B, succ)] = k1k2 ··· kp(cid:2) of SA[succ]. After at most d steps of LF -
+mapping the correct Q-list is found. The additional space needed is O(c log N−n
+)
+bits for the BSD of bit vector F .
+
+Finally, we are left with subproblem (i): the lists Q[1], Q[2], . . . , Q[n/d] occupy
+in total O((n/d)r log r) bits. We will next improve the space to O(s log s) bits
+modifying a classical solution by Overmars [16] to kth element/rank searching in
+the past. The original structure is reviewed in Theorem 1 and then Theorem 2
+improves the space and makes the structure conﬂuental persistent (see [11] for
+background).
+
+c
+
+et
+2
+
+··· et
+
+k−1 and etprev
+
+or inserting a new element e ∈ R between some etprev
+or after etprev
+
+∈ R∗ = {1, 2, . . . , r}∗ be a sequence of
+Deﬁnition 4. Let E(t) = et
+elements at time point t ∈ H, where H ⊆ H = {1, 2, . . . , h}, such that E(t)
+1
+can be constructed from E(tprev), tprev = max{t(cid:3) ∈ H | t(cid:3) < t}, by deleting
+some etprev
+(or
+before etprev
+). The persistent selection problem is to construct a
+static data structure D on {E(t)|t ∈ H} that supports operation select(t, k) = et
+k.
+The online persistent selection problem is to maintain D such that it supports
+insert(t, e, k) and delete(t, k), where value t must be at least max(H). The conﬂuental 
+persistent selection problem allows value t to be any t ∈ H also for
+insertions and deletions.
+Theorem 1 ([16]). There is a data structure D for the online persistent selection 
+problem occupying O(x(log x log h + log r)) bits of space and supporting
+select(t, k) in O(log x) time, and insert(t, e, k) and delete(t, k) in amortized
+O(log x) time, where x is the number of insertion and deletion operations executed 
+during the lifetime of D.
+Proof. (Sketch) The structure D is a variant of balanced binary tree that stores
+subtree sizes in its internal nodes, enhanced with path copying and fractional
+cascading to support persistence: Consider a tree T (t) for storing elements of
+E(t) in its leaves and having subtree sizes stored in its internal nodes. Selecting
+the k-th leaf equals accessing et
+k. It is easy to ﬁnd that leaf by following the
+path from the root and comparing k with the sum of subtree sizes of nodes that
+remain hanging left side of the path; if at node v the current sum plus subtree
+size of the left child of v is smaller than k, go right, otherwise go left. Now,
+consider an insertion to produce E(t) from E(tprev). To produce T (t) one can
+add a new leaf to T (tprev) and increment the subtree sizes by one on the path
+to the new leaf. To make this change persistent, the idea in [16] is to copy the old
+subtree size information into a new ﬁeld on each node on the path and increment
+that. The ﬁeld is labeled with the time t and also pointers are associated to the
+
+130
+
+V. M¨akinen et al.
+
+corresponding ﬁelds on the left and right child of the node, respectively. Here
+corresponding means a ﬁeld whose time-stamp is largest t(cid:3) such that t(cid:3) ≤ t.
+Analogous procedure is executed for deletions, except that the corresponding leaf
+is not deleted, but only the subtree sizes are updated accordingly. This procedure
+is repeated over all time points and the tree is rebalanced when necessary. The
+rotations to rebalance the tree require merging the lists of ﬁelds storing the timestamped 
+information. The cost of rebalancing can be amortized over insertions
+and deletions [16]. The root of the tree stores the time-stamped list as a binary
+search tree to provide O(log x) time access to the entries. The required space for
+the tree itself is O(x log x log h) bits as each of the x updates creates a new ﬁeld
+occupying O(log h) bits for each of the O(log x) nodes on the path from root to
+the leaf. In addition, each leaf contains a value of size log r bits.
+Theorem 2. There is a data structure D for the persistent selection problem
+occupying O(x(log x + log h + log r)) bits of space and supporting select(t, k) in
+O(log x) time, where x is the number of insertions and deletions to construct D.
+There is also an online/conﬂuental version of D that occupies the same space, but
+select(t, k) takes O(log2 x) time, and insert(t, e, k) and delete(t, k) take amortized 
+O(log2 x) time.
+
+1
+
+2
+
+(cid:2)i
+
+sv
+1
+
+sv
+2
+
+0)(sv
+
+− sv
+
+− sv
+
+j = sv
+
+j=1 ˆsv
+
+kv − sv
+
+1)··· (sv
+
+,··· sv
+0 = 0. Let ˆSv = (sv
+
+Proof. We modify the structure of Theorem 1 by replacing the time-stamped
+lists of ﬁelds in each node of the tree with two partial sums that can be represented 
+succinctly. Let Sv = sv
+kv be the list of subtree sizes stored in
+0
+some node v, where sv
+kv−1). We
+represent ˆSv via succinct data structure for (dynamic) partial sums to support
+operations select( ˆSv, i) =
+i . In addition, we construct a bit-vector
+Bv[1, kv] where Bv[i] = 1 if and only if the change sv
+i came from the right child
+of v. Notice that we do not need the explicit fractional cascading links anymore,
+ as we have the connection select( ˆSv, i) = select( ˆSl, i − i(cid:3)) + select( ˆSr, i(cid:3)),
+where i(cid:3) = rank1(Bv, i), and l and r are the left and right children of v. That
+is, select( ˆSl, i − i(cid:3)) and select( ˆSl, i(cid:3)) are the subtree sizes of nodes l and r, respectively,
+ at the same time point as sv
+i . In the root of the tree we keep the
+original binary search tree to map the parameter t to its rank i and after that
+the formulas above can be used to compare subtree sizes to value of parameter
+k. Notice also that conﬂuental insert and delete are immediately provided if we
+can support dynamic select on ˆSv and dynamic rank on Bv.
+(cid:2)
+
+(cid:2)kv
+
+j=1 ˆsv
+
+Let us consider how to provide select( ˆSv, i) = sv
+v∈T
+
+i . First we observe that
+j = O(x log x) because each insertion or deletion changes the subtree 
+size by one on O(log x) nodes. Hence, we can aﬀord to use unary coding for
+these values. We represent each ˆSv by a bit-vector F v = f(ˆsv
+kv),
+where f(x) = 1x if x > 0 otherwise f(x) = 0−x, and by a bit-vector G =
+kv )|−1. Then select( ˆSv, i) equals 2 · rank1(F v, j −
+10|f (ˆsv
+1)− (j − 1), where j = select1(Gv, i + 1). That is,
+v∈T (|F v| +|G|)(1 + o(1)) =
+O(x log x) bits is enough to support constant time select on all subtree sizes,
+when the tree is static. In the dynamic case, select takes O(log x) time [1]. Same
+analysis holds for bit-vectors Bv.
+
+2 )|−1 ··· 10|f (ˆsv
+
+2)··· f(ˆsv
+
+1)|−110|f (ˆsv
+
+1)f(ˆsv
+
+(cid:2)
+
+Storage and Retrieval of Individual Genomes
+
+131
+
+In summary, the tree in the root takes O(x log h) bits, and support rank for
+t in O(log x) time. The bit-vectors in the main tree occupy O(x log x) bits and
+make a slowdown of O(1) or O(log x) per node depending on the case. The
+associated values in the leaves occupy O(x log r) bits.
+
+Combining Lemma 4 and RLFM+ structure of Sect. 2.2 with Theorem 2 applied
+to sampling gives us the main result of the paper:
+Theorem 3. Given a collection C and a concatenated sequence T of all the r
+sequences T i ∈ C, there is a data structure for the repetitive collection indexing
+problem taking
+
+N
+R )(1 + o(1)) + O
+
+(cid:4)
+
+(cid:3)
+
+R log log
+
+(cid:4)
+
+N
+R
+
+(R log σ + 2R log
+
+(cid:3)
+
++O
+
+s logσ N log
+
+N
+
+s logσ N
+
++ O(s log s) + O(r log N)
+
++O(((s logσ N)/d) log N) + O((n/d) log n)
+
+bits of space in the average case. The structure supports count(P ) in time
+O(|P|tLF), locate(P ) in time of count(P ) plus O(d(tLF + tSA) + log s) per occurrence,
+ display(k, i, j) in time O((d + j − i)(tLF + tSA)), computing SA[i] and
+SA−1[(k, j)] in time tSA = O(d(tLF + tSA)+log s), and T (SA[i]) in time O(log σ),
+where tLF = O(log R) and tSA = O(log d).
+
+N
+
+Proof. (Sketch) The discussion preceding persistent selection developed data
+structures occupying O(s logσ N log
+s logσ N ) + O(((s logσ N)/d) log N) bits to
+support parts of the remaining locate() operation. These are larger than the
+ones for display(). Theorem 2 provides a solution to subproblem (i): we can
+replace the lists Q[1], Q[2], . . . , Q[n/d] by persistent select, where the s mutations
+cause insertions and deletions to the structure (as they change the rank of a
+text between two samples, see Fig. 2 for an example). There will be s such
+updates, and on any given position i of the text T 1 (including those that are
+sampled) one can select the k-th text aligned to that suﬃx in O(log s) time. The
+space usage of this persistent structure is O(s log s) bits. Computation of SA[i] is
+identical to locate(), but computation of SA−1[(k, j)] needs some interplay with
+the structures of Theorem 2, considered next.
+j belongs to an area where a sampled position is at distance
+d, computation of SA−1[(k, j)] resembles the display operation. Otherwise one
+must follow the closest sampled position after t1
+j to suﬃx array, and use at
+most d times the LF -mapping to ﬁnd out SA−1[(1, j)]. Now, to ﬁnd the rank
+of text T k with respect to that of text T 1 in the persistent tree of Theorem 2
+storing the lexicographic order of suﬃxes aligned to position j, one can do the
+following. Whenever a new leaf is added to the persistent tree, associate to that
+text position a pointer to this leaf. These pointers can be stored in O(s log s)
+bits and their locations can be marked using s log N
+s (1 + o(1)) space, so that one
+can ﬁnd the closest location to (k, j) having a pointer, using rank in tSA time.
+
+In the case tk
+
+132
+
+V. M¨akinen et al.
+
+Fig. 2. Persistent selection and changes in the lexicographic order of sampled suﬃxes.
+Text T 1 has been sampled regularly and the pointers to the sampled suﬃxes are stored
+with respect to the BWT sequence. Each such pointer is associated a range containing
+the occurrences of the same signiﬁcant preﬁx in the mutated copies of T 1. The relative
+lexicographic order of these aligned suﬃxes (shown below the sampled positions) change
+only when there is a mutation eﬀect zone between the sampled positions; when an eﬀect
+zone starts, the corresponding text is removed from the list, and when it ends (with
+the mutation), the text is inserted to the list with a new relative lexicographic order.
+
+Following this pointer to the persistent tree leaf, and continuing to the root of
+the tree (and back), one can compute the rank of the leaf (text T k) in O(log s)
+time. Computing the rank of (1, j) is analogous. By comparing these two ranks,
+one can ﬁnd the correct index in the vicinity of SA−1[(1, j)] making a select()
+operation on the bit-vector F used for locate() operation. The overall time is
+the same as for computing SA[i]. Finally, with a gap-encoded bit vectors storing
+tables C and CB, the operation T [SA[i]] works in AT (N, σ) time.
+
+The conﬂuental version of Theorem 2 can be used to handle dynamic samples.
+The result can be used to derive new compressed suﬃx trees: The entropybounded 
+compressed suﬃx tree of Fischer et al. [6] uses an encoding of LCP -
+values (lengths of longest common preﬁxes of SA[i] and SA[i + 1]) that consists
+of two bit-vectors of length N, each containing R bits set. In addition, only
+o(N) bit structures and normal suﬃx array operations are used for supporting
+an extended set of suﬃx tree operations. We can now use Theorem 3 to support
+suﬃx array functionality and BSD representation [8] to store LCP -values in
+(cid:6)
+2R log N
+)+o(N)
+bits to the structure of Theorem 3, one can support all the suﬃx tree operations
+listed in [6] in O(polylog(N)) time.4
+
+(cid:6)
+) bits. Thus, adding 2R log N
+
+(cid:5)
+R log log N
+R
+
+R +O
+
+(cid:5)
+R log log N
+R
+
+R +O
+
+4 We remark that the solution is not quite satisfactory, as in o(N ) space one can
+aﬀord to use the standard suﬃx array sampling as well. Converting o(N ) to o(n) is
+an open problem, and it seems to be common to all diﬀerent compressed suﬃx tree
+approaches.
+
+Storage and Retrieval of Individual Genomes
+
+133
+
+Table 1. Base structure sizes and times for count() and display() for various selfindexes 
+on a collection of genomes of multiple strains of Saccharomyces paradoxus (36
+sequences, 409 MB). The genomes were obtained from the Durbin Research Group
+at the Sanger Institute (http://www.sanger.ac.uk/Teams/Team71/durbin/sgrp/). Ψ
+sampling rate was set to 128 in CSA and to 32 bytes in RLCSA. Reported times are
+in microseconds / character.
+
+Index
+CSA
+SSA
+RLFM
+RLCSA
+RLWT
+RLFM+
+
+Size (MB)
+95.51
+121.70
+146.40
+42.78
+34.67
+54.77
+
+count()
+2.86
+0.48
+1.21
+1.93
+17.30
+3.03
+
+display()
+0.41
+0.40
+1.38
+0.77
+10.24
+2.10
+
+3 Implementation and Experiments
+
+So far we have considered only point mutations on DNA, although there are
+many other types of mutations, like insertions, deletions, translocations, and
+reversals. The runs in the Burrows-Wheeler transform change only for those
+suﬃxes whose lexicographic order is aﬀected by a mutation. In all mutation
+types (except in reversals) the eﬀect to the lexicographic order of suﬃxes is
+similar to point mutations, so the expected case bounds limiting the length
+of signiﬁcant preﬁxes extend easily to the real variation occurring in genomes.
+Reverse complementation is easy to take into account as well, by adding the
+reverse complement of the base sequence to the collection.
+
+The base structures (e.g. RLFM+ index) for counting queries are universal
+in the sense that they do not need to know what and where the mutations are.
+Standard sampling techniques can be used to add reasonably eﬃcient support
+for locating and displaying, as shown in Table 1 and Fig. 3. Compressed Suﬃx
+Array (CSA) [20], Succinct Suﬃx Array (SSA) [12,5], and Run-Length FM-index
+(RLFM) [12] are existing indexes similar to our RLCSA, RLWT, and RLFM+,
+respectively.
+
+The experiments were performed on a 2.66 GHz Intel Core 2 Duo system with
+3 GB of RAM running Fedora Core 8 based Linux. Counting and locating times
+are averages over 1000 patterns of length 10. Displaying a substring of length l
+requires the extraction of d/2 + l characters on the average.
+
+RLWT and RLFM+ currently store the suﬃx array samples in a more space
+eﬃcient manner than RLCSA. By using the same method for all three indexes,
+the size diﬀerences between them would be determined only by the sizes of base
+structures for counting. On the other hand, locate() in RLCSA and RLWT
+has been optimized for retrieving multiple occurrences in parallel. As the base
+structures are run-length encoded, we can perform the base step (LF -mapping
+in RLWT) for an entire run for roughly the same cost as for a single occurrence.
+If similar optimizations were implemented in RLFM+, its locating speed would
+be close to that of RLCSA.
+
+134
+
+V. M¨akinen et al.
+
+)
+s
+μ
+(
+ 
+e
+m
+T
+
+i
+
+0
+0
+2
+
+0
+5
+1
+
+0
+0
+1
+
+0
+5
+
+0
+
+CSA
+SSA
+RLFM
+RLCSA
+RLWT
+RLFM+
+
+0
+
+50
+
+100
+
+150
+
+200
+
+250
+
+300
+
+350
+
+Size (MB)
+
+Fig. 3. Sizes and times for locate() for self-indexes on the S paradoxus collection.
+Each index was tested with sampling rates d = 32, 128, and 512. Reported times are
+in microseconds / occurrence.
+
+The new structures for display() and locate() require the alignment of each
+sequence with the base sequence to be given; for succinctness we considered the
+easy case of identical length sequences and point mutations (where the alignment
+is trivial to compute). The structures are easy to extend to more general alignments.
+ Our current implementation supports alignments with gaps (i.e. runs of
+Ns) as well as insertions and deletions in addition to substitutions.
+
+The interesting question is at which mutation rates the persistent selection
+approach will become competitive with the standard sampling approach. With
+the mutation rates occurring in yeast collection of Fig. 3, the persistent selection
+approach does not seem to be a good choice; it occupied 8.49 MB on the 36 strains
+
+The main component required is the static structure supporting persistent
+selection. For its construction, we implemented also the dynamic structure supporting 
+online persistent selection (with minor modiﬁcations it would support
+conﬂuental persistent selection as well). Once it is constructed for the given
+alignment, it is converted into a static structure. The static structure is in fact
+more space-eﬃcient than the one described in Theorem 2, as we discard completely 
+the tree structure and instead concatenate levelwise the two bitvectors
+stored at the nodes of the tree; a third bitvector is added marking the leaves,
+which enables us to navigate in the tree whose nodes are now represented as
+ranges. The time-to-rank mapping in the root of the persistent tree can be
+stored space-eﬃciently using the BSD representation. The space requirement
+is 6x log x(1 + o(1)) + x log h
+x ) + x log r bits, where
+6x log x(1 + o(1)) comes from the 3 bitvectors of length x supporting rank
+and select on each of the at most 2 log x levels of the red-black balanced tree,
+x log h
+x ) comes from the BSD representation, and x log r
+from the values stored at leaves.
+
+x (1 + o(1)) + O(x log log h
+
+x (1 + o(1))+ O(x log log h
+
+Storage and Retrieval of Individual Genomes
+
+135
+
+Table 2. Standard sampling versus persistent selection. The rows give the size of the
+base structure (RLWT), size of suﬃx array samples, size of display structures, size of
+persistent selection structure including bookkeeping of zones, and the total size.
+
+Approach/Size
+Base (MB)
+Samples (MB)
+Display (MB)
+Persistent (MB)
+Total size (MB)
+
+Mutation rate 0.001
+Standard
+4.06
+1.24
+
+Persistent
+4.06
+0.28
+0.32
+3.22
+7.89
+
+Mutation rate 0.0001
+Standard
+2.19
+1.02
+
+Persistent
+2.19
+0.25
+0.07
+0.31
+2.82
+
+5.30
+
+3.21
+
+of S paradoxus chromosome 2 (28.67 MB), while RLWT with standard sampling
+approach occupied 3.97 MB.5 The sampling parameters were chosen so that
+both approaches obtained similar time eﬃciency (403 versus 320 microseconds
+for one locate, respectively). To empirically explore the turning point where
+the persistent selection approach becomes competitive, we generated a DNA
+sequence collection with 100 copies of a 1 MB reference sequence and applied
+diﬀerent amount of random mutations on it. Table 2 illustrates the turning point
+by giving the space requirements for RLWT+sampling versus RLWT+persistent
+selection on two diﬀerent mutation rates, where their order changes. We used
+sampling rate d = 512 for standard sampling, and d = 64 (d = 32) for persistent
+selection approach on mutation rate 0.001 (on mutation rate 0.0001). This made
+the running times reasonably close; for example, one locate took 172 versus 184
+microseconds on 0.0001 mutation rate, respectively.
+
+4 Conclusions
+
+We have studied the problem of representing highly repetitive sequences in such
+a way that their repetitiveness is exploited to achieve little space, yet at the
+same time any part of the sequences can be extracted and searched without
+decompressing it. This problem is becoming crucial in Computational Biology,
+due to the cheaper and cheaper availability of sequence data and the interest in
+analyzing it.
+
+We have shown that the current compressed text indexing technology is not
+well suited to cope with this problem, and have devised variants that have shown
+to be much more successful.
+
+In the full paper we will show how to allow for dynamism, that is, permitting
+to handle a compressed collection where insertion and deletion of sequences
+can be eﬃciently intermixed with searches. We achieve the same space bounds,
+whereas the time requirements are multiplied roughly by a logarithmic factor.
+An important challenge for future work is to look for schemes achieving further
+compression. For example, LZ77 algorithm is an excellent candidate to compress
+
+5 We observed that the given multiple alignments were not the best possible; the size
+
+would be reduced signiﬁcantly by the choice of better consensus sequences.
+
+136
+
+V. M¨akinen et al.
+
+repetitive collections, achieving space proportional to the number of mutations.
+For example, the 409 MB collection of Saccharomyces paradoxus strains studied
+here can be compressed into 4.93 MB using an eﬃcient LZ77 implementation6.
+This is over 7 times less space than what the new self-indexes studied in this
+paper achieve. Yet, LZ77 has deﬁed for years its adaptation to a self-index form.
+Thus there is a wide margin of opportunity for such a development.
+
+Acknowledgments
+
+We wish to thank Teemu Kivioja from Institute of Biomedicine, University of
+Helsinki, for turning our attention to the challenges of individual genomes. We
+wish also to thank Kimmo Palin from Sanger Institute, Hinxton, for pointing us
+the yeast genome collection.
+
+References
+
+1. Blanford, D., Blelloch, G.: Compact representations of ordered sets. In: Proc. 15th
+
+SODA, pp. 11–19 (2004)
+
+2. Burrows, M., Wheeler, D.: A block sorting lossless data compression algorithm.
+
+Technical Report Technical Report 124, Digital Equipment Corporation (1994)
+
+3. Church, G.M.: Genomes for all. Scientiﬁc American 294(1), 47–54 (2006)
+4. Ferragina, P., Manzini, G.: Indexing compressed texts. Journal of the ACM 52(4),
+
+552–581 (2005)
+
+5. Ferragina, P., Manzini, G., M¨akinen, V., Navarro, G.: Compressed representations
+of sequences and full-text indexes. ACM Transactions on Algorithms (TALG) 3(2)
+article 20 (2007)
+
+6. Fischer, J., M¨akinen, V., Navarro, G.: An(other) entropy-bounded compressed sufﬁx 
+tree. In: Ferragina, P., Landau, G.M. (eds.) CPM 2008. LNCS, vol. 5029, pp.
+152–165. Springer, Heidelberg (2008)
+
+7. Grossi, R., Vitter, J.: Compressed suﬃx arrays and suﬃx trees with applications
+to text indexing and string matching. SIAM Journal on Computing 35(2), 378–407
+(2006)
+
+8. Gupta, A., Hon, W.-K., Shah, R., Vitter, J.S.: Compressed data structures: Dictionaries 
+and data-aware measures. In: DCC 2006: Proceedings of the Data Compression 
+Conference (DCC 2006), pp. 213–222 (2006)
+
+9. Gusﬁeld, D.: Algorithms on Strings, Trees and Sequences: Computer Science and
+
+Computational Biology. Cambridge University Press, Cambridge (1997)
+
+10. Hall, N.: Advanced sequencing technologies and their wider impact in microbiology.
+
+The Journal of Experimental Biology 209, 1518–1525 (2007)
+
+11. Kaplan, H.: Persistent Data Structures. In: Mehta, D.P., Sahni, S. (eds.) Handbook
+of Data Structures and Applications, vol. 31. Chapman & Hall, Boca Raton (2005)
+12. M¨akinen, V., Navarro, G.: Succinct suﬃx arrays based on run-length encoding.
+
+Nordic Journal of Computing 12(1), 40–66 (2005)
+
+13. Manber, U., Myers, G.: Suﬃx arrays: a new method for on-line string searches.
+
+SIAM J. Comput. 22(5), 935–948 (1993)
+
+6 http://p7zip.sourceforge.net/
+
+Storage and Retrieval of Individual Genomes
+
+137
+
+14. Manzini, G.: An analysis of the Burrows-Wheeler transform. Journal of the
+
+ACM 48(3), 407–430 (2001)
+
+15. Navarro, G., M¨akinen, V.: Compressed full-text indexes. ACM Computing Surveys 
+39(1) article 2 (2007)
+
+16. Overmars, M.H.: Searching in the past, i. Technical Report Technical Report RUU-
+CS-81-7, Department of Computer Science, University of Utrecht, Utrecht, Netherlands 
+(1981)
+
+17. Pennisi, E.: Breakthrough of the year: Human genetic variation. Science 21, 1842–
+
+1843 (2007)
+
+18. Russo, L., Navarro, G., Oliveira, A.: Dynamic fully-compressed suﬃx trees. In:
+Ferragina, P., Landau, G.M. (eds.) CPM 2008. LNCS, vol. 5029, pp. 191–203.
+Springer, Heidelberg (2008)
+
+19. Russo, L., Navarro, G., Oliveira, A.: Fully-compressed suﬃx trees. In: Laber, E.S.,
+Bornstein, C., Nogueira, L.T., Faria, L. (eds.) LATIN 2008. LNCS, vol. 4957, pp.
+362–373. Springer, Heidelberg (2008)
+
+20. Sadakane, K.: New text indexing functionalities of the compressed suﬃx arrays.
+
+Journal of Algorithms 48(2), 294–313 (2003)
+
+21. Sadakane, K.: Compressed suﬃx trees with full functionality. Theory of Computing
+
+Systems 41(4), 589–607 (2007)
+
+22. Sir´en, J., V¨alim¨aki, N., M¨akinen, V., Navarro, G.: Run-length compressed indexes
+are superior for highly repetitive sequence collections. In: Amir, A., Turpin, A.,
+Moﬀat, A. (eds.) SPIRE 2008. LNCS, vol. 5280, pp. 164–175. Springer, Heidelberg
+(2008)
+
+23. Waterman, M.S.: Introduction to Computational Biology. Chapman & Hall, University 
+Press (1995)
+
+

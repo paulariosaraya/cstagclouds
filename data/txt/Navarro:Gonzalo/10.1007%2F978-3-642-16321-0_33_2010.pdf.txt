@@ -1,0 +1,775 @@
+Dual-Sorted Inverted Lists(cid:2)
+
+Gonzalo Navarro1 and Simon J. Puglisi2
+
+1 Department of Computer Science, University of Chile, Santiago, Chile
+
+2 School of Comp. Sci. & Inf. Tech., Royal Melbourne Institute of Technology,
+
+gnavarro@dcc.uchile.cl
+
+Melbourne, Australia
+
+simon.puglisi@rmit.edu.au
+
+Abstract. Several IR tasks rely, to achieve high eﬃciency, on a single
+pervasive data structure called the inverted index. This is a mapping
+from the terms in a text collection to the documents where they appear,
+plus some supplementary data. Diﬀerent orderings in the list of documents 
+associated to a term, and diﬀerent supplementary data, ﬁt widely
+diﬀerent IR tasks. Index designers have to choose the right order for one
+such task, rendering the index diﬃcult to use for others.
+
+In this paper we introduce a general technique, based on wavelet trees,
+to maintain a single data structure that oﬀers the combined functionality 
+of two independent orderings for an inverted index, with competitive
+eﬃciency and within the space of one compressed inverted index. We
+show in particular that the technique allows combining an ordering by
+decreasing term frequency (useful for ranked document retrieval) with an
+ordering by increasing document identiﬁer (useful for phrase and Boolean
+queries). We show that we can support not only the primitives required
+by the diﬀerent search paradigms (e.g., in order to implement any intersection 
+algorithm on top of our data structure), but also that the data
+structure oﬀers novel ways of carrying out many operations of interest,
+including space-free treatment of stemming and hierarchical documents.
+
+1 Introduction
+
+The last decade has been witness to tremendous progress in the ﬁeld of compact
+data strucutres. These data structures mimic the operations of their classical
+counterparts within much less space and sometimes, surprisingly, oﬀer much
+wider functionality. Recently, several authors have brought compact data structures 
+to bear on problems in Information Retrieval (IR), in particular ranked
+document retrieval [14,20]. Although quite diﬀerent in their details, the common
+vision of these works is to use breakthroughs in compressed pattern matching as
+an eﬃcient algorithmic base on which the more sophisticated operations required
+by IR systems can be built. Our work in this invited paper is complementary to
+these eﬀorts, applying compact data structures to gain a new perspective on a
+tool already widely adopted in IR: the inverted index.
+(cid:2) Funded in part by Fondecyt Grant 1-080019, Chile (ﬁrst author) and by the Australian 
+Research Council (second author).
+
+E. Chavez and S. Lonardi (Eds.): SPIRE 2010, LNCS 6393, pp. 309–321, 2010.
+c(cid:2) Springer-Verlag Berlin Heidelberg 2010
+
+310
+
+G. Navarro and S.J. Puglisi
+
+Inverted indexes are an old and simple data structure, yet one of the most
+successful in IR. They play a central role in any book on the topic [6,31,12,22,11],
+and are also at the heart of most modern Web search engines.
+
+Given a text collection regarded as a set of documents, an inverted index is
+an array of lists. Each array entry corresponds to a diﬀerent word or term of
+the collection, and its list points to the documents where that word appears in
+the text collection. The set of diﬀerent words is called the vocabulary. Empirical
+laws well accepted in IR [19] establish that the vocabulary is much smaller than
+the collection size n, more precisely of size O(nβ), for some constant 0 < β < 1
+that depends on the text type.
+
+Two main variants of inverted indexes exist [5,35]. Ranked retrieval is aimed
+at retrieving documents which are “relevant” to a query, under some criterion.
+Documents are regarded as vectors, where terms are the dimensions, and the
+values of the vectors correspond to the relevance of the terms in the documents.
+The lists point to the documents where each term appears, storing also the
+weight of the term in that document (i.e., the coordinate value). The query is
+seen as a set of words, so that retrieval consists of processing the lists of the query
+words and ﬁnding the documents which, considering the weights the query terms
+have in the document, are predicted to be relevant. Query processing usually
+involves somehow merging the involved lists, so that documents can be assigned
+the combined weights over the diﬀerent terms. Algorithms and diﬀerent data
+organizations for this type of query have been intensively studied [25,31,35,3,30].
+List entries are usually sorted into order of descending weight of the term in the
+documents.
+
+The second variant is the inverted index for so-called full-text retrieval (also
+known as boolean retrieval). These simply ﬁnd all the documents where the query
+terms appear. The lists point to the documents where each term appears, usually
+in increasing document order. Queries can be single words, in which case the
+retrieval consists simply of fetching the list of the word; or disjunctive queries,
+where one has to fetch the lists of all the query words and merge the sorted lists;
+or conjunctive queries, where one has to intersect the lists. While intersection
+can be done also by scanning all the lists in synchronization, it is usually the case
+that some lists are much shorter than the others [34], and so faster intersection
+algorithms are possible. These algorithms are especially relevant when many
+words have to be intersected.
+
+Intersection queries have become extremely popular as Google-like default
+policies to handle multiword queries. Another important query where intersection 
+is essential is the phrase query, where intersecting the documents where the
+words appear is the ﬁrst step. The amount of recent research on intersection of
+inverted lists witnesses the importance of the problem [15,8,4,7,27,28,13,9]. In
+particular, in-memory algorithms have received much attention recently, as large
+main memories and distributed systems make it feasible to hold the inverted index 
+entirely in RAM.
+
+Needless to say, space is an issue in inverted indexes, especially when combined 
+with the goal of operating in main memory. Much research has been carried
+
+Dual-Sorted Inverted Lists
+
+311
+
+out on compressing inverted lists [31,24,35,13], and on the interaction of various
+compressed representation with diﬀerent query algorithms, including list intersections.
+ Most of the list compression algorithms for full-text indexes rely on the
+fact that the document identiﬁers are increasing, and that the diﬀerences between 
+consecutive entries are smaller on the longer lists. The diﬀerences are thus
+represented with encodings that favor small numbers [31,35]. Random access
+is supported by storing sampled absolute values. For lists sorted by decreasing
+weights, these techniques can still be adapted, by considering that most documents 
+in a list have small weight values, and within the same weight one can
+still sort the documents by increasing identiﬁer.
+
+A problem with the current state of the art is that a serious IR system must
+support both types of retrieval: ranked and full-text. Yet, to maintain reasonable
+space eﬃciency, the list must be ordered either by decreasing weights or by
+increasing document number, but not both. Hence one type of search will be
+signiﬁcantly slower than the other, if aﬀordable at all.
+
+In this paper we introduce a data structure that permits, within the same
+space required for a single compressed inverted index, retrieving the list of documents 
+for any term in either decreasing-weight or increasing-identiﬁer order,
+thus supporting both types of retrieval. Moreover, we can eﬃciently support the
+operations needed to implement any of the intersection algorithms, namely: retrieve 
+the i-th element of a list, retrieve the ﬁrst element larger than x, retrieve
+the next element, and several more complex ones. In addition, our structure
+oﬀers novel ways of carrying out several operations of interest. These include,
+among others, the support for stemming and for structured document retrieval
+without any extra space cost. Indeed, the data structure can be generalized to
+support a combination of any two orderings, not only the two most popular ones.
+
+2 Related Work
+
+2.1 Intersection Algorithms for Inverted Lists
+
+The intersection of two inverted lists can be done in a merge-wise fashion (which
+is the best choice if both lists are of similar length), or using a set-versus-set (svs)
+approach where the longer list is searched for each of the elements of the shortest,
+to check if they should appear in the result. Either binary or exponential (also
+called galloping or doubling) search are typically used for svs. The latter checks
+the list at positions i + 2j for increasing j, to ﬁnd an element known to be after
+position i (but probably close).
+
+Algorithm bys [7] is based on binary searching the longer list N for the median
+of the smallest list M. If the median is found, it is added to the result set. Then
+the algorithm proceeds recursively on the left and right parts of each list. At each
+new step the longest sublist is searched for the median of the shortest sublist.
+It has been shown that bys performs about the same number of comparisons as
+svs with binary search. As expected, both svs and bys improve upon the merge
+algorithm when |N| >> |M| (actually from |N| ≈ 20|M|).
+
+312
+
+G. Navarro and S.J. Puglisi
+
+Multiple lists can be intersected using any pairwise svs approach (iteratively
+intersecting the two shortest lists, and then intersecting the result against the
+next shortest one, and so on). Other algorithms are based on choosing the ﬁrst
+element of the smallest list as an eliminator that is searched for in the other lists
+(usually keeping track of the position where the search ended). If the eliminator
+is found, it becomes a part of the result. In any case, a new eliminator is chosen.
+Barbay et al. [9] compared four multi-set intersection algorithms: i) a pairwise
+svs-based algorithm; ii) an eliminator-based algorithm [8] (called sequential) that
+chooses the eliminator cyclically among all the lists and exponentially searches
+for it; iii) a multi-set version of bys; and iv) a hybrid algorithm (called small-
+adaptive) based on svs and on the so-called adaptive algorithm [15], which at each
+step recomputes the list ordering according to the elements not yet processed,
+chooses the eliminator from the shortest list, and tries the others in order. In
+their experimental results [9] the simplest pairwise svs-based approach (coupled
+with exponential search) performed best.
+
+2.2 Data Structures for Inverted Lists
+
+The previous algorithms require that lists can be accessed at any given element
+(for example those using binary or exponential search) and/or that, given a
+value, its smallest successor from a list can be obtained. Those needs interact
+with the methods employed for inverted list compression.
+The compression of inverted lists usually represents each list (cid:3)p1, p2, p3, . . . , p(cid:3)(cid:4)
+as a sequence of d-gaps (cid:3)p1, p2 − p1, p3 − p2, . . . , p(cid:3) − p(cid:3)−1(cid:4), and uses a variablelength 
+encoding for these diﬀerences, for example γ-codes, δ-codes or Golomb
+codes [31]. More recent proposals use byte-aligned [29,10,13] or word-aligned
+[2,33] codes, which lose little compression and are faster at decoding.
+
+Intersection of compressed inverted lists is still possible using a merge-type
+algorithm. However, approaches that require direct access are not possible as
+sequential decoding of the d-gaps values is mandatory. This problem can be
+overcome by sampling the sequence of codes [13,27]. The result is a two-level
+structure composed of a top-level array storing the absolute values of, and pointers 
+to, the sampled values in the sequence, and the encoded sequence itself.
+Assuming 1 ≤ p1 < p2 < . . . < p(cid:3) ≤ u, Culpepper and Moﬀat [13] extract
+a sample every k(cid:3) = k log (cid:5) values1 from the compressed list, where k is a parameter.
+ Each of those samples and its corresponding oﬀset in the compressed
+sequence is stored in the top-level array of pairs (cid:3)value, oﬀset(cid:4) needing (cid:6)log u(cid:7)
+and (cid:6)log((cid:5) log(u/(cid:5)))(cid:7) bits, respectively, while retaining random access to the toplevel 
+array. Accessing the v-th value of the compressed structure implies accessing
+the sample (cid:6)v/k(cid:3)(cid:7) and decoding at most k(cid:3) codes. We call this “(a)-sampling”.
+Results [13] show that intersection using svs coupled with exponential search in
+the samples performs just slightly worse than svs over uncompressed lists.
+
+Sanders and Transier [27], instead of sampling at regular intervals of the list,
+propose sampling regularly at the domain values. We call this a “(b)-sampling”.
+
+1 Our logarithms are in base 2 unless otherwise stated.
+
+Dual-Sorted Inverted Lists
+
+313
+
+The idea is to create buckets of values identiﬁed by their most signiﬁcant bits
+and then build a top-level array of pointers to them. Given a parameter B
+(typically B = 8), and the value k = (cid:6)log(uB/(cid:5))(cid:7), bucket bi stores the values
+xj = pj mod 2k such that (i−1)2k ≤ pj < i 2k. Values xj can also be compressed
+(typically using variable-length encoding of d-gaps). Comparing with the previous 
+approach [13], this structure keeps only pointers in the top-level array, and
+avoids the need of searching it (in sequential, binary, or exponential fashion),
+as (cid:6)pj/2k(cid:7) indicates the bucket where pj appears. In exchange, the blocks are
+of varying length and more values might have to be scanned on average for a
+given number of samples. The authors also keep track of up to where they have
+decompressed a given block in order to avoid repeated decompressions.
+
+2.3 Algorithms for Ranked Retrieval
+
+Persin et al. [25] proposed heuristics to solve ranked retrieval problems without
+scanning all of the lists, and assuming they are sorted by decreasing weight. To
+ﬁx ideas we will assume, as in their work, that the weight is simply the term
+frequency, that is, the number of times the term appears in the document. This
+supports various tf-idf-like formulas, yet other weights that have been proposed
+(for example the so-called impacts [3]) can be acommodated as well.
+(cid:2)
+
+In the tf-idf model, the ﬁnal weight of a document d for a query q is w(d) =
+t∈q tft,d × idft summed over all the query terms t. The query retrieves the
+documents with highest w(d). The term tft,d is the term frequency of t in d,
+whereas idft = log D
+dft , where D is the total number of documents and dft is the
+number of those where t appears. While idft (or dft) is stored in the vocabulary,
+a term’s tft,d values are stored together with each document d in the inverted
+list of each term t, and the documents d are sorted by decreasing tft,d value.
+
+The algorithm retrieves ﬁrst the shortest list (i.e., with highest idft) and
+stores the documents as candidates for the ﬁnal answer. Now the other lists are
+processed in increasing length order. The documents of each list are sought in
+the set of candidates, and their weight accumulated if found; otherwise they are
+inserted as new candidates. There is a threshold for continuing processing each
+list: if the tft,d values fall below it, the list is abandoned (see Ahn et al. [1] and
+references therein). There is also a stricter threshold for inserting new elements
+as candidates. These heuristic thresholds provide a time/quality tradeoﬀ.
+
+3 Wavelet Trees
+
+Let L[1, N] be a sequence of N symbols, where each symbol is in the range [1, D].
+The wavelet tree of L is a perfect binary tree with D leaves. The leaves are labeled
+left-to-right with the symbols [1, D] in increasing order. For a given internal node
+v of the tree, let Sv be the subsequence of L consisting of only the symbols on the
+leaves in the subtree rooted at v. We store at v a bitvector Bv of |Sv| bits, setting
+Bv[i] = 1 if symbol Sv[i] is appears below the right child of v, and Bv[i] = 0
+otherwise. Note that Sv is not actually stored, only Bv. Finally, each bitvector
+
+314
+
+G. Navarro and S.J. Puglisi
+
+Bv is preprocessed for O(1) rank and select queries [26]: rankb(Bv, i) returns the
+number of occurrences of bit b in Bv[1, i]; and selectb(Bv, i) returns the position
+in Bv of the ith occurence of bit b. As we shall see, this preprocessing allows for
+eﬃcient navigation of the tree when resolving certain range queries on L.
+
+The wavelet tree was originally designed [17] to allow accessing any S[i], as
+well as computing queries rankd(L, i) and selectd(L, i) on L for any value d, all
+in O(log D) time.
+
+4 Our Data Representation
+
+Let D be the total number of documents in the collection and V the number
+of diﬀerent terms. Let Lt[1, dft] be the list of document identiﬁers in which
+term t appears, in decreasing tf order. Let N =
+t dft be the total number of
+occurrences of distinct terms in the documents2, and n =
+t,d tft,d be the total
+length, in words, of the collection. (Thus D ≤ N ≤ min(DV, n).) Finally, let |q|
+be the number of terms in query q.
+
+(cid:2)
+
+(cid:2)
+
+We propose to concatenate all the lists Lt into a unique list L[1, N], and store
+for each term t the starting position st of list Lt within L. The sequence L of
+document identiﬁers is then represented with a wavelet tree.
+
+The tf values themselves are stored in diﬀerential and run-length compressed
+form in a separate sequence. More precisely, we mark the vt diﬀerent tft,d values 
+of each list in a bitmap Tt[1, mt], where mt = maxd tft,d, and the points
+in Lt[1, dft] where value tfd,t changes, in a bitmap Rt[1, dft]. With Tt and Rt
+preprocessed for rank and select queries we can obtain tft,Lt[i] = select1(Tt, vt−
+rank1(Rt, i) + 1).
+
+Finally, the st sequence is represented using a bitmap S[1, N], also preprocessed 
+for rank and select queries. Thus st = select1(S, t), and also rank1(S, i)
+tells the list L[i] belongs to.
+
+The analysis of wavelet trees [17,23] shows that the space occupied by that of L
+≤ N log D, where dtd
+is N H0(L)+o(N log D) bits. Here N H0(L) =
+is the number of distinct terms in document d. The classical diﬀerential encoding
+of inverted ﬁles produces a set of N numbers. If they are sorted by increasing
+≤
+document identiﬁer, these numbers can be represented using
+N log V bits plus lower-order terms, by using Elias δ-encoding. If, however, they
+are sorted by decreasing tf, the analysis is not so clean.
+
+d dtd log N
+dtd
+
+t dft log N
+dft
+
+(cid:2)
+
+(cid:2)
+
+In general the measures are not comparable, yet we remind that our wavelet
+tree representation will oﬀer the combined functionality of both inverted indexes,
+and more.
+
+The other structures are the tf and the st values. The former is encoded
+with Tt and Rt, which are compressible as they have only vt bits set. We use a
+bitmap representation [18, BSGAP, Section 4.3] supporting rank and select in
+time O(log vt) and requiring vt log mt
+vt +
+O(dft log log dft
+vt ) for Rt. This is asymptotically similar to the space needed to
+t dft counts each distinct term once for each document it appears in. This is
+
+vt ) bits for Tt and vt log dft
+
+vt +O(vt log log mt
+
+2 N =
+
+(cid:2)
+
+also the total length of the inverted lists.
+
+Dual-Sorted Inverted Lists
+
+315
+
+represent, in a traditional tf-sorted index, each new tft,d value and the number of
+entries that share it. The st values are represented so that they support constanttime 
+rank and select [26], requiring V log N
+V + O(V ) + o(N) bits, which is less
+than the usual pointers from the vocabulary to the list of each term. In the
+worst case the bitmaps add up to O(N log N
+V ) bits and the time to compute tf
+is O(log D).
+
+Before considering the classical and extended operations that can be carried
+
+out with our data structure, let us raise a couple of issues:
+
+1. Stemming is a useful tool to enhance recall [21,32]. A way to provide it is by
+stemming the terms directly during the parsing, yet in this case the index
+is unable to provide at the same time non-stemmed searching. One can of
+course index the stemmed and non-stemmed occurrence of each term, thus
+increasing the space. We will be able to provide stemmed retrieval without
+any extra space. All we require is that all the variants of the same stemmed
+word be contiguous in the vocabulary (this is in many cases automatic as
+stemmed terms share the same root, or preﬁx).
+
+2. Most IR systems support a ﬂat set of documents, while in XML or ﬁle systems,
+ for example, one has a hierarchy of documents and would like to choose,
+at query time, which level of the hierarchy to use (e.g., to retrieve relevant
+sections, or relevant chapters, or relevant books), or to carry out ranked IR
+on a certain subtree. In a temporal (e.g., news archives) or versioned (e.g.,
+Wikipedia) text collection, one might want to search only a range of documents.
+ Our data structure has also support for some queries of this kind
+without using any extra space.
+
+4.1 Full-Text Retrieval
+
+The full-text index, rather than Lt, requires a list Ft, where the same terms
+are sorted by increasing document identiﬁer. Diﬀerent kinds of access operations
+need to be carried out on Ft. We show now how all these can be carried in
+O(log D) time.
+
+Direct retrieval. First, with our wavelet tree representation of L we can
+ﬁnd any value Ft[i]. This is equivalent to ﬁnding the i-th smallest value in
+L[stt, stt+1 − 1]. The algorithm, for a general range L[l, r], is as follows [16].
+Let v be the root of the wavelet tree and Bv its bitmap. We count with n1 =
+rank1(Bv, r) − rank1(Bv, l − 1) the number of 1s in Bv[l, r], and with n0 =
+(r−l+1)−n1 the number of 0s. If i ≤ n0, then there are at least i values d in L[l, r]
+belonging to the smaller half of the document identiﬁers, thus we continue recursively 
+on the left child of v, with l = rank0(Bv, l − 1) + 1 and r = rank0(Bv, r).
+Otherwise, we continue on the right child, with l = rank1(Bv, l − 1) + 1, r =
+rank1(Bv, r), and i = i − n0. The symbol corresponding to the leaf arrived at is
+the answer.
+We can also extract any segment Ft[i, i(cid:3)], in order, in time O((i(cid:3) − i + 1)(1 +
+i(cid:2)−i+1)). The algorithm is as above, going just by one branch when both i
+
+log D
+
+G. Navarro and S.J. Puglisi
+
+316
+and i(cid:3) choose the same, and splitting the interval into two separate searches when
+they do not. At worst we arrive at i(cid:3) − i + 1 leaves of the wavelet tree, but part
+of the paths to these leaves must be shared. At worst, their paths become all
+distinct at depth log(i(cid:3)− i+1), up to which point we work on all the O(i(cid:3)− i+1)
+diﬀerent wavelet tree nodes, and after then we work on a diﬀerent path, of length
+log D − log(i(cid:3) − i + 1), for each value.
+Another useful operation is to ﬁnd Ft[j] after having visited Ft[i], for some
+j > i. We show this can be done in amortized time proportional to log(j − i + 1).
+We need to store log D numbers m(cid:3), d(cid:3), and b(cid:3), where m0 = ∞ and d1 = 0, and
+the others are computed as follows when we obtain Ft[i]: If, at wavelet tree depth
+(cid:5) (the root being depth 1), we must go left, then m(cid:3) = min(m(cid:3)−1, d(cid:3) + n0 − i)
+and d(cid:3)+1 = d(cid:3), else m(cid:3) = m(cid:3)−1 and d(cid:3)+1 = d(cid:3) + n0. Here n0 is the value local
+to the node. Therefore d(cid:3) counts the values skipped to the left, and m(cid:3) is the
+maximum j − i value such that the downward paths to compute Ft[i] and Ft[j]
+coincide up to depth (cid:5). We also set b(cid:3) = i. Now, to compute Ft[j], we consider
+all the (cid:5) values, from largest to smallest, until ﬁnding the ﬁrst one such that
+j − b(cid:3) ≤ m(cid:3). From there on we recompute the downward path, resetting d(cid:3) and
+m(cid:3) accordingly and setting b(cid:3) = j.
+Overall, if we carry out this operation k times, across a range [i, i(cid:3)], the cost
+is O(log D + k(1 + log i(cid:2)−i+1
+)), as there can be only O(1) diﬀerent paths longer
+than O(log(i(cid:3) − i + 1)) arriving at i(cid:3) − i + 1 consecutive leaves, and considering
+the argument above to analyze the retrieval of Ft[i, i(cid:3)].
+
+k
+
+Boolean operations. The most important operation for intersecting lists is to
+be able to ﬁnd the ﬁrst j such that Ft[j] ≥ d, given d. This is usually solved with
+a combination of sampling and linear, exponential, or binary search. We show
+now that our representation supports this operation in O(log D) time.
+The operation is as follows. We start at the root v, with bitmap Bv, and the
+interval L[l, r] with l = stt and r = stt+1 − 1. If number d belongs to the ﬁrst
+half of the wavelet tree, we descend left, otherwise right. In both cases we update
+l and r as in the algorithm to retrieve Ft[i]. If, at some point, the interval [l, r]
+becomes empty, then there is no value d in the subtree and we return without
+a value. If, instead, we arrive at a leaf with a nonempty [l, r] (indeed, it must
+hold l = r in this case), then the leaf arrived at is d and we return this value.
+If the recursive step returns no result, then we must look for the ﬁrst result to
+the right: If the recursion was to the right child, or it was to the left but there
+is not any 1 in Bv[l, r], we in turn return with no result. Otherwise we enter
+the right child looking for the smallest value. From there, we enter recursively
+the left child only if there is some 0 in Bv[l, r], otherwise we go right. Thus in
+at most two root-to-leaf traversals we ﬁnd out the ﬁrst d(cid:3) ≥ d value in Ft. To
+obtain j, the position of d(cid:3) in list Ft, we must add up the n0 values at all the
+nodes in the path to d(cid:3) where we have gone to the right. Note O(log D) is not
+far from the time required by a binary search on Ft.
+As before, if we know Ft[j] = d and seek for the ﬁrst value Ft[j(cid:3)] ≥ d(cid:3), where
+d(cid:3) ≥ d, we can do it in amortized time proportional to log(d(cid:3)− d+1). The reason
+is that, once again, we can redo the work for d(cid:3) from the corresponding position
+
+Dual-Sorted Inverted Lists
+
+317
+
+k
+
+of the path used for d (this position is now easier to calculate: it is the ﬁrst bit
+at which d and d(cid:3) diﬀer). For the same reason as before, k searches covering a
+range [d, d(cid:3)] will cost at most O(log D + k log d(cid:2)−d+1
+) time. This is indeed the
+time required by k successive searches using exponential search.
+
+Finally, our data structure allows us to carry out a particular intersection
+algorithm. Consider intersecting two lists Ft and Ft(cid:2). This is equivalent to ﬁnding
+the common document numbers in L[l, r] and L[l(cid:3), r(cid:3)]. We proceed as follows.
+Let v be the wavelet tree root and Bv its bitmap. We descend to the left with
+l = rank0(Bv, l − 1) + 1, r = rank0(Bv, r), l(cid:3) = rank0(Bv, l(cid:3) − 1) + 1, and r(cid:3) =
+rank0(Bv, r(cid:3)). We also descend to the right using the same formulas replacing
+rank0 with rank1. If at any point range [l, r] or range [l(cid:3), r(cid:3)] is empty, we abort
+that branch. If we arrive at a leaf d with l = r and l(cid:3) = r(cid:3), then we report d as an
+element in the intersection. This algorithm is indeed a materialization of bys [7],
+where the binary searches have been replaced by constant-time rank operations,
+hence it is an O(log D) factor faster!
+
+Furthermore, this can be extended to intersecting k terms simultaneously,
+by maintaining k ranges instead of two, with an O(k) time penalty factor. As
+soon as one such range disappears, the tree branch is abandoned. This can oﬀer
+much better performance than the successive pairwise intersections that are
+currently the best choice in practice. Perhaps more importantly, this scheme can
+be relaxed to report any document where at least k(cid:3) out of the k words appear, by
+abandoning the branches when there are less than k(cid:3) nonempty intervals. Again,
+it is not easy to implement this type of search by, say, successive intersections.
+We can proceed similarly in case of unions. We start with the k intervals
+and proceed recursively as long as one of the intervals is nonempty. The cost
+is O(M(1 + log D
+m)), where m is the size of the output and M is the sum, over
+the returned documents, of the number of intervals where they appeared. The
+reason is that each interval must be projected to all of its leaves, but again, we
+arrive at m diﬀerent leaves overall, but the m paths of length log D cannot be
+all diﬀerent. The classical algorithm is O(M log k) time, which can be slightly
+better or worse.
+Other operations of interest. If the range of terms [t, t(cid:3)] represent the derivatives 
+of a single stemmed root, we might wish to act as if we had a single list Ft,t(cid:2)
+containing all the documents where they occur. Indeed, if we apply our previous
+algorithm to obtain Ft[i] from L[stt, stt+1 − 1], on the range L[stt, stt(cid:2)+1 − 1], we
+obtain precisely Ft,t(cid:2)[i], if we understand that a document d may repeat several
+times in the list if diﬀerent terms in [t, t(cid:3)] appear in d.
+More than that, the algorithms to ﬁnd the ﬁrst j such that Ft[j] ≥ d can
+be applied verbatim to obtain the same result for Ft,t(cid:2)[j] ≥ d (except that
+l = r may not hold at the leaves, but rather r − l + 1 is the number of times the
+resulting document appears in Ft,t(cid:2)). All the variants of these queries are directly
+supported as well. Finally, the bys-like search can also be applied verbatim in
+order to intersect stemmed terms (again, at the leaves it may hold that l ≤ r
+and l(cid:3) ≤ r(cid:3), not necessarily the equality).
+
+318
+
+G. Navarro and S.J. Puglisi
+
+Note we can obtain the list of unique documents d for a range of terms [t, t(cid:3)]
+by using the method that ﬁnds the ﬁrst j and d such that Ft[j] = d ≥ 1, then
+Ft[j(cid:3)] = d(cid:3) ≥ d + 1, and so on.
+
+Note also that we have a kind of summarization information available. In
+particular, we can obtain the local vocabulary of a document d, that is, the set
+of diﬀerent terms that appear in d. By descending to a leaf d, and then locating
+back all of its occurrences L[i] (via select as we move upwards in the wavelet
+tree), we can ﬁnd all the i such that L[i] = d, and then rank1(S, i) gives the
+terms, all in time O(log D) per term. Moreover, as the occurrences of d within
+its leaf are a stable sort of the original order in L, we can retrieve the local
+vocabulary in lexicographic order. This allows, for example, merging in linear
+time the vocabularies of diﬀerent documents, or binary searching for a particular
+term in a particular document (yet, the latter is easier via two rank operations
+on L: rankd(L, st+1 − 1)− rankd(L, st − 1); then the corresponding position can
+be obtained by selectd(L, 1 + rankd(L, st − 1))).
+
+The way to support hierarchical documents by mapping them to ranges [dl, dr]
+of documents is relatively obvious. It is suﬃcient to restrict all our wavelet tree
+traversals to the nodes that contain leaves in this range, disregarding others.
+
+4.2 Ranked Retrieval
+
+We focus now on the operations of interest for ranked retrieval, which are also
+simulated essentially in O(log D) time.
+
+Direct access and Persin’s algorithm. The Lt lists used for ranked retrieval
+are directly concatenated in L, so Lt[i] is obtained by extracting symbol L[st +
+i−1] using the wavelet tree. Recall that the term frequencies tf are also available
+in time O(log D). Again, a range Lt[i, i(cid:3)] is obtained in O((i(cid:3) − i + 1) log D
+i(cid:2)−i+1)
+time, as follows. Start at the root v with bitmap Bv and let the range to extract
+be [l, r]. Compute the corresponding ranges [l0, r0] and [l1, r1] for the left and
+right child, as usual, and descend recursively to both. Stop the recursion when
+the range is empty. Upon arriving at a leaf d, report d. One can, for example,
+ﬁnd with select1(Rt, vt− rank1(Tt, p)+1)−1 the length of the preﬁx of Lt where
+the tf values are > p, which is useful for Persin’s algorithm [25].
+
+This algorithm is correct but it has the problem of retrieving the documents
+in document order, not in tf order as they are in Lt. To recover the correct
+ordering, we must merge the results at each internal wavelet tree node during
+the recursion, as they arrive. At node v with results returned by its left and right
+child, we use select0 and select1, respectively, in Bv to map their positions in
+the bitmap of v. We advance in both lists so as to build their union in the correct
+order in Bv prior to sending them upwards. Note that, due to this merging eﬀort,
+the complexity is again O((i(cid:3) − i + 1) log D), but in practice the method is faster
+than extracting each L[i] one by one.
+
+Note, nevertheless, that retrieving the highest-tf documents in document order
+is indeed beneﬁcial for Persin’s algorithm, where a diﬃculty is how to accumulate
+results across unordered document sets. One could use the threshold p of the
+
+Dual-Sorted Inverted Lists
+
+319
+
+algorithm to retrieve the relevant documents from the next list to consider, and
+gracefully merge the result with the current candidates, as all are automatically
+in increasing document order.
+
+Other operations of interest. Any candidate document d in Persin’s algorithm 
+can be directly evaluated, obtaining its weight w(d), by ﬁnding it within
+Lt for each t ∈ q (with rankd and selectd on L, as explained), and its tf obtained,
+all in O(|q| log D) time.
+
+If we wish to use stemming, we might want to retrieve preﬁxes of several lists
+Lt to Lt(cid:2). We may carry out the previous algorithm to deliver all the distinct
+documents in these preﬁxes, now carrying on the t(cid:3)−t+1 intervals as we descend
+in the wavelet tree. When we arrive at the relevant leaves d, the corresponding
+positions will be contiguous, thus we can naturally return just one occurrence
+of each d in the union. This is a simpliﬁcation of the method sketched earlier
+to obtain the unique documents in Ft,t(cid:2). If we wish to obtain the sum of the tf
+values for all the stemmed terms in d, we can traverse the wavelet tree upwards
+for each interval element at leaf d, and obtain its tf upon ﬁnding its position i
+in L. Alternatively, we could store the tf values aligned to the leaves and mark
+their cumulative values on a compressed bitmap, so as to obtain the sum as the
+diﬀerence of two select1 queries on that bitmap. The space for tf becomes now
+O(N log n
+There is also some basic support for hierarchical documents: If we wish to
+know the total tf of t in a range [d, d(cid:3)] of documents, this range is exactly covered
+by O(log D) wavelet tree nodes. We can descend, projecting the range of Lt in
+L, until those nodes, and then move upwards again to ﬁnd their positions and
+individual tf values, to add them all.
+More interesting is the fact that we can carry out ranked retrieval restricted
+to any range of documents [d, d(cid:3)] (e.g., within a particular XML subtree or
+ﬁlesystem directory or range of document versions). Once again, it is suﬃcient
+to restrict any of the operations described above so that they do not descend
+to a node whose range does not intersect [d, d(cid:3)]. This automatically yields, for
+example, Persin’s algorithm over a range of documents.
+
+N ) bits. In any case, this delivers the results in document order.
+
+5 Conclusions and Future Work
+
+In this paper we have shown how wavelet trees can be used to achieve dualordered 
+inverted lists, that is, lists that are simultaneously sorted by document id
+(useful for intersections and document retrieval) and by term impact or frequency
+(useful for ranked retrieval). We are in the process of translating these data
+structures into practice and verifying them experimentally.
+
+Finally, we emphasize that our approach can be applied to any ordering on
+the documents. A very diﬀerent and interesting ordering from the one considered
+here is that induced by the suﬃx array (the D array of Culpepper et al. [14]).
+Applying our data structure and bys-like intersection algorithm over this ordering 
+immediately yields eﬃcient “bag-of-strings” queries from suﬃx arrays,
+further bridging the gap between IR problems and optimal pattern matching
+data structures.
+
+320
+
+G. Navarro and S.J. Puglisi
+
+References
+
+1. Anh, V., de Kretser, O., Moﬀat, A.: Vector-space ranking with eﬀective early termination.
+ In: Proc. 24th SIGIR, pp. 35–42 (2001)
+
+2. Anh, V., Moﬀat, A.: Inverted index compression using word-aligned binary codes.
+
+Inf. Retr. 8(1), 151–166 (2005)
+
+3. Anh, V., Moﬀat, A.: Pruned query evaluation using pre-computed impacts. In:
+
+Proc. 29th SIGIR, pp. 372–379 (2006)
+
+4. Baeza-Yates, R.: A fast set intersection algorithm for sorted sequences. In: Sahinalp,
+ S.C., Muthukrishnan, S.M., Dogrusoz, U. (eds.) CPM 2004. LNCS, vol. 3109,
+pp. 400–408. Springer, Heidelberg (2004)
+
+5. Baeza-Yates, R., Moﬀat, A., Navarro, G.: Searching Large Text Collections, pp.
+
+195–244. Kluwer Academic, Dordrecht (2002)
+
+6. Baeza-Yates, R., Ribeiro, B.: Modern Information Retrieval. Addison-Wesley,
+
+Reading (1999)
+
+7. Baeza-Yates, R., Salinger, A.: Experimental analysis of a fast intersection algorithm
+for sorted sequences. In: Consens, M.P., Navarro, G. (eds.) SPIRE 2005. LNCS,
+vol. 3772, pp. 13–24. Springer, Heidelberg (2005)
+
+8. Barbay, J., Kenyon, C.: Adaptive intersection and t-threshold problems. In: Proc.
+
+13th SODA, pp. 390–399 (2002)
+
+9. Barbay, J., L´opez-Ortiz, A., Lu, T., Salinger, A.: An experimental investigation
+of set intersection algorithms for text searching. ACM J. Exp. Alg. 14, article 7
+(2009)
+
+10. Brisaboa, N., Fari˜na, A., Navarro, G., Esteller, M.: S,C-dense coding: an optimized
+compression code for natural language text databases. In: Nascimento, M.A., de
+Moura, E.S., Oliveira, A.L. (eds.) SPIRE 2003. LNCS, vol. 2857, pp. 122–136.
+Springer, Heidelberg (2003)
+
+11. Buettcher, S., Clarke, C., Cormack, G.V.: Information Retrieval: Implementing
+
+and Evaluating Search Engines. MIT Press, Cambridge (2010)
+
+12. Croft, B., Metzler, D., Strohman, T.: Search Engines: Information Retrieval in
+
+Practice. Pearson Education, London (2009)
+
+13. Culpepper, J.S., Moﬀat, A.: Compact set representation for information retrieval.
+In: Ziviani, N., Baeza-Yates, R. (eds.) SPIRE 2007. LNCS, vol. 4726, pp. 137–148.
+Springer, Heidelberg (2007)
+
+14. Culpepper, J.S., Navarro, G., Puglisi, S.J., Turpin, A.: Top-k ranked document
+
+search in general text databases. In: Proc. 18th ESA (2010) (to appear)
+
+15. Demaine, E., Munro, I.: Adaptive set intersections, unions, and diﬀerences. In:
+
+Proc. 11th SODA, pp. 743–752 (2000)
+
+16. Gagie, T., Puglisi, S., Turpin, A.: Range quantile queries: Another virtue of wavelet
+trees. In: Karlgren, J., Tarhio, J., Hyyr¨o, H. (eds.) SPIRE 2009. LNCS, vol. 5721,
+pp. 1–6. Springer, Heidelberg (2009)
+
+17. Grossi, R., Gupta, A., Vitter, J.: High-order entropy-compressed text indexes. In:
+
+Proc. 14th SODA, pp. 841–850 (2003)
+
+18. Gupta, A.: Succinct Data Structures. PhD thesis, Duke University, USA (2007)
+19. Heaps, H.: Information Retrieval - Computational and Theoretical Aspects. Academic 
+Press, London (1978)
+
+20. Hon, W.-K., Shah, R., Vitter, J.S.: Space-eﬃcient framework for top-k string retrieval 
+problems. In: Proc. 50th IEEE FOCS, pp. 713–722 (2009)
+
+21. Hull, D.A.: Stemming algorithms: A case study for detailed evaluation. J. Amer.
+
+Soc. Inf. Sci. 47(1), 70–84 (1996)
+
+Dual-Sorted Inverted Lists
+
+321
+
+22. Manning, C.D., Raghavan, P., Sch¨utze, H.: Introduction to Information Retrieval.
+
+Cambridge University Press, Cambridge (2008)
+
+23. Navarro, G., M¨akinen, V.: Compressed full-text indexes. ACM Comp. Surv. 39(1),
+
+article 2 (2007)
+
+24. Navarro, G., Moura, E., Neubert, M., Ziviani, N., Baeza-Yates, R.: Adding compression 
+to block addressing inverted indexes. Inf. Retr. 3(1), 49–77 (2000)
+
+25. Persin, M., Zobel, J., Sacks-Davis, R.: Filtered document retrieval with frequencysorted 
+indexes. J. Amer. Soc. Inf. Sci. 47(10), 749–764 (1996)
+
+26. Raman, R., Raman, V., Rao, S.: Succinct indexable dictionaries with applications
+to encoding k-ary trees and multisets. In: Proc. 13th SODA, pp. 233–242 (2002)
+
+27. Sanders, P., Transier, F.: Intersection in integer inverted indices. In: Proc. 9th
+
+ALENEX (2007)
+
+28. Sanders, P., Transier, F.: Compressed inverted indexes for in-memory search engines.
+ In: Proc. 10th ALENEX, pp. 3–12 (2008)
+
+29. Scholer, F., Williams, H., Yiannis, J., Zobel, J.: Compression of inverted indexes
+
+for fast query evaluation. In: Proc. 25th SIGIR, pp. 222–229 (2002)
+
+30. Strohman, T., Croft, B.: Eﬃcient document retrieval in main memory. In: Proc.
+
+30th SIGIR, pp. 175–182 (2007)
+
+31. Witten, I., Moﬀat, A., Bell, T.: Managing Gigabytes, 2nd edn. Morgan Kaufmann,
+
+San Francisco (1999)
+
+32. Xu, J., Croft, W.B.: Corpus-based stemming using cooccurrence of word variants.
+
+ACM Trans. Inf. Sys. 16(1), 61–81 (1998)
+
+33. Yan, H., Ding, S., Suel, T.: Inverted index compression and query processing with
+
+optimized document ordering. In: Proc. 18th WWW, pp. 401–410 (2009)
+
+34. Zipf, G.: Human Behaviour and the Principle of Least Eﬀort. Addison-Wesley,
+
+Reading (1949)
+
+35. Zobel, J., Moﬀat, A.: Inverted ﬁles for text search engines. ACM Comp. Surv. 38(2),
+
+article 6 (2006)
+
+

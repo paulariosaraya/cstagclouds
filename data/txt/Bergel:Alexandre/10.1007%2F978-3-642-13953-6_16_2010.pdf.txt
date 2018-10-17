@@ -1,0 +1,1154 @@
+Visualizing Dynamic Metrics with Proﬁling
+
+Blueprints
+
+Alexandre Bergel1, Romain Robbes1, and Walter Binder2
+
+1 Pleiad Lab, DCC, University of Chile, Santiago, Chile
+http://bergel.eu, http://www.dcc.uchile.cl/∼rrobbes
+
+2 University of Lugano, Switzerland
+
+http://www.inf.usi.ch/faculty/binder
+
+Abstract. While traditional approaches to code proﬁling help locate
+performance bottlenecks, they oﬀer only limited support for removing
+these bottlenecks. The main reason is the lack of visual and detailed
+runtime information to identify and eliminate computation redundancy.
+We provide two proﬁling blueprints which help identify and remove performance 
+bottlenecks. The structural distribution blueprint graphically
+represents the CPU consumption share for each method and class of an
+application. The behavioral distribution blueprint depicts the distribution
+of CPU consumption along method invocations, and hints at method
+candidates for caching optimizations. These two blueprints helped us
+to signiﬁcantly optimize Mondrian, an open source visualization engine.
+Our implementation is freely available for the Pharo development environment 
+and has been evaluated in a number of diﬀerent scenarios.
+
+1 Introduction
+
+Even though computing resources are abundant, execution optimization through
+code proﬁling remains an important software development activity. A CPU time
+proﬁler is a crucial tool to identify bottlenecks – program elements that take a
+large part of the execution time. Today, it is inconceivable to ship a programming
+environment without a code proﬁler included or provided by a third party.
+
+However, when we retrospectively look at the history of code proﬁler tools, we
+see that tool usability and proﬁling overhead reduction have steadily improved,
+but that the set of oﬀered abstractions has remained constant. For instance,
+gprof, which appeared in 1982, oﬀers a number of textual reports focussed on
+“how much time was spent executing directly in each function” and call graphs1.
+JProﬁler essentially produces the same output, using a graphical rendering instead 
+of a textual one2. Most of the research conducted in the ﬁeld of code
+proﬁling focus on reducing the overhead triggered by the code instrumentation
+and observation. The abstractions used to proﬁle object-oriented applications
+are very close to the ones for procedural applications.
+
+1
+
+2
+
+http://sourceware.org/binutils/docs/gprof/Output.html#Output
+http://www.ej-technologies.com/products/jprofiler/screenshots.html
+
+J. Vitek (Ed.): TOOLS 2010, LNCS 6141, pp. 291–309, 2010.
+c(cid:2) Springer-Verlag Berlin Heidelberg 2010
+
+292
+
+A. Bergel, R. Robbes, and W. Binder
+
+The contribution of this paper is to apply some visualizations that have been
+previously used in static software analysis to display dynamic metric for proﬁling 
+purposes. We propose a visual mechanism for rendering dynamic information
+that eﬀectively enables comparison of diﬀerent metrics related to a program execution.
+ Structural distribution blueprint and behavioral distribution blueprint
+are two visualizations intended to identify bottlenecks and propose hints on how
+to remove them. The ﬁrst blueprint represents the distribution of the CPU effort 
+along the program structure. The second blueprint directs the distribution
+along method invocations and identiﬁes methods prone to one class of optimization,
+ namely caching. The work presented in this paper aims at complementing
+existing proﬁlers with new visualizations that help speciﬁc optimization tasks.
+We obtained the results presented in this paper using Pharo3, an open-source
+Smalltalk-dialect programming language. Nothing in the visualizations we propose 
+prevents one from using them in a diﬀerent setting.
+
+We apply our techniques to the visualization framework Mondrian4 [MGL06],
+our running example. We ﬁrst describe our blueprints (Section 2). Subsequently,
+we identify and implement opportunities
+for optimization in Mondrian
+(Section 3). We then review related work (Section 4) and conclude (Section 5).
+
+2 Proﬁling Blueprints
+
+2.1 Proﬁling Blueprint in a Nutshell
+
+Time proﬁling blueprints are graphical representations meant to help programmers 
+(i) assess the time distribution and (ii) identify bottlenecks and give hints
+on how to remove them for a given program execution. The essence of proﬁling
+blueprints is to enable a better comparison of elements constituting the program
+structure and behavior. To render information, these blueprints use a graph
+metaphor, composed of nodes and edges.
+
+The size of a node hints at its importance in the execution. In the case that
+nodes represent methods, a large node may say that the program execution
+spends “a lot of time” in this method. The expression “a lot of time” is then
+quantiﬁed by visually comparing the height and/or the width of the node against
+other nodes.
+
+Color is used to either transmit a boolean property (e.g., a gray node represents 
+a method that always returns the same value) or a metric (e.g., a color
+gradient is mapped to the number of times a method has been invoked).
+
+We propose two blueprints that help identify opportunities for code optimization.
+ They provide hints to programmers to refactor their program along the
+following two principles: (i) make often-used methods faster and (ii) call slow
+methods less often. The metrics we adopted in this paper help ﬁnding methods
+that are either unlikely to perform a side eﬀect or return always the same result,
+good candidates for simple caching optimizations.
+
+3
+
+4
+
+http://www.pharo-project.org/home
+http://www.moosetechnology.org/tools/mondrian
+
+Visualizing Dynamic Metrics with Proﬁling Blueprints
+
+293
+
+width property
+
+color
+
+property
+
+height
+property
+
+edge width and 
+color properties
+
+X property
+
+Y
+
+property
+
+Fig. 1. Principle of polymetric view
+
+2.2 Polymetric Views
+The blueprints we propose are graphically rendered as polymetric views [LD03].
+A polymetric view is a lightweight software visualization enriched with software
+metrics. It has been successfully used to provide “software maps” intended to
+help software comprehension and visualization. Figure 1 depicts the general aspect 
+of a polymetric view.
+
+Given two-dimensional nodes representing entities, we can map up to 5 metrics
+on the node characteristics: position (X and Y ), size (width and height), and
+color:
+
+– Position. The X and Y coordinates of the position of a node may reﬂect two
+
+measurements.
+
+– Size. The width and height of a node can render two measurements. We
+follow the intuitive notion that the wider and the higher the node, the larger
+the associated metric.
+
+– Color. The color interval between white and black may render one measurement.
+ The convention that is usually adopted [GL04] is that the higher
+the measurement, the darker the node. Thus light gray represents a smaller
+measurement than dark gray.
+
+Edges may also render properties along a number of dimensions (width, color,
+direction, etc.). However, for the purpose of this work, all edges are identical.
+
+2.3 Structural Distribution Blueprint
+The execution of an object-oriented program yields a large amount of information 
+[DLB04] (e.g., number of objects created at runtime, total execution time of
+a method). Unfortunately, all these dimensions cannot be visually rendered in a
+meaningful fashion. The structural distribution blueprint displays a selected number 
+of metrics indicating the distribution of the execution time along the static
+structure of a program (i.e., classes, methods and class hierarchy). Table 1 gives
+the speciﬁcation of the structural distribution blueprint. The blueprint renders
+a program in terms of classes, methods and inheritance relations. Each method
+representation exhibits its corresponding CPU time proﬁling information along
+three metrics:
+
+294
+
+A. Bergel, R. Robbes, and W. Binder
+
+– number of diﬀerent receivers: amount of diﬀerent object receivers the method
+has been invoked on. Due to implementation limitations, this is at the moment 
+a lower bound estimate.
+
+– total execution time of a method: time for which a call frame corresponding
+to the method is present on the stack at runtime. The precision depends on
+the underlining proﬁler used to collect runtime information.
+
+– number of executions: number of times the method has been executed, independently 
+of the object receiver.
+
+Actual metric values, and additional information, are accessible through a contextual 
+popup window.
+
+Table 1. Speciﬁcation of the structural distribution blueprint
+
+Structural distribution blueprint
+
+Scope
+Edge
+Layout
+
+full system execution time
+class inheritance (upper is superclass of below)
+tree layout for outer nodes and gridlayout for inner nodes
+(inner nodes are ordered by increasing height)
+linear (except for node width)
+outer node is a class, an inner node is a method
+
+Metric scale
+Node
+Inner node color Number of diﬀerent receivers
+Inner node height total execution time of a method
+Inner node width number of executions (logarithmic scale)
+Example
+
+Figure 2
+
+Example. Troughout this paper, we use the graph visualization framework Mondrian 
+as a case study. The blueprints described in this paper are also rendered
+using Mondrian. An example of the structural distribution blueprint is given in
+Figure 2. Four classes are represented: MOGraphElement, MOViewRenderer, MONode 
+and MORoot. This ﬁgure is a small part of a bigger picture obtained by
+evaluating the following code snippet, which renders a simple visualization of
+100 nodes, each containing 100 nodes:
+
+ProﬁlingPackageSpy
+viewProﬁling: [
+| view |
+view := MOViewRenderer new.
+view nodes: (1 to: 100)
+
+forEach: [:each | view nodes: (1 to: 100)].
+
+view root applyLayout ]
+
+inPackage: ’Mondrian’
+
+The code being proﬁled is indicated using a bold font in the example source
+code. The proﬁling is realized from the perspective of one package, Mondrian in
+our case. MOGraphElement inherits from MONode, MORoot from MOGraphElement,
+and MOViewRenderer from Object. Since Object does not belong to Mondrian (but
+to the Kernel package), it is not rendered in the blueprint.
+
+Visualizing Dynamic Metrics with Proﬁling Blueprints
+
+295
+
+shapeBoundsAt:
+
+ifPresent:
+
+bounds
+
+translateTo:
+
+legend for methods
+
+# executions
+
+execution
+
+time
+
+(color)
+
+#different
+receiver
+
+Fig. 2. Example of a structural blueprint
+
+The height of a method node is proportional to the total execution time
+taken by the method (e.g., 53% of the code execution is spent in the method
+applyLayout and 38% in bounds). The width is proportional to the number of times
+the method has been executed. A logarithmic scale is used. The method node
+color represents the number of diﬀerent objects this method has been executed
+on (more than 3 732). The scope of the blueprint is global, which means that
+the darkest method corresponds to the method that has been executed on the
+greatest number of object receivers, system-wide.
+
+Moving the mouse over a method node pops up additional contextual information.
+ In the example, the contextual window says that the method applyLayout
+deﬁned in the class MOGraphElement has been executed 10 100 times, and has
+been executed on more than 3 732 distinct receiver objects (i.e., instances of
+MOGraphElement or one of its subclasses). It is also indicated that this method
+returns always the same value for a given object receiver. While the blueprint
+emphasizes the three metrics indicated above, the contextual information provides 
+useful data when one wants to know more about a particular method.
+
+it
+
+Within a class, methods are ordered along their height. This helps quickly spot
+that among
+
+the amount of costly methods. For example,
+MOGraphElement’s methods, 3 are dominating with respect to execution time.
+
+is clear
+
+296
+
+A. Bergel, R. Robbes, and W. Binder
+
+Interpretation. Classes represented in Figure 2 illustrate part of a scenario
+that totals 11 classes. Among the 111 classes that deﬁne Mondrian, these 11
+classes are the only classes involved in the code snippet execution given above.
+Only classes that are covered by the execution, even partially, are depicted in
+the blueprint.
+
+MOGraphElement contains “many large and dark” methods. This indicates that
+this class is central to the code snippet execution: these large and black methods
+consume a lot of CPU time and are invoked on many diﬀerent instances. Almost
+all of MOGraphElement’s methods are executed a large number of times: in the
+visualization, they are quite wide compared to methods in other classes. For
+most of them, this is not a problem because they are thin and horizontal: even
+if these methods are executed many times, they do not consume CPU time. On
+the left of applyLayout stands the bounds method. This method takes 38% of the
+CPU time and is invoked 70 201 times on more than 3 732 object receivers. The
+third costliest method on MOGraphElement, shapeBoundsAt:ifPresent: takes 33% of
+the CPU time. MONode contains a black and relatively large method: MONode>>
+translateTo: consumes 22% of the total CPU time. The method has been invoked
+10 100 times on at least 3 732 receivers.
+
+Comparing to MOGraphElement, we ﬁnd that classes are not involved in the computation 
+as much. The representation of MOViewRenderer quickly says that its
+methods are invoked a few times without consuming much CPU. Moreover, methods 
+are white, which tells that they are invoked on few instances only. The contextual 
+information obtained by moving the mouse over the methods reveals that
+these methods are executed on a unique receiver. This is not surprising since only
+one instance of MOViewRenderer is created in the code example given above.
+
+MORoot also does not seem to be the cause of a bottleneck at runtime. The
+few methods of this class are not frequently executed since they are relatively
+narrow. MORoot also deﬁnes a method applyLayout. This method is the tall, thin
+and white method. The contextual information reveals that this method is executed 
+once and on one object only. It consumes 97% of the CPU time. The
+method MORoot>> applyLayout invokes MOGraphElement>> applyLayout on each of
+the nodes. The relation between these two applyLayout methods is indicated by a
+ﬂy-by-highlighting (not represented in the picture) and the behavioral distribution 
+blueprint, described below.
+
+All in all, a large piece of the total CPU time is distributed over four methods:
+MONode>> translateTo: (24%), MOGraphElement>> bounds (32%), MOGraphElement>>
+shapeBoundsAt:ifPresent: (33%), MOGraphElement>> applyLayout (53%). Note that at
+this stage, we cannot say that the CPU time share of these three methods is the
+sum of their individual share. We have 24 + 32 + 33 + 53 = 142. This indicates
+that some of these methods call each other since their sum cannot exceed 100%.
+
+2.4 Behavioral Distribution Blueprint
+
+In a pure object-oriented setting, computation is solely performed through
+message sending between objects. The CPU time consumption is distributed
+along method executions. Assessing the runtime distribution along method
+
+Visualizing Dynamic Metrics with Proﬁling Blueprints
+
+297
+
+invocations complements the structural distribution described in the previous
+section. To reﬂect this proﬁling along method invocations, we provide the behavioral 
+distribution blueprint. Table 2 gives the speciﬁcation of the ﬁgure.
+
+The goal of this blueprint is to assess runtime information alongside method
+call invocations. It is intended to ﬁnd optimization opportunities, which may be
+tackled with caching. In addition to the metrics such as the number of calls and
+execution time, we also show whether a given method returns constant values,
+and whether it is likely to perform a side eﬀect or not. As shown later, this
+information is helpful to identify a class of bottlenecks.
+
+Classes do not appear on this blueprint. Methods are represented by nodes
+and invocations by directed edges. The blueprint uses the two metrics described
+in the previous blueprint for the width and height of a method. In addition to
+the shape, node color indicates a property:
+
+– the gray color indicates methods that return self, the default return value.
+When no return value is speciﬁed in Pharo, the object receiver is returned.
+This corresponds to void methods in a statically typed language. No result
+is expected from the method, strongly suggesting that the method operates
+via side eﬀects.
+
+– the yellow color (which appears as light gray on a black and white printout)
+indicates methods that are constant on their return value, this value being
+diﬀerent from self.
+
+– other methods are white.
+
+A tree layout is used to order methods, with upper methods calling lower methods.
+ We illustrates this blueprint on the MOGraphElement>> bounds method that
+we previously saw, a candidate for optimization.
+
+Table 2. Speciﬁcation of the behavioral distribution blueprint
+
+Behavioral distribution blueprint
+
+Scope
+
+all methods directly or indirectly invoked for a given
+starting method
+method invocation (upper methods invoke lower ones)
+tree layout
+
+Edge
+Layout
+Metric scale linear (except for node width)
+Nodes
+Node color
+
+methods
+gray: return always self; yellow: same return value per
+object receiver; white: remaining methods
+
+Node height total execution time
+Node width number of execution (logarithmic scale)
+Example
+
+Figure 3
+
+Example. In the previous blueprint (Figure 2), right-clicking on the method
+MORoot>> applyLayout opens a behavioral distribution blueprint for this method.
+The complete picture is given in Figure 3. The picture has to be read topdown.
+ Methods in this blueprint have the same dimensions as in the behavioral
+
+298
+
+A. Bergel, R. Robbes, and W. Binder
+
+MORoot>>applyLayout
+
+MOGraphElement>>
+
+applyLayout
+
+MOAbstractLayout>>applyOn:
+
+MONode>>
+translateTo:
+
+legend for methods
+
+# executions
+
+execution
+
+time
+
+gray = 
+return
+self
+
+yellow = 
+constant
+on return 
+
+value
+
+m1
+
+m2
+
+m3
+m1
+
+invokes
+
+m2 and m3
+
+bounds
+
+shapeBoundsAt:
+
+ifPresent:
+
+Fig. 3. Example of a behavioral blueprint
+
+blueprint. We recognize the tall and thin MORoot>> applyLayout at the top. All
+methods in Figure 3 are therefore invoked directly or indirectly by MORoot >> applyLayout.
+ MORoot>> applyLayout invokes 3 methods, including MOGraphElement>>
+applyLayout (labelled in the ﬁgure). MOGraphElement>> applyLayout calls MOAb-
+stractLayout>> applyOn:, and both of these are called by MORoot>> applyLayout.
+
+Interpretation. As the ﬁrst blueprint revealed, bounds, applyLayout, shapeBound-
+sAt:ifPresent:, translateTo: are expensive in terms of CPU time consumption. The
+behavior blueprint highlights this fact from a diﬀerent point of view, along
+method invocations. In the following we will optimize bounds by identifying the
+reason of its high cost and provide a solution to ﬁx it. Our experience with Mondrian 
+tells us that this method has a surprisingly high cost. Where to start a
+refactoring among all potential candidates remains the programmer’s task. Our
+blueprint only says “how it is” and not “how it should be”, however it is a rich
+source of indication of what’s going on at runtime.
+
+Visualizing Dynamic Metrics with Proﬁling Blueprints
+
+299
+
+The return value of MOGraphElement>> bounds is constant over time, hence it is
+painted in yellow. This method is involved in a rich invocation graph (presented
+in Figure 3). In general, understanding the interaction of a single method is likely
+to be diﬃcult when a complete call graph is used. The contextual menu obtained
+by right-clicking on a method oﬀers a ﬁltered view on the entity of interest.
+
+computeExtentHavingChildrenFor:
+
+Calling  #bounds
+
+MOGraphElement>>
+
+origin
+
+bounds
+
+Called by  #bounds
+
+shapeBoundsAt:ifPresent:
+
+Fig. 4. Detailed view of MOGraphElement>> bounds
+
+Figure 4 shows a detailed view of a behavioral blueprint, centered on MO-
+GraphElement>> bounds. This method is at the center of the picture. Above are
+located the methods calling bounds. Below, the unique method that is called by
+bounds. Among the 5 methods that call bounds, 3 always return the same value
+when executed. The method called by bounds also remains constant on its return 
+value. Figure 4 renders bounds and shapeBoundsAt:ifPresent: with the same
+width. It is therefore likely that these two methods are invoked the same number 
+of times. The contextual window indicates that each of these two methods
+is invoked 70 201 times. We can deduce the following:
+
+– bounds belongs to several execution paths in which each method is constant
+
+on its return value. This is indicated in the upper part of Figure 4.
+
+– bounds calls shapeBoundsAt:ifPresent:, which is constant on return value.
+– bounds and shapeBoundsAt:ifPresent: are invoked the same number of times.
+
+The following section addresses this bottleneck by adding a cache in bounds and
+unveils another bottleneck in Mondrian.
+
+3 Optimizing Mondrian
+
+The combination of the structural and behavioral blueprints helped us to identify
+a number of bottlenecks in Mondrian. In this section, we address some of these
+
+300
+
+A. Bergel, R. Robbes, and W. Binder
+
+bottlenecks by using memoization5, i.e. we cache values to avoid redundant
+computations.
+
+3.1 Bottleneck MOGraphElement>> Bounds
+As we saw earlier, the behavioral blueprint on the method MOGraphElement>>
+bounds reveals a number of facts about the program’s execution. These facts are
+good hints that bounds will beneﬁt from a caching mechanism since it always
+returns the same value and calls a method that is also constant. We inspect its
+source code:
+
+MOGraphElement>> bounds
+”Answer the bounds of the receiver.”
+| basicBounds |
+self shapeBoundsAt: self shape ifPresent: [ :b | ˆ b ].
+
+basicBounds := shape computeBoundsFor: self.
+self shapeBoundsAt: self shape put: basicBounds.
+ˆ basicBounds
+
+The code source conﬁrms that shapeBoundsAt:ifPresent: is invoked once each time
+bounds is invoked. The method shape is also invoked at each invocation of bounds.
+The contextual window obtained in the structural blueprint reveals that the return 
+value of shape is constant: It is a simple variable accessor (“getter” method),
+so it is fast. bounds calls computeBoundsFor: and shapeBoundsAt:put: in addition to
+shapeBoundsAt:ifPresent: and shape. However, they do not appear in Figure 3 and
+4. This means that bounds exits before reaching computeBoundsFor:. The block [:b
+| ˆb], which has the eﬀect of exiting the method, is therefore always executed in
+the considered example.
+
+We ﬁrst thought that the last tree lines of bounds may be removed since they
+are not executed in our scenario. However, the large number of tests in Mondrian
+indicate that these lines are indeed important in other scenarios, although not
+in our particular example.
+
+We elected to upgrade bounds with a simple cache mechanism. Diﬀerences with
+the original version are indicated using a bold font. The class MOGraphElement
+is extended with a new instance variable, boundsCache. In addition, the cache
+variable has to be reset in 5 methods related to graphical bounds manipulation
+of nodes, such as translating and resizing.
+
+MOGraphElement>> bounds
+”Answer the bounds of the receiver.”
+| basicBounds |
+boundsCache ifNotNil: [ ˆ boundsCache ].
+self shapeBoundsAt: self shape ifPresent: [ :b | ˆ boundsCache := b ].
+
+basicBounds := shape computeBoundsFor: self.
+self shapeBoundsAt: self shape put: basicBounds.
+ˆ boundsCache := basicBounds
+
+5
+
+http://en.wikipedia.org/wiki/Memoization
+
+Visualizing Dynamic Metrics with Proﬁling Blueprints
+
+301
+
+There is no risk of concurrent accesses of boundsCache since this variable is set
+when the layout is being computed. This occurs before the display of the visualization,
+ which is done in a diﬀerent thread.
+
+Result. Adding a statement boundsCache ifNotNil: [ ˆ boundsCache ] signiﬁcantly
+reduces the execution time of the code given in Section 2.3. Before adding this
+simple cache mechanism, the code took 430 ms to execute (on a MacBook Pro,
+2Gb of RAM (1067 MHz DDR3), 2.26 GHz Intel Core 2 Duo, Squeak VM
+4.2.1beta1U). With the cache, the same execution takes 242 ms only, which
+represents a speedup of approximately 43%.
+
+This gain is reﬂected on the overall distribution of the computational eﬀort.
+Figure 5 provides two structural blueprints of the code snippet given in Section 
+2.3. The left blueprint has been produced before upgrading the method
+MOGraphElement>> bounds. Figure 2 is a part of it. The right one has been produced 
+after upgrading bounds as described above. Many places are impacted. We
+annotated the ﬁgure with the most signiﬁcant changes:
+
+– the size of the bounds method and the methods invoked by it (C) have seen
+their height signiﬁcantly reduced. Before the optimization, bounds used 38%
+of the total CPU consumption. After the optimization, its CPU use fell to
+5%.
+
+– the 5 methods denoted by the circle A and B have seen their height increased
+and their color darkened. The height increase illustrates the augmentation
+in relative CPU consumption these methods are subject to, now that bounds
+has been improved.
+
+The evolution of the behavioral blueprint is presented in Figure 6. We can clearly
+see the reduced size of bounds and shapeBoundsAt:ifPresent: (Circle B) and the
+increase of the applyLayout method (Circle A).
+
+3.2 Bottleneck in MONode>> displayOn:
+We ﬁxed an important bottleneck when computing bounds in Mondrian. We
+push our analysis of bounds computing a step further. We inspect the User
+Interface (UI) thread of Mondrian. Most applications with a graphical user interface 
+run in at least 2 threads: one for the program logic and another in charge
+of receiving user events (e.g., keystrokes, mouse events) and virtual machine/OS
+events (e.g., window refreshes). Mondrian is no exception. The blueprints presented 
+earlier focused on proﬁling the application logic.
+
+Step 1. Figure 7 shows the structural proﬁling of the UI thread for the Mondrian 
+script given in Section 2.3. The blueprint contains many large methods,
+indicating methods that received a signiﬁcant CPU share. Among these, our
+knowledge of Mondrian lead us to absoluteBounds. This method is very similar
+to bounds that we previously saw. It returns the bounds of a node using absolute 
+coordinates (instead of relative). The UI thread spends most of the time in
+MONode>> displayOn: since it is the root of the thread’s computation.
+
+302
+
+A. Bergel, R. Robbes, and W. Binder
+
+Upgrading
+
+MOGraphElement>>bounds
+
+A
+
+B
+
+C
+
+Fig. 5. Upgrading bounds has a global structural impact
+
+A
+
+Upgrading
+
+MOGraphElement>>bounds
+
+B
+
+Fig. 6. Upgrading bounds has a global behavioral impact
+
+Visualizing Dynamic Metrics with Proﬁling Blueprints
+
+303
+
+absoluteBounds
+
+shapeBoundsAt:
+
+ifPresent:
+
+displayOn:
+
+display:on:
+
+absoluteBoundsFor:
+
+legend for methods
+
+# executions
+
+execution
+
+time
+
+(color)
+
+#different
+receiver
+
+Fig. 7. Proﬁling of the UI thread in Mondrian
+
+Figure 8 shows the behavioral blueprint opened on MONode>> displayOn:. The
+blueprint reveals that absoluteBounds and absoluteBoundsFor: call each other. Return 
+values of these two methods are constant as indicated by their yellow color.
+They are therefore good candidates for caching:
+
+MOGraphElement>> absoluteBounds
+
+”Answer the bounds in absolute terms (relative to the entire Canvas, not just the parent).”
+absoluteBoundsCache ifNotNil: [ ˆabsoluteBoundsCache ].
+ˆabsoluteBoundsCache := self shape absoluteBoundsFor: self
+
+Result. Without the cache in absoluteBounds, the scenario takes 356 ms to run.
+With the cache, it takes 231 ms. We therefore gained 35% when displaying the
+visualization.
+
+Step 2. By adding the cache in absoluteBounds, we signiﬁcantly reduced the cost
+of this method. We can still do better. As shown in Figure 8, there is another
+caller of absoluteBounds. MORectangleShape>> display:on: is 85 lines long and begins
+with:
+
+MORectangleShape>> display: aFigure on: aCanvas
+| bounds borderWidthValue textExtent c textToDisplay font borderColorValue ... |
+bounds := self absoluteBoundsFor: aFigure.
+c := self ﬁllColorFor: aFigure.
+...
+
+304
+
+A. Bergel, R. Robbes, and W. Binder
+
+MONode>>displayOn:
+
+MORectangleShape>>
+
+display:on:
+
+MOShape>>
+
+absoluteBoundsFor:
+
+MOGraphElement>>
+
+absoluteBounds
+
+legend for methods
+
+# executions
+
+execution
+
+time
+
+gray = 
+return
+self
+
+yellow = 
+constant
+on return 
+
+value
+
+m1
+
+m2
+
+m3
+m1
+
+invokes
+
+m2 and m3
+
+Fig. 8. Proﬁling of the UI thread in Mondrian
+
+We saw in Step 1 that absoluteBounds calls the expensive and uncached absolute-
+BoundsFor:. Replacing the call to absoluteBoundsFor: by absoluteBounds improves
+performance further:
+
+MORectangleShape>> display: aFigure on: aCanvas
+| bounds borderWidthValue textExtent c textToDisplay font borderColorValue ... |
+bounds := aFigure absoluteBounds.
+c := self ﬁllColorFor: aFigure.
+...
+
+Result. The execution time of the code snippet has been reduced to 198 ms. A
+speedup of 14% from Step 1, and of 45% overall.
+
+Blueprint evolution. Figure 9 summarizes the two evolution steps described
+previously. Diﬀerences with a previous step are denoted using a circle. The effect 
+of caching absoluteBounds considerably diminished the execution time of this
+method. This is illustrated by Circle C. It has also the eﬀect of reducing the
+size of MOShape’s methods and increasing MORectangleShape>> display:on:. The
+share of the CPU consumption increased for this method. Step 2 reduced the
+
+Visualizing Dynamic Metrics with Proﬁling Blueprints
+
+305
+
+D
+
+C
+
+B
+
+A
+
+:
+n
+o
+:
+y
+a
+l
+p
+s
+i
+d
+e
+k
+a
+m
+
+:
+r
+o
+F
+s
+d
+n
+u
+o
+B
+e
+t
+u
+o
+s
+b
+a
+ 
+f
+o
+ 
+d
+a
+e
+t
+s
+n
+
+l
+
+i
+
+s
+d
+n
+u
+o
+B
+e
+t
+u
+o
+s
+b
+a
+
+l
+
+l
+l
+
+a
+c
+
+'
+
+C
+
+'
+
+B
+
+'
+
+C
+
+'
+
+A
+
+d
+e
+h
+c
+a
+c
+
+s
+d
+n
+u
+o
+B
+e
+t
+u
+o
+s
+b
+a
+
+l
+
+Fig. 9. Proﬁling of the UI thread in Mondrian
+
+306
+
+A. Bergel, R. Robbes, and W. Binder
+
+size of MOShape’s method. Their execution time became so small, that it does
+not appear in the behavioral blueprint (since we use a sampling-based proﬁler
+to obtain the runtime information, methods having less than 1% of the CPU do
+not appear in this blueprint).
+
+3.3 Summary
+The cache value of MOGraphElement>> bounds (Section 3.1) is implemented and
+has been ﬁnalized in the version 341 of Mondrian6. The improvement of absoluteBounds 
+and display:on: may be found in the version 352 of Mondrian. The
+complete experiment lead to a 43% improvement in creating the layout of a view,
+and of 45% in displaying the same view.
+
+We identify and remove a number of bottlenecks. From this experience, it is
+tempting to identify and look after some general patterns that would easily expose 
+ﬁxable execution bottleneck. Unfortunately, we haven’t see the opportunity
+to deduce some general rules. The visualization we provide clearly identify costly
+methods and classes, potentially being candidates for optimization. Whether the
+optimization can be easily realized or not depends heavily on a wide range of
+parameters (e.g., algorithm, architecture, data structure).
+
+4 Related Work
+
+Proﬁling capabilities have been integrated in IDEs such as the NetBeans Proﬁler7 
+and Eclipse’s Tracing and Proﬁling Project (TPTP)8. The NetBeans Proﬁler 
+uses JFluid [Dmi04], which oﬀers a Calling Context Tree (CCT) [ABL97]
+augmented with the accumulated execution time for individual methods. The
+CCT is visualized as an expandable tree, where calling contexts are sorted by
+their execution time and can be expanded (respectively collapsed) in order to
+show (or hide) callees. However, as CCTs for real-world applications are often
+large, comprising up to some million nodes, an expandable tree representation
+makes it diﬃcult to detect hotspots in deep calling contexts.
+
+The Calling Context Ring Chart (CCRC) [MBAV09] is a CCT visualization
+that eases the exploration of large trees. Like the Sunburst visualization [Sta00],
+CCRC uses a circular layout. Callee methods are represented in ring segments
+surrounding the caller’s ring segment. In order to reveal hot calling contexts,
+the ring segments can be sized according to a chosen dynamic metric. Recently,
+ CCRC has been integrated into the Senseo plugin for Eclipse [RHV+09],
+which enriches Eclipse’s static source views with several dynamic metrics. Our
+blueprints have a diﬀerent focus, since global information is shown instead of
+providing a line-of-code granularity.
+
+Execution traces may be used to analyze dynamic program behavior. Execution 
+traces are logged events, such as method entry and exit, or object allocation.
+
+6 The source code is available at: http://www.squeaksource.com/Mondrian.html
+7
+
+8
+
+http://profiler.netbeans.org/
+http://www.eclipse.org/tptp/performance/
+
+Visualizing Dynamic Metrics with Proﬁling Blueprints
+
+307
+
+However, the resulting amount of data can be excessive. In Deelen et al.
+[DvHHvdW07] execution traces are visualized with nodes representing classes
+and edges representing method calls. Node size and edge thickness are mapped
+to properties (e.g., number of method invocations). A time range can be selected
+in order to limit the data to be visualized. Another approach to visualizing execution 
+traces has been introduced in Holten et al. [HCvW07]. It uses the concept
+of hierarchical edge bundles [Hol06], where similar edges are put together to improve 
+the visualization of larger traces. Execution traces allow keeping calls in
+sequences and selecting a precise time interval to be visualized, which helps understand 
+a particular phase in the execution of a program. Blueprint proﬁling
+oﬀers a global map of the complete execution without focusing on sequentiality
+in time. However, they oﬀer hints about the behavior of individual methods that
+help to solve a class of optimization problem, namely introducing caches.
+
+instance,
+
+Tree-maps [JS91] visualize hierarchical structures. Nodes are represented as
+rectangular areas sized proportionally to a metric. Tree-maps have been used to
+visualize proﬁling data. For
+the authors present
+KCacheGrind, a front end to a simulator-based cache proﬁling tool, using a
+combination of tree-maps and call graphs to visualize the data. Our blueprint
+use polymetric view to render data. A tree-map solves a problem in a diﬀerent
+way that a polymetric view would solve it. A polymetric enables one to compare
+several diﬀerent metrics, whereas a tree-map is dedicated to showing a single
+metric (besides color) in a compact space.
+
+in [WKT04]
+
+5 Conclusion
+
+In this paper we presented two visualizations helping developers to identify and
+remove performance bottlenecks. Providing visualizations that are intuitive and
+easy to use is our primary goal. Our graphical blueprints follow simple principles
+such as “big nodes are slow methods”, “gray nodes are methods likely to have
+side-eﬀects”, “yellow nodes remain constant on return values”. Our visualizations
+helped us to signiﬁcantly improve Mondrian, a visualization engine. We described
+a number of optimizations we realized. For space reason, we couldn’t describe all
+the optimizations. The last version of Mondrian contains an improved version of
+the applyLayout method, thus mitigating the bottleneck caused by this method.
+This improvement was recently publicly announced9.
+
+A number of conclusions may be drawn from the experiment described in this
+paper. First, bottleneck identiﬁcation and removal are signiﬁcantly easier when
+side-eﬀects and constant return values are localized. Second, an extensive set of
+unit tests remains essential to assess whether a candidate optimization can be
+applied without changing the behavior of the system.
+
+As future work, we plan to focus on architectural views by adopting coarser
+
+grain than methods and classes.
+
+9
+
+http://www.iam.unibe.ch/pipermail/moose-dev/2010-January/003781.html
+
+308
+
+A. Bergel, R. Robbes, and W. Binder
+
+We used our blueprint visualizations on a number of case studies not described
+in this paper: Glamour and Moose, and O210. Our visualizations and proﬁler are
+available in Pharo11 under the MIT license.
+
+References
+
+[ABL97]
+
+[DLB04]
+
+[Dmi04]
+
+[DvHHvdW07]
+
+[GL04]
+
+[HCvW07]
+
+[Hol06]
+
+[JS91]
+
+[LD03]
+
+[MBAV09]
+
+Ammons, G., Ball, T., Larus, J.R.: Exploiting hardware performance
+counters with ﬂow and context sensitive proﬁling. In: Proceedings
+of the ACM SIGPLAN conference on Programming language design
+and implementation (PLDI’97), pp. 85–96 (1997)
+Ducasse, S., Lanza, M., Bertuli, R.: High-level polymetric views of
+condensed run-time information. In: Proceedings of 8th European
+Conference on Software Maintenance and Reengineering (CSMR
+2004), pp. 309–318. IEEE Press, Los Alamitos (2004)
+Dmitriev, M.: Proﬁling Java applications using code hotswapping
+and dynamic call graph revelation. In: Proceedings of the Fourth International 
+Workshop on Software and Performance (WOSP 2004),
+pp. 139–150 (2004)
+Deelen, P., van Ham, F., Huizing, C., van de Watering, H.: Visualization 
+of dynamic program aspects. In: Proceedings of the 4th IEEE
+International Workshop on Visualizing Software for Understanding
+and Analysis (VISSOFT 2007), June 2007, pp. 39–46 (2007)
+Gˆırba, T., Lanza, M.: Visualizing and characterizing the evolution
+of class hierarchies. In: Proceedings of the 5th ECOOP Workshop
+on Object-Oriented Reengineering (WOOR 2004)
+Holten, D., Cornelissen, B., van Wijk, J.J.: Trace visualization using
+hierarchical edge bundles and massive sequence views. In: Proceedings 
+of the 4th IEEE International Workshop on Visualizing Software 
+for Understanding and Analysis (VISSOFT 2007), pp. 47–54
+(2007)
+Holten, D.: Hierarchical edge bundles: Visualization of adjacency
+relations in hierarchical data. IEEE Transactions on Visualization
+and Computer Graphics 12(5), 741–748 (2006)
+Johnson, B., Shneiderman, B.: Tree-maps: a space-ﬁlling approach to
+the visualization of hierarchical information structures. In: Proceedings 
+of the 2nd conference on Visualization (VIS 1991), pp. 284–291.
+IEEE Computer Society Press, Los Alamitos (1991)
+Lanza, M., Ducasse, S.: Polymetric views—a lightweight visual approach 
+to reverse engineering. Transactions on Software Engineering
+(TSE) 29(9), 782–795 (2003)
+Moret, P., Binder, W., Ansaloni, D., Villaz´on, A.: Visualizing Calling
+Context Proﬁles with Ring Charts. In: Proceedings of the 5th IEEE
+International Workshop on Visualizing Software for Understanding
+and Analysis (VISSOFT 2009), pp. 33–36. IEEE Computer Society,
+Los Alamitos (2009)
+
+10
+
+11
+
+http://www.moosetechnology.org/tools/, http://www.squeaksource.com/O2.html
+http://www.squeaksource.com/Spy.html
+
+[MGL06]
+
+[RHV+09]
+
+[Sta00]
+
+[WKT04]
+
+Visualizing Dynamic Metrics with Proﬁling Blueprints
+
+309
+
+Meyer, M., Gˆırba, T., Lungu, M.: Mondrian: An agile visualization
+framework. In: Proceedings of the 3rd ACM Symposium on Software
+Visualization (SoftVis 2006), pp. 135–144. ACM Press, New York
+(2006)
+R¨othlisberger, D., H¨arry, M., Villaz´on, A., Ansaloni, D., Binder,
+W., Nierstrasz, O., Moret, P.: Augmenting Static Source Views in
+IDEs with Dynamic Metrics. In: Proceedings of the 25th IEEE International 
+Conference on Software Maintenance (ICSM 2009), pp.
+253–262. IEEE Computer Society, Los Alamitos (2009)
+Stasko, J.: An evaluation of space-ﬁlling information visualizations 
+for depicting hierarchical structures. Int. J. Hum.-Comput.
+Stud. 53(5), 663–694 (2000)
+Weidendorfer, J., Kowarschik, M., Trinitis, C.: A tool suite for simulation 
+based analysis of memory access behavior. In: Bubak, M.,
+van Albada, G.D., Sloot, P.M.A., Dongarra, J. (eds.) ICCS 2004.
+LNCS, vol. 3038, pp. 440–447. Springer, Heidelberg (2004)
+
+

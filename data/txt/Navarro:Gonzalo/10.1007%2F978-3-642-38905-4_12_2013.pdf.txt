@@ -1,0 +1,978 @@
+Document Listing on Repetitive Collections
+
+Travis Gagie1, Kalle Karhu2, Gonzalo Navarro3,
+
+Simon J. Puglisi1, and Jouni Sir´en3
+
+1 Helsinki Institute for Information Technology (Aalto),
+Department of Computer Science, University of Helsinki
+
+{travis.gagie, simon.j.puglisi}@gmail.com
+
+2 Department of Computer Science and Engineering, Aalto University
+
+kalle.karhu@aalto.fi
+
+3 Department of Computer Science, University of Chile
+
+{gnavarro, jsiren}@dcc.uchile.cl
+
+Abstract. Many document collections consist largely of repeated material,
+ and several indexes have been designed to take advantage of this.
+There has been only preliminary work, however, on document retrieval
+for repetitive collections. In this paper we show how one of those indexes,
+the run-length compressed suﬃx array (RLCSA), can be extended to
+support document listing. In our experiments, our additional structures
+on top of the RLCSA can reduce the query time for document listing by
+an order of magnitude while still using total space that is only a fraction
+of the raw collection size. As a byproduct, we develop a new document
+listing technique for general collections that is of independent interest.
+
+1
+
+Introduction
+
+Document listing is a fundamental and well-studied problem in information retrieval.
+ It is known how to store a collection of documents in entropy-compressed
+space such that, given a pattern, we can quickly list the distinct documents in
+which that pattern occurs [15,8]. If the collection is repetitive, however — e.g.,
+genomes of individuals of the same or related species, software repositories, or
+versioned document collections — then its statistical entropy may not capture
+its true compressibility (the statistical entropy does not decrease if we concatenate 
+the same text several times). Several indexes for exact pattern matching
+[9,4,2] take good advantage of repetitiveness, but to date there has been no work
+on document retrieval in this setting.
+
+In this paper we show how M¨akinen et al.’s [9] run-length compressed suﬃx array 
+(RLCSA) can be extended to support fast document listing. We present two
+diﬀerent solutions. In Section 3, we show that interleaving the longest common
+
+1 This work was supported in part by Academy of Finland grants 250345 (CoECGR)
+and 134287; Fondecyt grant 1-110066, Chile; the Helsinki Doctoral Programme in
+Computer Science; the Jenny and Antti Wihuri Foundation, Finland; and the Millennium 
+Nucleus for Information and Coordination in Networks (ICM/FIC P10-024F),
+Chile.
+
+J. Fischer and P. Sanders (Eds.): CPM 2013, LNCS 7922, pp. 107–119, 2013.
+c(cid:2) Springer-Verlag Berlin Heidelberg 2013
+
+108
+
+T. Gagie et al.
+
+preﬁx (LCP) arrays of the individual documents, in the order given by the global
+LCP of the collection, yields long runs of equal values on repetitive collections,
+which makes this so-called interleaved LCP (ILCP) array highly compressible.
+Further, we show that a classical document listing technique [11], designed for a
+completely diﬀerent array, works almost verbatim over the ILCP, and this yields
+a new document listing technique of independent interest for generic document
+collections (not only repetitive). In Section 4 we explore the idea, dubbed PDL,
+of precomputing the answers of document listing queries for all suﬃx tree nodes
+with enough leaves, and exploiting repetitiveness by grammar-compressing the
+resulting sets of answers. In Section 5 we experimentally show that the ILCP
+takes very little extra space on top of the RLCSA, and can speed up the RLCSA
+when the pattern appears many times in the documents; PDL is an order of
+magnitude faster and still uses only a fraction of the original text size.
+
+2 Related Work
+
+The best current solutions for document listing are based on an idea by Muthukrishnan 
+[11]. Let T [1..n] be the concatenation of the collection of d documents separated 
+by copies of a special character “$”. Muthukrishnan’s solution stores the
+suﬃx tree [18] of T , which in particular includes the suﬃx array [10] SA[1..n]. The
+solution also stores a so-called document array D[1..n] of T , in which each cell
+D[i] stores the identiﬁer of the document containing T [SA[i]]; an array C[1..n],
+in which each cell C[i] stores the largest value h < i such that D[h] = D[i], or
+0 if there is no such value h; and a data structure supporting range-minimum
+queries (RMQs) over C, rmqC(i, j) = argmini≤k≤j C[k]. These data structures
+take a total of O(n lg n) bits. Given a pattern P [1..m], the suﬃx tree is used
+to ﬁnd the interval SA[(cid:2)..r] that contains the starting positions of the suﬃxes
+preﬁxed by P . It follows that every value C[i] < (cid:2) in C[(cid:2)..r] corresponds to a
+distinct document in D[i]. Thus a recursive algorithm ﬁnding all those positions
+i starts with k = rmqC((cid:2), r). If C[k] ≥ (cid:2) it stops. Otherwise it reports document
+D[k] and continues recursively with the ranges C[(cid:2), k − 1] and C[k + 1, r] (the
+condition C[k] ≥ (cid:2) always uses the original (cid:2) value). In total, the algorithm uses
+O(m + ndoc) time, where ndoc is the number of documents returned.
+
+Sadakane [15] gave a compressed version of Muthukrishnan’s solution, which
+stores only a compressed suﬃx array CSA of T , a sparse bitvector B[1..n] indicating 
+where in T each document starts, an RMQ data structure for C that
+returns the position of the leftmost minimum in a range without accessing C,
+and a bitmap V [1..d] to record which document identiﬁers we have already returned.
+ Fischer [3] showed that such an RMQ data structure takes only 2n+o(n)
+bits and can answer queries in O(1) time. These data structures take a total of
+|CSA| + 2n + d lg(n/d) + O(d) + o(n) bits. Here d lg(n/d) + O(d) + o(n) bits
+are for a sparse bitvector representation (e.g., [13]) of B, which has only d 1s.
+This representation answers in constant time query rank(B, i), which gives the
+number of 1s in B[1..i]. Now, given P , we use CSA to ﬁnd (cid:2) and r, then emulate
+Muthukrishnan’s algorithm: After each RMQ giving position k we use CSA and
+
+Document Listing on Repetitive Collections
+
+109
+
+B to compute D[k] = rank(B, CSA[k]), then check the bitmap V to see whether
+we have already returned that document. If V [D[k]] = 1, we stop that recursive
+branch, else we return D[k], mark V [D[k]] ← 1, and continue recursing. In total
+we use O(search(m) + ndoc · lookup(n)) time, where search(m) is the time to ﬁnd
+(cid:2) and r and lookup(n) is the time to access a cell of SA, using CSA.
+Hon et al. [8] push the space down further by sampling array C. The array is
+divided into blocks of length b, and an array C(cid:4)
+[1..n/b] stores the minima of the
+blocks. The recursive RMQs algorithm is run over C(cid:4)
+[k]
+found requires exploring the documents in one block of D, D[(k− 1)b + 1..kb]. By
+ n for a constant  > 0, the space becomes |CSA| + d lg(n/d) +
+setting, say, b = lg
+O(d) + o(n) bits and the time raises to O(search(m) + ndoc · lookup(n) lg
+ n).
+
+, so that each position C(cid:4)
+
+In a repetitive environment, one can use an RLCSA [9] as the CSA. However,
+those 2n + o(n) bits of Sadakane [15], and even the o(n) bits of Hon et al. [8],
+are likely to dominate the space requirement.
+
+Another trend to simulate Muthukrishnan’s algorithm is to represent the document 
+array D[1..n] explicitly using a wavelet tree [7], which uses n lg d + o(n)
+bits and can access any D[i], as well as compute rankc(D, i) and selectc(D, j),
+in time O(lg d). The ﬁrst query counts the number of times c occurs in D[1..i],
+whereas the second gives the position in D of the jth occurrence of c. The
+wavelet tree root divides values ≤ d/2 and > d/2 in D[1..n], storing only a
+bitmap B[1..n] where B[i] = 0 iﬀ D[i] ≤ d/2. Then, recursively, the left child of
+the root represents the subsequence of D with values ≤ d/2, and the right child
+the subsequence with values > d/2. The leaves represent runs of a single value
+in [1..d], and the tree has height lg d.
+M¨akinen and V¨alim¨aki [17] showed that the wavelet tree of D can also emulate
+array C, as C[i] = selectD[i](rankD[i](D, i) − 1). Then, Gagie et al. [6] showed
+that just the CSA and the wavelet tree of D provided document listing in time
+O(search(m) + ndoc lg(n/ndoc)), without using any RMQ structure. Navarro et
+al. [12] showed that this wavelet tree is grammar-compressible, as D contains
+repeated substrings at almost the same positions of the runs found in SA.
+
+Interleaved LCP Array
+
+3
+The longest-common-preﬁx array LCPS[1..|S|] of a string S is deﬁned such that
+LCPS[1] = 0 and, for 2 ≤ i ≤ |S|, LCPS[i] is the length of the longest common
+preﬁx of the lexicographically (i − 1)th and ith suﬃxes of S, that is, between
+S[SAS[i− 1]..|S|] and S[SAS[i]..|S|], where SAS is the suﬃx array of S. We deﬁne
+the interleaved LCP array of T , ILCP, to be the interleaving of the LCP arrays
+of the individual documents according to the document array.
+
+Deﬁnition 1. Let T [1, n] = S1 · S2 ··· Sd be the concatenation of documents Sj,
+D the document array of T , and LCPSj the longest common preﬁx array of string
+Sj. Then the interleaved LCP array of T is deﬁned, for all 1 ≤ i ≤ n, as
+
+(cid:2)
+
+(cid:3)
+rankD[i](D, i)
+
+.
+
+ILCP[i] = LCPSD[i]
+
+The following property of ILCP makes it suitable for document retrieval.
+
+110
+
+T. Gagie et al.
+
+Lemma 1. Let T [1, n] = S1 · S2 ··· Sd be the concatenation of documents Sj,
+SA its suﬃx array and D its document array. Let SA[(cid:2)..r] be the interval that
+contains the starting positions of suﬃxes preﬁxed by a pattern P [1..m]. Then the
+values strictly less than m in ILCP[(cid:2)..r] are in the same positions as the leftmost
+occurrences in D[(cid:2)..r] of the distinct document identiﬁers in that range.
+
+Proof. Let SASj [(cid:2)j..rj] be the interval of all the suﬃxes of Sj starting with
+P [1..m]. Then it must hold that LCPSj [(cid:2)j] < m, as otherwise Sj[SA[(cid:2)j−1]..SA[(cid:2)j−
+1] + m− 1] = Sj[SA[(cid:2)j]..SA[(cid:2)j] + m− 1] = P as well, contradicting the deﬁnition
+of (cid:2)j. For the same reason, it holds that LCPSj [(cid:2)j +k] ≥ m for all 1 ≤ k ≤ rj −(cid:2)j.
+Now, let Sj start at position pj + 1 in T , where pj = |S1 ··· Sj−1|. Because each
+Sj is terminated by the special symbol “$”, the lexicographic ordering between
+the suﬃxes Sj[k..] in SASj is the same as of the corresponding suﬃxes T [pj + k..]
+in SA. That is, it holds that (cid:5)SA[i], D[i] = j, 1 ≤ i ≤ n(cid:6) = (cid:5)pj + SASj [i], 1 ≤ i ≤
+|Sj|(cid:6). Or, put another way, SA[i] = pj + SASj [rankj(D, i)] whenever D[i] = j.
+Now, let fj be the leftmost occurrence of j in D[(cid:2)..r]. This means that SA[fj]
+is the lexicographically ﬁrst suﬃx of Sj that starts with P . By deﬁnition of
+(cid:2)j, it holds that (cid:2)j = rankj(D, fj). Thus, by deﬁnition of ILCP, it holds that
+ILCP[fj] = LCPSj [rankj(D, fj)] = LCPSj [(cid:2)j] < m, whereas all the other ILCP[k]
+(cid:7)(cid:8)
+values, for (cid:2) ≤ k ≤ r, where D[k] = j, must be ≥ m.
+Therefore, for the purposes of document listing, we can replace the C array
+by ILCP in Muthukrishnan’s algorithm: instead of recursing until listing all the
+positions k such that C[k] < (cid:2), we recurse until listing all the positions k such
+that ILCP[k] < m.
+
+3.1 Document Listing in General Collections
+
+Under Szpankowski’s very general A2 probabilistic model [16] (which includes
+Bernoulli and Markov chains of ﬁxed memory), the maximum LCP value in a
+string S is almost surely (a very strong kind of convergence2, which we abbreviate
+a.s.) O(lg |S|) [16]. This means that storing ILCP explicitly requires a.s. at most
+n lg lg(n/d) + O(n) bits, usually far less than the n lg d bits required by C.
+The fact that we are interested in the values 0 to m − 1 in ILCP gives a
+new relevant index for document listing in general collections. Grossi et al. [7]
+proved that, if we give the wavelet tree of a sequence S any shape (i.e., not
+necessarily balanced) and represent the wavelet tree bitmaps using a compressed
+representation (e.g., [13]), then the total space is the zero-order entropy of the
+represented sequence, H0(S), plus o(nh) bits, where h is the wavelet tree’s height.
+The o(nh) bits can become O(nh/ lg n) if we use the bitmap representation of
+P˘atra¸scu [14] instead. Now consider a representation where the leftmost leaf is at
+depth 1, the next 2 leaves are at depth 3, the next 4 leaves are at depth 5, and in
+general the 2d−1th to (2d− 1)th leftmost leaves are at depth 2d− 1. Then the ith
+2 A sequence Xn tends to a value β almost surely if, for every  > 0, the probability 
+that |XN /β − 1| >  for some N > n tends to zero as n tends to inﬁnity,
+limn→∞ supN>n Pr(|XN /β − 1| > ) = 0.
+
+Document Listing on Repetitive Collections
+
+111
+
+leftmost leaf is at depth O(lg i). If we build this wavelet tree on sequence ILCP,
+the total space is H0(ILCP) + O(n lg d/ lg n), which is a.s. n lg lg(n/d) + O(n).
+What is interesting about this shape is that, using the traversal of Gagie et
+al. [6] to reach the leaves with values 0 to m − 1, we need only reach m leaves
+at depth O(lg m) (i.e., the leftmost m in the wavelet tree), and thus we need to
+traverse only O(m) wavelet tree nodes. Array D can be stored in plain form, but
+permuted so that it is aligned to the wavelet tree leaves, which allows determining
+each distinct document identiﬁer in O(1) time.
+Theorem 1. Let T [1..n] = S1 · S2 ··· Sd be the concatenation of d documents
+Sj and let l be the maximum length of a repeated string in any Sj. Let CSA
+be a compressed suﬃx array on T that searches for any pattern P [1..m] in
+time search(m) ≥ m. Then we can store T in |CSA| + n(lg d + lg l + O(1))
+bits such that the ndoc documents where P [1..m] occurs can be listed in time
+O(search(m) + ndoc). If T is generated under Szpankowski’s A2 model [16], then
+the space is |CSA| + n(lg d + lg lg(n/d) + O(1)) bits.
+In particular, if we use the CSA of Belazzougui and Navarro [1], we recover the
+optimal time of Muthukrishnan’s solution, using (in most cases) less space.
+Corollary 1. Under the conditions of Theorem 1, we can obtain nHk(T ) +
+o(nHk(T )) + n(lg d + lg l + O(1)) bits and O(m + ndoc) time, where Hk(T ) is
+the k-th order empirical entropy of T , for any k ≤ α lgσ n, σ the alphabet size of
+T , and 0 < α < 1 any constant.
+
+3.2 Document Listing in Repetitive Collections
+Array ILCP has yet another property, which also makes it attractive for repetitive
+collections.
+Lemma 2. Let S be a string generated under Szpankowski’s A2 model. Let T be
+formed by concatenating d copies of S, each terminated with the special symbol
+“$”, and then carrying out s edits (symbol insertions, deletions, or substitutions)
+at arbitrary positions in T (excluding the ‘$’s). Then, a.s., the ILCP array of T
+is formed by ρ ≤ r + O(s lg(r + s)) runs of equal values, where r = |S|.
+Proof. Before applying the edit operations, we have T = S1 ··· Sd and Sj = S$
+for all j. At this point, ILCP is formed by at most r + 1 runs of equal values,
+since the d equal suﬃxes Sj[SASj [i]..r + 1] must be contiguous in the suﬃx array
+SA of T , in the area SA[(i − 1)d + 1..id]. Since the values l = LCPSj [i] are also
+equal, and ILCP values are the LCPSj values listed in the order of SA, it follows
+that ILCP[(i − 1)d + 1..id] = l forms a run, and thus there are r + 1 = n/d runs
+in ILCP. Now, if we carry out s edit operations on T , any Sj will be of length
+at most r + s + 1. Consider an arbitrary edit operation at T [k]. It changes all
+the suﬃxes T [k − h..n] for all 0 ≤ h < k. However, since a.s. the string depth
+of a leaf in the suﬃx tree of S is O(lg(r + s)) [16], the suﬃx will possibly be
+moved in SA only for h = O(lg(r + s)). Thus, a.s., only O(lg(r + s)) suﬃxes are
+moved in SA, and possibly the corresponding runs in ILCP are broken. Hence
+ρ ≤ r + O(s lg(r + s)) a.s.
+(cid:7)(cid:8)
+
+112
+
+T. Gagie et al.
+
+This proof generalizes M¨akinen et al.’s [9] arguments, which hold for uniformly
+distributed strings S. There is also experimental evidence [9] that, in real-life
+text collections, a small change to a string usually causes only a small change
+to its LCP array. Next we design a document listing data structure whose size is
+bound in terms of ρ.
+
+Let LILCP[1..ρ] be the array containing the partial sums of the lengths of
+the ρ runs in ILCP, and let VILCP[1..ρ] be the array containing the values
+in those runs. We can store LILCP as a bitvector L[1..n] with ρ 1s, so that
+LILCP[i] = select(L, i). Bitmap L can be stored using a structure by Okanohara
+and Sadakane [13] that requires ρ lg(n/ρ) + O(ρ) bits and answers select queries
+in O(1) time3. For rank it requires O(lg(n/ρ)) time, but we can reduce it to
+O(lg lg n) by building a y-fast trie [19] on every (lg n)th value of LILCP and
+completing the query with a binary search using select, adding O(ρ) bits.
+map from any position i to its run i(cid:4)
+any run i(cid:4)
+
+With this representation, it holds that ILCP[i] = VILCP[rank(L, i)]. We can
+= rank(L, i) in time O(lg lg n), and from
+
+to its starting position in ILCP, i = select(L, i(cid:4)
+
+), in constant time.
+
+= rank(L, (cid:2)) and r(cid:4)
+
+This is suﬃcient to emulate Sadakane’s algorithm [15] on a repetitive collection.
+ We will use RLCSA as the CSA. The sparse bitvector B[1..n] marking the
+document beginnings in T will be represented just like L, so that it requires
+d lg(n/d) + O(d) bits and lets us compute any value D[i] = rank(B, SA[i]) in
+time O(lg lg n + lookup(n)). Finally, we build an RMQ data structure on VILCP,
+requiring 2ρ + o(ρ) bits and without needing access to VILCP [3].
+Assume we have already used RLCSA to ﬁnd (cid:2) and r in O(search(m)) time.
+Now we compute (cid:2)(cid:4)
+= rank(L, r), which are the endpoints of
+the interval VILCP[(cid:2)(cid:4)..r(cid:4)
+] containing the values in the runs in ILCP[(cid:2)..r]. Now we
+run the recursive RMQs algorithm on VILCP[(cid:2)(cid:4)..r(cid:4)
+]. Each time we ﬁnd a minimum
+at VILCP[i(cid:4)
+], we remap it to the run ILCP[i..j], where i = max((cid:2), select(L, i)) and
+j = min(r, select(L, i + 1)− 1). For each i ≤ k ≤ j, we compute D[k] using B and
+RLCSA as explained, mark it in V [D[k]] ← 1, and report it. Since we do not have
+access to the values in ILCP nor in VILCP, the condition to stop the recursion at
+some value i(cid:4)
+is that V [D[i]] = 1 is already marked. We show next that this is
+correct as long as RMQ returns the leftmost minimum in the range and that we
+recurse ﬁrst to the left and then to the right of each minimum VILCP[i(cid:4)
+] found.
+Lemma 3. Using the procedure described, we correctly ﬁnd all the positions (cid:2) ≤
+k ≤ r such that ILCP[k] < m.
+Proof. Let j = D[k] be the leftmost occurrence of document j in D[(cid:2)..r]. By
+Lemma 1, among all the positions where D[k(cid:4)
+] = j in D[(cid:2)..r], k is the only one
+where ILCP[k] < m. Since we ﬁnd a minimum ILCP value in the range, and then
+explore the left subrange before the right subrange, it is not possible to ﬁnd ﬁrst
+another occurrence D[k(cid:4)
+] = j, since it has a larger ILCP value and is to the right
+of k. Therefore, when V [D[k]] = 0, that is, the ﬁrst time we ﬁnd a D[k] = j,
+it must hold ILCP[k] < m, and the same is true for all the other ILCP values
+in the run. Hence it is correct to list all those documents and mark them in V .
+3 Using a constant-time rank/select data structure for their internal array H.
+
+Document Listing on Repetitive Collections
+
+113
+
+Conversely, whenever we ﬁnd a V [D[k(cid:4)
+]] = 1, the document has already been
+] ≥ m holds,
+reported, thus this is not its leftmost occurrence and then ILCP[k(cid:4)
+as well as for the whole run. Hence it is correct to avoid reporting the whole run
+and to stop the recursion in the range, as the minimum value is already ≥ m. (cid:7)(cid:8)
+
+We have thus obtained our ﬁrst result for repetitive collections:
+
+Theorem 2. Let T = S1 · S2 ··· Sd be the concatenation of d documents Sj, and
+RLCSA be a suﬃx array on T , searching for any pattern P [1..m] in time search(m)
+and accessing SA[i] in time lookup(n). Let ρ be the number of runs in the ILCP array
+of T . We can store T in |RLCSA| + ρ lg(n/ρ) + O(ρ) + d lg(n/d) + O(d) bits such
+that document listing takes O(search(m) + ndoc · (lg lg n + lookup(n))) time.
+
+3.3 Document Counting
+
+l, r(cid:4)
+
+l] such that VILCP[(cid:2)(cid:4)..r(cid:4)
+
+lth occurrences of value l in VILCP[(cid:2)(cid:4)..r(cid:4)
+
+Finally, array ILCP allows us to eﬃciently count the number of distinct documents 
+where P appears, without listing them all. Sadakane [15] showed how to
+compute it in constant time adding just 2n + o(n) bits of space. With ILCP we
+can obtain a variant that is suitable for repetitive collections.
+We represent VILCP using a skewed wavelet tree as in Section 3.1. We can visit
+the ﬁrst m leaves in time O(m). Moreover, the traversal algorithm [6] tells us
+how many times each value 0 ≤ l < m occurs in VILCP[(cid:2)(cid:4)..r(cid:4)
+]. More precisely, we
+arrive at each leaf l with an interval [(cid:2)(cid:4)
+] contains from
+the (cid:2)(cid:4)
+]. We store a reordering
+of the run lengths so that the runs corresponding to each value l are collected
+left to right in ILCP and stored aligned to the wavelet tree leaf l. Those are
+concatenated into another bitmap L(cid:4)
+[1..n] with ρ 1s, similar to L, which allows
+us, using select(L(cid:4),·), to count the total length spanned by the (cid:2)(cid:4)
+lth runs
+in leaf l. By adding the areas spanned over the m leaves, we count the total
+number of documents where P occurs. Note that we need to correct the lengths
+of runs (cid:2)(cid:4)
+Theorem 3. Let T = S1 · S2 ··· Sd be the concatenation of d documents Sj, and
+RLCSA a compressed suﬃx array on T that searches for any pattern P [1..m] in
+time search(m) ≥ m. Let ρ be the number of runs in the ILCP array of T and l
+be the maximum length of a repeated substring inside any Sj. Then we can store
+T in |RLCSA| + ρ(lg l + 2 lg(n/ρ) +O(1)) bits such that the number of documents
+where a pattern P [1..m] occurs can be computed in time O(search(m)).
+
+, as they may overlap the original interval ILCP[(cid:2)..r].
+
+lth to the r(cid:4)
+
+and r(cid:4)
+
+lth to r(cid:4)
+
+4 Precomputed Document Listing
+
+When the document collection is repetitive, the document array is also repetitive.
+Let SA[i..j] be a run in the suﬃx array, so that there is another area SA[i(cid:4)..j(cid:4)
+],
+where SA[i + k] = SA[i(cid:4)
++ k]
+for all k ≤ j − i, except for at most d cells in the entire array D [5]. Navarro
+et al. [12] used this repetitiveness in grammar-based compression of the wavelet
+
++ k] − 1 for all k ≤ j − i. Then D[i + k] = D[i(cid:4)
+
+114
+
+T. Gagie et al.
+
+tree of D. We can also use it to compress the precomputed answers to document
+listing queries covering long intervals of suﬃxes.
+
+Let v be a suﬃx tree node. We write SAv to denote the interval of the suﬃx
+array covered by node v, and Dv to denote the set of distinct document identiﬁers
+occurring in the same interval of the document array. Given block size b and a
+constant β ≥ 1, we build a sparse suﬃx tree that allows us to answer document
+listing queries eﬃciently. For any suﬃx tree node v, it holds that
+1. |SAv| < b, and thus documents can be listed in time O(b · lookup(n)) by
+
+2. we can compute the set Dv as a union of some sets Du1 , . . . , Duk of total
+
+using CSA and bitvector B; or
+size at most β · |Dv|, where nodes u1, . . . , uk are in the sparse suﬃx tree.
+
+We start by selecting suﬃx tree nodes v1, . . . , vL, so that no selected node is
+an ancestor of another, and the intervals SAvi of the selected nodes cover the
+entire suﬃx array. Given node v and its parent w, we select v if |SAv| ≤ b and
+|SAw| > b, and store Dv with the node. These nodes become the leaves of the
+sparse suﬃx tree, and we assume that they are numbered from left to right. Next
+we proceed upward in the suﬃx tree. Let v be an internal node, u1, . . . , uk its
+children, and w its parent. If the total size of sets Du1, . . . , Duk is at most β·|Dv|,
+we remove node v from the tree, and add nodes u1, . . . , uk to the children of node
+w. Otherwise we keep node v in the sparse suﬃx tree, and store Dv there.
+
+Let v1, . . . , vL be the leaf nodes and vL+1, . . . , vL+I the internal nodes of the
+sparse suﬃx tree. We use grammar-based compression to replace frequent subsets
+in sets Dv1 , . . . , DvL+I with grammar rules expanding to those subsets. Given a
+set Z and a grammar rule X → Y , where Y ⊆ {1, . . . , d}, we replace Z with
+(Z ∪ {X})\ Y , if Y ⊆ Z. As long as |Y | ≥ 2 for all grammar rules X → Y , each
+set Dvi can be decompressed in O(|Dvi|) time.
+When all rules have been applied, we store the reduced sets Dv1, . . . , DvL+I
+as an array A of document and rule identiﬁers. The array takes |A| lg(d + nR)
+bits of space, where nR is the total number of rules. We mark the ﬁrst cell in the
+encoding of each set with a 1 in a bitvector BA[1..|A|], so that set Dvi can be
+retrieved by decompressing A[select(BA, i), select(BA, i + 1) − 1]. The bitvector
+takes |A|(1 + o(1)) bits of space and answers select queries in O(1) time [13].
+The grammar rules are stored similarly, in an array G taking |G| lg d bits and
+a bitvector BG[1..|G|] of |G|(1 + o(1)) bits separating the array into rules (note
+that right hand sides of rules are formed only by terminals).
+
+In addition to the sets and the grammar, we also have to store the sparse
+suﬃx tree. Bitvector BL[1..n] marks the ﬁrst cell of interval SAvi for all leaf
+nodes vi, allowing us to convert interval SA[(cid:2), r] into a range of nodes [ln, rn] =
+[rank(BL, (cid:2)), rank(BL, r + 1) − 1]. By using the same bitvector as for LILCP in
+Section 3.2, we can store BL in L lg(n/L) +O(L) bits and answer rank queries in
+O(lg lg n) time and select queries in constant time. Another bitvector BF [1..L+I]
+of (L + I)(1 + o(1)) bits marks the nodes that are the ﬁrst children of their
+respective parents, supporting rank queries in constant time [13]. Array F of
+I lg I bits stores pointers to parent nodes, so that if node vi is a ﬁrst child, its
+
+Document Listing on Repetitive Collections
+
+115
+
+function listDocuments((cid:4), r)
+(res, ln) ← (∅, rank(BL, (cid:4)))
+if select(BL, ln) < (cid:4):
+
+), ln + 1)
+
+r(cid:4) ← min(select(BL, ln + 1) − 1, r)
+(res, ln) ← (list((cid:4), r(cid:4)
+if r(cid:4)
+= r: return res
+rn ← rank(BL, r + 1) − 1
+if select(BL, rn + 1) ≤ r:
+(cid:4)(cid:4) ← select(BL, rn + 1)
+res ← res ∪ list((cid:4)(cid:4), r)
+
+return res ∪ decompress(ln, rn)
+
+function decompress((cid:4), r)
+
+(res, i) ← (∅, (cid:4))
+while i ≤ r:
+next ← i + 1
+while BF [i] = 1:
+) ← parent(i)
+(i(cid:4), next(cid:4)
+if next(cid:4) > r + 1: break
+(i, next) ← (i(cid:4), next(cid:4)
+
+)
+
+res ← res ∪ set(i)
+i ← next
+return res
+
+function parent(i)
+
+par ← F [rank(BF , i)]
+return (par + L, N [par])
+
+function set(i)
+
+res ← ∅
+(cid:4) ← select(BA, i)
+r ← select(BA, i + 1) − 1
+for j ← (cid:4) to r:
+
+if A[j] ≤ d: res ← res ∪ {A[j]}
+else: res ← res ∪ rule(A[j] − d)
+
+return res
+
+function rule(i)
+
+(cid:4) ← select(BG, i)
+r ← select(BG, i + 1) − 1
+return G[(cid:4) . . . r]
+
+function list((cid:4), r)
+res ← ∅
+for i ← (cid:4) to r:
+
+res ← res ∪ {rank(B, SA[i])}
+
+return res
+
+Fig. 1. Pseudocode for document listing using precomputed answers. Function
+listDocuments((cid:4), r) lists the documents from interval SA[(cid:4), r]; decompress((cid:4), r) decompresses 
+the sets stored in nodes v(cid:2), . . . , vr; parent(i) returns the parent node and the
+leaf node following it for a ﬁrst child vi; set(i) decompresses the set stored in vi; rule(i)
+expands the ith grammar rule; and list((cid:4), r) lists the documents from interval SA[(cid:4), r]
+by using CSA and bitvector B.
+
+parent node is vj, where j = L + F [rank(BF , i)]. Finally, array N of I lg L bits
+stores a pointer to the leaf node following each internal node.
+Figure 1 contains pseudocode for document listing using the precomputed
+answers. Function list((cid:2), r) takes O((r + 1 − (cid:2))(lg lg n + lookup(n))) time, set(i)
+takes O(|Dvi|) time, and parent(i) takes O(1) time. Function decompress((cid:2), r)
+requires O(|res|) time to decompress the sets. Traversing the tree takes additional 
+O(h) time per decompressed set, where h is the height of the sparse suﬃx
+tree. As each set contains at least one document, and we may have to list each
+document up to β times, this sums to O(βh · |res|) time in the worst case. Hence
+the total time for listDocuments((cid:2), r) is O(ndoc · βh + lg lg n), if the answer has
+been precomputed, and O(b · (lg lg n + lookup(n))) otherwise.
+
+5 Experiments
+
+We implemented the document listing approaches described in preceding sections,
+ and measured their performance on two datasets. All experiments were
+
+116
+
+T. Gagie et al.
+
+Table 1. Means and standard deviations (SD) of ndoc and the ratio occ
+pattern sets
+
+ndoc for the
+
+fiwiki, ndoc
+fiwiki, ratio
+
+High
+
+Medium
+
+Low
+
+Mean
+1810.8
+32.04
+
+SD
+
+1369.8
+378.62
+
+Mean
+602.7
+4.26
+
+SD
+654.9
+22.72
+
+Mean
+327.0
+1.75
+
+SD
+556.7
+2.46
+
+influenza, ndoc 111021.3 29379.4 69666.5 19056.8 46304.3 17082.8
+influenza, ratio
+
+1.55
+
+0.26
+
+1.11
+
+0.06
+
+1.23
+
+0.08
+
+run on an Intel i7 860 2.8 GHz (8192 KB cache), with 16 GB RAM, running
+Ubuntu 12.04 and compiling with gcc-4.6.3 -03.
+
+Test Data. We used two repetitive text collections. Fiwiki is a 400 MB preﬁx of
+Finnish Wikipedia version history. Each version of each Wikipedia article is considered 
+a separate document, giving 20,433 documents. influenza is composed
+of genomes of the inﬂuenza virus, totaling 321.2 MB, and 227,356 documents.
+
+Test Patterns. Let occ be the number of times a pattern occurs in the whole collection,
+ and recall ndoc is the number of documents containing the pattern. Document 
+listing queries for patterns with similar occ and ndoc are easily handled by
+just enumerating all the positions of pattern occurrences (with the RLCSA) and
+mapping them to document identiﬁers. This approach however becomes less feasible 
+as the separation between occ and ndoc grows, and at some point specialized
+document listing approaches become necessary. With this in mind, for each collection 
+we constructed three sets of patterns as follows. First, we listed all patterns
+of length k present, and then ordered the patterns in descending order by value
+occ − ndoc, picking speciﬁc intervals of this list for testing.
+
+For fiwiki, the pattern length is 8, and each pattern set contains 20,000
+patterns, starting at ranks 1,001, 40,001 and 100,001 of the full list of patterns.
+For influenza, the pattern length is 6, the set size 1000, and starting ranks are
+1, 1,001 and 2,001. We call these three sets in both collections the high, medium
+and low pattern sets, respectively. Table 1 gives pattern statistics.
+
+Results. Figure 2 shows the space-time tradeoﬀ achieved by our document listing 
+methods. The interleaved LCP array approach (Section 3) is called ilcp, and
+values following underscores represent the RLCSA sample rate. The precomputed 
+document listing approach (Section 4) is called pdl, and values following
+underscores represent block size and the β value.
+
+As a baseline we measured the time for a brute force (brute) approach, which
+simply enumerates pattern occurrences with the RLCSA, collecting distinct documents.
+ This approach adds no space to the index. Like ilcp, brute’s tradeoﬀ
+comes from the sample period of the RLCSA.
+
+Our ﬁrst observation is that the new approaches achieve small space overhead,
+particularly on the fiwiki set. Speciﬁcally, the RLCSA with sample period 128
+
+Document Listing on Repetitive Collections
+
+117
+
+High
+
+Medium
+
+Low
+
+)
+s
+(
+ 
+e
+m
+
+i
+t
+
+)
+s
+(
+ 
+
+e
+m
+
+i
+t
+
+100.0
+
+50.0
+
+25.0
+
+10.0
+
+5.0
+
+2.5
+
+1.0
+
+1000
+500
+250
+
+100
+50
+25
+
+10
+5
+
+0
+
+2
+
+4
+
+6
+
+8 0
+
+2
+
+4
+
+6
+
+8 0
+
+2
+
+4
+
+6
+
+8
+
+High
+
+Medium
+
+Low
+
+method
+
+brute_128
+brute_64
+brute_32
+brute_16
+brute_8
+ilcp_128
+ilcp_64
+ilcp_32
+ilcp_16
+ilcp_8
+pdl_1024_16
+pdl_256_16
+pdl_128_2
+
+f
+i
+
+w
+k
+
+i
+
+i
+
+i
+
+n
+
+f
+l
+
+u
+e
+n
+z
+a
+
+0
+
+2
+
+4
+
+6
+
+8
+
+10 0
+
+4
+
+2
+bits per character
+
+6
+
+8
+
+10 0
+
+2
+
+4
+
+6
+
+8
+
+10
+
+Fig. 2. Document listing times and memory required by diﬀerent document listing
+approaches. Bits per character are shown on the x-axis, and time taken to list the
+documents on the y-axis (note the logarithmic scale). The time taken to ﬁnd suﬃx
+array intervals corresponding to each pattern is not included in times shown here.
+
+takes 29 MB and 27 MB for the fiwiki and influenza collections, respectively
+(about 7% and 8% of the uncompressed collection sizes). Including such RLCSA,
+ilcp took 40 MB and 45 MB (about 10% and 14%). With block size b = 1024
+and β = 16, pdl took 61 MB and 267 MB (about 15% and 83%).
+
+With respect to query time, pdl signiﬁcantly outperforms ilcp and brute on
+both data sets and is around an order of magnitude faster than the others when
+memory is equated. On the other hand ilcp is beaten by brute, except when the
+separation between occ and ndoc becomes large (the high fiwiki pattern set).
+Our most important experimental result is that, on the fiwiki collection, pdl
+speeds up document listing by around an order of magnitude over brute while still
+using total space that is only a fraction of the uncompressed collection size. We
+were unable to compare to more sophisticated document listing techniques [12]
+designed for non-highly-repetitive collections because we could not construct
+them on our data sets. We leave an extensive comparison for the full paper.
+
+6 Conclusions
+
+We have described two approaches to document listing in highly repetitive collections 
+— using an interleaved LCP array (ilcp) and precomputed document
+
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+118
+
+T. Gagie et al.
+
+listing (pdl) — and shown that, on some representative collections, pdl signiﬁcantly 
+reduces the query time of a brute-force solution, while still using only a
+fraction of the space of the uncompressed collection.
+
+Aside from further experimental analysis, there are many directions for future
+work. Probably the most interesting one is to apply the ilcp approach over faster
+document listing indices, such as the wavelet tree of Theorem 3, which would
+yield an interesting space/time tradeoﬀ.
+
+Acknowledgements. We thank Giovanni Manzini for suggesting this line of research,
+ Veli M¨akinen and Jorma Tarhio for helpful discussions, Cecilia Hern´andez
+for her grammar compressor, and Meg Gagie for righting our own grammar.
+
+References
+
+1. Belazzougui, D., Navarro, G.: Alphabet-independent compressed text indexing. In:
+Demetrescu, C., Halld´orsson, M.M. (eds.) ESA 2011. LNCS, vol. 6942, pp. 748–759.
+Springer, Heidelberg (2011)
+
+2. Claude, F., Navarro, G.: Improved grammar-based compressed indexes. In:
+Calder´on-Benavides, L., Gonz´alez-Caro, C., Ch´avez, E., Ziviani, N. (eds.) SPIRE
+2012. LNCS, vol. 7608, pp. 180–192. Springer, Heidelberg (2012)
+
+3. Fischer, J.: Optimal succinctness for range minimum queries. In: L´opez-Ortiz, A.
+
+(ed.) LATIN 2010. LNCS, vol. 6034, pp. 158–169. Springer, Heidelberg (2010)
+
+4. Gagie, T., Gawrychowski, P., K¨arkk¨ainen, J., Nekrich, Y., Puglisi, S.J.: A faster
+grammar-based self-index. In: Dediu, A.-H., Mart´ın-Vide, C. (eds.) LATA 2012.
+LNCS, vol. 7183, pp. 240–251. Springer, Heidelberg (2012)
+
+5. Gagie, T., Navarro, G., Puglisi, S.J.: Colored range queries and document retrieval.
+ In: Chavez, E., Lonardi, S. (eds.) SPIRE 2010. LNCS, vol. 6393, pp. 67–81.
+Springer, Heidelberg (2010)
+
+6. Gagie, T., Navarro, G., Puglisi, S.J.: New algorithms on wavelet trees and applications 
+to information retrieval. Theor. Comp. Sci. 426-427, 25–41 (2012)
+
+7. Grossi, R., Gupta, A., Vitter, J.S.: High-order entropy-compressed text indexes.
+
+In: Proc. SODA, pp. 636–645 (2003)
+
+8. Hon, W.-K., Shah, R., Vitter, J.: Space-eﬃcient framework for top-k string retrieval
+
+problems. In: Proc. FOCS, pp. 713–722 (2009)
+
+9. M¨akinen, V., Navarro, G., Sir´en, J., Valim¨aki, N.: Storage and retrieval of highly
+
+repetitive sequence collections. J. Computational Biology 17(3), 281–308 (2010)
+
+10. Manber, U., Myers, G.: Suﬃx arrays: a new method for on-line string searches.
+
+SIAM J. Comput. 22(5), 935–948 (1993)
+
+11. Muthukrishnan, S.: Eﬃcient algorithms for document retrieval problems. In: Proc.
+
+SODA, pp. 657–666 (2002)
+
+12. Navarro, G., Puglisi, S.J., Valenzuela, D.: Practical compressed document retrieval.
+In: Pardalos, P.M., Rebennack, S. (eds.) SEA 2011. LNCS, vol. 6630, pp. 193–205.
+Springer, Heidelberg (2011)
+
+13. Okanohara, D., Sadakane, K.: Practical entropy-compressed rank/select dictionary.
+
+In: Proc. ALENEX (2007)
+
+14. P˘atra¸scu, M.: Succincter. In: Proc. FOCS, pp. 305–313 (2008)
+
+Document Listing on Repetitive Collections
+
+119
+
+15. Sadakane, K.: Succinct data structures for ﬂexible text retrieval systems. J. Disc.
+
+Alg. 5(1), 12–22 (2007)
+
+16. Szpankowski, W.: A generalized suﬃx tree and its (un)expected asymptotic behaviors.
+ SIAM J. Comput. 22(6), 1176–1198 (1993)
+
+17. V¨alim¨aki, N., M¨akinen, V.: Space-eﬃcient algorithms for document retrieval. In:
+Ma, B., Zhang, K. (eds.) CPM 2007. LNCS, vol. 4580, pp. 205–215. Springer,
+Heidelberg (2007)
+
+18. Weiner, P.: Linear pattern matching algorithm. In: Proc. SAT, pp. 1–11 (1973)
+19. Willard, D.: Log-logarithmic worst-case range queries are possible in space θ(n).
+
+Inf. Pr. Lett. 17(2), 81–84 (1983)
+
+

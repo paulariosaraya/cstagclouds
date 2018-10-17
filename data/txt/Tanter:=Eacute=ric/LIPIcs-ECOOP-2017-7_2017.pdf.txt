@@ -1,0 +1,1937 @@
+Type Abstraction for Relaxed Noninterference∗
+Raimil Cruz1, Tamara Rezk2, Bernard Serpette3, and Éric Tanter4
+
+1 PLEIAD Lab, Computer Science Department (DCC), University of Chile
+
+2
+
+3
+
+racruz@dcc.uchile.cl
+INRIA - Indes Project-Team, Sophia Antipolis, France
+Tamara.Rezk@inria.fr
+INRIA - Indes Project-Team, Sophia Antipolis, France
+Bernard.Serpette@inria.fr
+
+4 PLEIAD Lab, Computer Science Department (DCC), University of Chile
+
+etanter@dcc.uchile.cl
+
+Abstract
+
+Information-ﬂow security typing statically prevents conﬁdential information to leak to public
+channels. The fundamental information ﬂow property, known as noninterference, states that a
+public observer cannot learn anything from private data. As attractive as it is from a theoretical
+viewpoint, noninterference is impractical: real systems need to intentionally declassify some
+information, selectively. Among the diﬀerent information ﬂow approaches to declassiﬁcation,
+a particularly expressive approach was proposed by Li and Zdancewic, enforcing a notion of
+relaxed noninterference by allowing programmers to specify declassiﬁcation policies that capture
+the intended manner in which public information can be computed from private data. This
+paper shows how we can exploit the familiar notion of type abstraction to support expressive
+declassiﬁcation policies in a simpler, yet more expressive manner. In particular, the type-based
+approach to declassiﬁcation—which we develop in an object-oriented setting—addresses several
+issues and challenges with respect to prior work, including a simple notion of label ordering
+based on subtyping, support for recursive declassiﬁcation policies, and a local, modular reasoning
+principle for relaxed noninterference. This work paves the way for integrating declassiﬁcation
+policies in practical security-typed languages.
+
+1998 ACM Subject Classiﬁcation D.4.6 Security and Protection: Information ﬂow controls,
+D.3.2 Language Classiﬁcations: Object-oriented languages
+
+Keywords and phrases type abstraction, relaxed noninterference, information ﬂow control
+
+Digital Object Identiﬁer 10.4230/LIPIcs.ECOOP.2017.7
+
+Supplementary Material ECOOP Artifact Evaluation approved artifact available at
+http://dx.doi.org/10.4230/DARTS.3.2.9
+
+Introduction
+
+1
+Information-ﬂow security typing enables statically classifying program entities with respect
+to their conﬁdentiality levels, expressed via a lattice of security labels [18]. For instance,
+a two-level lattice L (cid:52) H allows distinguishing public or low data (e.g. IntL) from conﬁdential 
+or high data (e.g. IntH). An information-ﬂow security type system statically ensures
+noninterference, i.e. that high-conﬁdentiality data may not ﬂow directly or indirectly to
+
+∗ This work was partially funded by Project Conicyt REDES 140219 “CEV: Challenges in Practical
+Electronic Voting”. Raimil Cruz is funded by CONICYT-PCHA/Doctorado Nacional/2014-63140148.
+
+© Raimil Cruz, Tamara Rezk, Bernard Serpette, and Éric Tanter;
+licensed under Creative Commons License CC-BY
+
+31st European Conference on Object-Oriented Programming (ECOOP 2017).
+Editor: Peter Müller; Article No. 7; pp. 7:1–7:27
+
+Leibniz International Proceedings in Informatics
+Schloss Dagstuhl – Leibniz-Zentrum für Informatik, Dagstuhl Publishing, Germany
+
+Consistent*Complete*WellDocumented*EasytoReuse**Evaluated*ECOOP*Artifact*AEC7:2
+
+Type Abstraction for Relaxed Noninterference
+
+lower-conﬁdentiality channels [36]. To do so, the security type system tracks the conﬁdentiality 
+level of computation based on the conﬁdentiality of the data involved.
+
+As attractive as it is, noninterference is too strict to be useful in practice, as it prevents
+conﬁdential data to have any inﬂuence whatsoever on observable, public output. Indeed,
+even a simple password checker function violates noninterference. Consider the following:
+
+String login ( String guess , String password )
+
+if( password == guess )
+
+return " Login Successful "
+
+else
+
+}
+
+return " Login failed "
+
+By deﬁnition, a public observer that tries to log in should be able to “learn something”
+about the conﬁdential input (here, password), thereby violating the conﬁdentiality restriction
+imposed by noninterference.
+
+This problem with noninterference has long been recognized. Supporting such intentional
+downward information ﬂows is called declassiﬁcation, which can be supported in many different 
+ways [29]. For example, Jif [24] supports an explicit declassify operator to allow
+downward ﬂows to be accepted by the security type system.
+In the above example, one
+can use declassify(password == guess) to state that the returned value is public knowledge.
+However, arbitrary uses of a declassify operator may lead to serious information ﬂow leaks;
+for instance declassify(password) simply makes the password publicly available. One solution 
+adopted by Jif is to control declassiﬁcation using principals with privileges, as in the
+Decentralized Label Model (DLM) [25]. Trusted declassiﬁcation [21] restricts Jif’s mechanism 
+to specify authorization in a global policy ﬁle and formulate noninterference modulo
+trusted methods. Robust declassiﬁcation [40] relies on integrity to ensure that low integrity
+ﬂows do not inﬂuence high conﬁdentiality data that will later be declassiﬁed.
+
+To capture the essence of expressive declassiﬁcation without appealing to additional
+mechanisms like integrity or authority, Li and Zdancewic proposed an expressive mechanism
+for declassiﬁcation policies that supports the extensional speciﬁcation of secrets and their
+intended declassiﬁcation [22]. A declassiﬁcation policy is a function that captures what
+information on a conﬁdential value can be declassiﬁed to eventually produce a public value.
+For the password checker example, if the declassiﬁcation policy for password is λx.λy.x==y,
+then an equality comparison with password can be declassiﬁed (and thus be made public).
+However, this declassiﬁcation policy for password disallows arbitrary declassiﬁcations such as
+revealing the password. Furthermore, declassiﬁcation can be progressive, requiring several
+operations to be performed in order to obtain public data: e.g. λx.λy.hash(x)==y speciﬁes
+that only the result of comparing the hash of the password for equality can be made public.
+The formal security property, called relaxed noninterference, states that a secure program 
+can be rewritten into an equivalent program without any variable containing conﬁdential 
+data but whose inputs are conﬁdential and declassiﬁed. For the password checker
+example with p (cid:44) λx.λy.x==y as the declassiﬁcation policy for password, the program
+login(guess,password) can be rewritten to the equivalent program login’(guess,p(password))
+where login’ is:
+
+String login ’( String guess , String→Bool eq ){
+
+if(eq( guess )) ...
+
+}
+
+Note that p(password) is a closure that strongly encapsulates the secret value, and only
+allows equality comparisons.
+
+R. Cruz, T. Rezk, B. Serpette, and É. Tanter
+
+7:3
+
+While the proposal of Li and Zdancewic elegantly and formally captures the essence
+of ﬂexible declassiﬁcation while retaining a way to state a clear and extensional security
+property of interest, it suﬀers from a number of limitations that jeopardize its practical
+adoption. First, security labels are sets of functions that form a security lattice whose ordering,
+ based on a semantic interpretation of these sets of functions, is far from trivial [22]:
+it relies on a general notion of program equivalences that would be both hard to implement
+and to comprehend. Second, Li and Zdancewic explicitly rule out recursive declassiﬁcation 
+policies, which are however natural when expressing declassiﬁcation of recursive data
+structures. Finally, the rewriting-based deﬁnition of relaxed noninterference is unsatisfying
+for practical software development, as it rigidly requires all secrets to be both global and
+external, thereby losing modular reasoning; as recognized by the authors, local language
+constructs for introducing secrets and their policies are lacking [22].
+
+In this work, we exploit the familiar notion of type abstraction to capture declassiﬁcation 
+policies in a simpler, yet more expressive manner. Type abstraction in programming
+languages manifests in diﬀerent ways [26]; here, we speciﬁcally adopt the setting of objectoriented 
+programming, where object types are interfaces, i.e. the set of methods available
+to the client of an object, and type abstraction is driven by subtyping. For instance, the
+empty interface type—the root of the subtyping hierarchy—denotes an object that hides all
+its attributes, which intuitively coincides with secret data, while the interface that coincides
+with the implementation type of an object exposes all of them, which coincides with public
+data. Our initial observation is that any interface in between these two extremes denotes
+declassiﬁcation opportunities. Additionally, choosing objects, as opposed to records, allows
+us to explore recursive declassiﬁcation policies from the start, given that the essence of data
+abstraction in OOP are recursive types [17].
+
+The type-based approach to conﬁdentiality is very intuitive as it only relies on concepts
+that are readily available in object-oriented languages: a declassiﬁcation policy is simply a
+method signature, a security label is an object interface, and label ordering boils down to
+subtyping. Progressive declassiﬁcation occurs through chaining of method invocations. In
+fact, the only extension to the standard programming model is that a security type has two
+facets, each representing the view available to a private and public observer, respectively. In
+addition to being intuitive, the type-based approach addresses the issues and challenges of
+the downgrading policies of Li and Zdancewic: a) there is no need to rely on general program
+equivalences to deﬁne and decide label ordering, which is just standard, syntactic subtyping;
+b) declassiﬁcation naturally scales to recursive policies over recursive data structures; and
+c) type-based relaxed noninterference is formulated as a modular reasoning principle, and
+local secrets can be introduced with standard type annotations.
+
+This work makes the following contributions:
+We develop a novel type-based approach to declassiﬁcation policies, which supports interesting 
+scenarios while appealing to standard programming concepts such as interface
+types and subtyping (Section 2).
+We capture the essence of type-based declassiﬁcation in a core object-oriented language,
+ObSEC, in which a security type is a pair of (recursive) object types (Section 3). We
+describe the static and dynamic semantics of ObSEC and prove type safety.
+We specify the formal semantic notion of type-based relaxed noninterference, which accounts 
+for type-based declassiﬁcation policies, independently of any enforcement mechanism 
+(Section 4). We then prove type soundness of ObSEC: a well-typed program satisﬁes
+type-based relaxed noninterference.
+We informally explore how the expressiveness of declassiﬁcation policies scales with the
+
+ECOOP 2017
+
+7:4
+
+Type Abstraction for Relaxed Noninterference
+
+expressiveness of types (Section 5), identifying interesting venues for extensions.
+
+Section 6 discusses related work and Section 7 concludes. Auxiliary deﬁnitions are provided
+in Appendix.
+
+Type-Based Declassiﬁcation Policies
+
+2
+We now progressively and informally introduce the type-based approach to declassiﬁcation
+policies, appealing ﬁrst to a simple intuitive connection with type abstraction. We then
+explain why this ﬁrst intuition is insuﬃcient, and reﬁne it in order to support the key
+features of a security-typed language with expressive declassiﬁcation. We end by discussing
+the security guarantee supported by the approach.
+
+Type abstraction and conﬁdentiality.
+It is well-known that type abstraction can capture
+the need to expose only a subset of the operations of an object. For instance, if the password
+secret is made available using the interface type StringEq (cid:44) [eq : String → Bool], the login
+function from Section 1 can be rewritten as follows:
+String login (String guess , StringEq password ){
+
+if( password .eq( guess )) ...
+
+}
+
+Because password has type StringEq, the login function cannot accidentally leak information
+about the password. In particular, note that the function cannot even return the password
+because StringEq is a supertype of String, not a subtype. Therefore, the standard substitutability 
+expressed by subtyping seems to align well with the valid information ﬂows permitted
+in a conﬁdentiality type system: a (public) string value at type String can be used freely,
+and passed as argument expecting a (mostly) private StringEq, which only exposes equality
+comparison. Similarly, any value can ﬂow to a private variable, characterized by the empty
+interface type, > (cid:44) [ ].1
+
+Progressive declassiﬁcation policies can be expressive with nested interface types. For
+instance, assume that String objects have a hash method, of type Unit → Int. To specify
+that only the hash of the password can be compared for equality, it suﬃces to expose the
+password at type StringHashEq (cid:44) [hash : Unit → IntEq], where IntEq (cid:44) [eq : Int → Bool]:
+
+String login (Int guess , StringHashEq password ){
+
+if( password . hash (). eq( guess )) ...
+
+}
+
+In the code above, the only available operation on password is hash(), which in turn returns
+an integer that only exposes an equality comparison. Note that here again, StringHashEq >:
+String and IntEq >: Int.
+
+Recursive declassiﬁcation. The informal presentation of type-based declassiﬁcation so far
+has exempliﬁed two of the main advantages of our approach: security label ordering is
+syntactic subtyping, and secrets and their declassiﬁcation policies can be declared locally,
+by standard type annotations. We now illustrate recursive declassiﬁcation policies.
+
+1 The reader might wonder at this point about the eﬀect of using arbitrary downcasts, as supported in
+Java. Indeed, downcasts are a way to violate type abstraction, and therefore to violate the type-based
+security guarantees. For instance, the login function could return (String)password, thereby returning
+the password for public consumption. Fortunately, there is a simple solution to this issue, which we
+discuss in Section 5.
+
+R. Cruz, T. Rezk, B. Serpette, and É. Tanter
+
+7:5
+
+Recursive declassiﬁcation policies are desirable to express interesting declassiﬁcation of
+either inductive data structures or object interfaces (whose essence are recursive types [17]).
+Consider for instance a secret list of strings, for which we want to allow traversal of the
+structure and comparison of its elements with a given string. This can be captured by the
+recursive type StrEqList deﬁned as:
+
+StrEqList (cid:44) [isEmpty : Unit → Bool, head : Unit → StringEq, tail : Unit → StrEqList]
+
+To allow traversal, the declassiﬁcation policy exposes the methods isEmpty, head and tail,
+with the speciﬁc constraints that a) accessing an element through head yields a StringEq, not
+a full String, and b) the tail method returns the tail of the list with the same declassiﬁcation
+policy. Type-based declassiﬁcation policies can therefore naturally be recursive, as long as
+the underlying type language allows (some form of) recursive types.
+
+Facets of computation. With the standard programming approach described so far, a
+program that attempts to violate the declassiﬁcation protocol of an object is rejected by the
+(standard) type system because it is ill-typed. For instance:
+
+String login (Int guess , StringEq password ){
+
+if( password . length (). eq( guess )) ...
+
+}
+
+is rejected because length is not part of the exposed interface of password.
+
+However, security-typed languages typically are more ﬂexible than this: they allow computation 
+to proceed with private information, but ensure the result of such computation is
+itself private [38]. For instance, adding a public integer and a private integer yields a private
+result. Li and Zdancewic follow the same approach with declassiﬁcation policies: using a
+secret in a way that does not follow its declassiﬁcation policy yields a private result [22].
+The justiﬁcation of these approaches is that computation with private data is relevant, but
+only visible to a high security, private observer; noninterference only dictates that a low
+security, public observer should not be able to deduce information about private data by
+observing public outputs.
+
+This means that security-typed languages inherently adopt a multi-faceted view of computation,
+ where each observation level corresponds to a diﬀerent facet. Sticking to a twofacet,
+ private/public model, the deﬁnition of login above is well-typed if one “knows” that
+password is in fact a String object. In this case using length is valid: it just yields a private
+result. Flow-sensitivity then ensures that the result of login, which follows from a conditional
+branching computed based on a private value, is also private.
+
+Faceted types. To accommodate the possibility of computing with private data, we extend
+standard types to faceted types. A security type S, noted T / U, consists of two standard
+types: type T for the private interface, and type U for the public interface.2. In this paper,
+we often use the notation TL as a shortcut for the lowest-conﬁdentiality security type T / T,
+in which the public facet exposes the same interface as the private facet, and TH for the
+fully-conﬁdential security type T / > in which the public facet is empty.
+
+To express that password is a private string that can only be declassiﬁed through equality
+
+comparison, we can use the following signature for login:
+
+2 Similarly to multi-faceted execution [8], one can extend the model to support n levels of observations,
+
+by introducing security types with n facets.
+
+ECOOP 2017
+
+7:6
+
+Type Abstraction for Relaxed Noninterference
+
+StringL login (IntL guess , String/StringEq password )
+
+With this signature the previous deﬁnition of login, which invokes length, is still illtyped.
+ Indeed, the body of the function now has type StringL, capturing the fact that the
+resulting string is private, but the signature pretends that the result of login is public, which
+violates noninterference. For login to be well-typed, either the declared return type should
+be changed to StringH, or the conditional should adhere to the public facet StringEq.
+
+Note that subtyping naturally extends covariantly to faceted types, i.e. T1 / U1 <: T2 / U2
+iﬀ both T1 <: T2 and U1 <: U2. Therefore, it is invalid to pass a private string of type
+String / > to a function expecting a declassiﬁable string of type String / StringEq, because
+> is not a subtype of StringEq. Subtyping on the public facet corresponds to security label
+ordering; compared to the semantic, equivalence-based interpretation of labels of Li and
+Zdancewic, here label ordering is just standard syntactic subtyping.
+
+For
+
+the
+
+for
+
+the
+
+same
+
+Object
+
+types directly support
+secret.
+
+the possibility to oﬀer diﬀerent declassiﬁcation
+paths
+type
+String / [hash : UnitL → IntL, length : UnitL → IntL] allows a client to obtain a public integer
+from a string by using either its hash or its length. Naturally, by breadth subtyping, such a
+secret with two possible declassiﬁcation paths can also be used as a more restricted secret,
+e.g. one that only exposes its hash publicly.
+
+instance,
+
+security
+
+Type-based relaxed noninterference. The security property we establish in this work is a
+particular form of termination insensitive noninterference, called typed-based relaxed noninterference 
+(TRNI for short). Like the relaxed noninterference result of Li and Zdancewic [22],
+TRNI accounts for declassiﬁcation policies.
+
+To understand the intuition behind TRNI, we must ﬁrst establish a notion of type-based
+observational equivalence between objects. The starting point of the notion of equivalence is
+that an object is deﬁned by the observations that can be made on it, that is, by invoking its
+methods [17]. More precisely, two objects o1 and o2 are said to be observationally equivalent
+at type S, with S (cid:44) T / U, if for each method m : S1 → S2 of the public facet U, invoking
+m on o1 and o2 with equivalent arguments at type S1, yields equivalent results at type S2.
+Crucially, the deﬁnition of equivalence uses the public facet of the type, thereby accounting
+for observational equivalence only up to declassiﬁed information.
+
+For example, the strings "john" and "mary" are not equivalent at type String / String,
+because a public observer can observe the ﬁrst character of each string and realize they
+are diﬀerent. However, these strings are equivalent when observed at String / StringLen,
+where StringLen (cid:44) [length : UnitL → IntL], because the only declassiﬁed information about
+the strings is their length, which is here equal. This also means that "john" and "james" are
+equivalent when are observed at type StringH (i.e. String / >) since there are no observations
+available to distinguish them. In fact, any two objects of type T are equivalent at type TH.
+Given this notion of equivalence, a program satisﬁes TRNI at type Sout, if given two
+inputs that are equivalent at type Sin, it produces two results that are equivalent at type
+Sout. Intuitively, the types Sin and Sout capture the knowledge of public observers. Another
+way to understand TRNI is that, if the initial knowledge implies the ﬁnal knowledge, then
+the program is secure for the public observer.
+
+For instance, consider a program with an input x of type String / StringLen. The program
+x.length satisﬁes TRNI at type Int / Int: two executions of the program with related inputs
+at String / StringLen, such as "john" and "mary", yields two identical results at type Int / Int
+(i.e. 4 in both cases). However, the program if(x.eq("mary")) return 1 else 2 does not satisfy
+
+R. Cruz, T. Rezk, B. Serpette, and É. Tanter
+
+7:7
+
+::= v | e.m(e) | x
+
+::= (cid:2)z : S ⇒ m (x) e(cid:3)
+O ::= Obj(α).(cid:2)m : S → S(cid:3)
+
+T, U ::= O | α
+
+e
+v
+
+S ::= T / U
+
+Figure 1 ObSEC: Syntax.
+
+(terms)
+(values)
+(types)
+(object type)
+(security type)
+
+x, y, z
+α, β
+m
+
+TL (cid:44) T / T
+
+(variables)
+(type variables)
+(method labels)
+TH (cid:44) T / >
+
+TRNI at type Int / Int because there are equivalent inputs at type String / StringLen ("john"
+and "mary") that yield diﬀerent outputs at type Int / Int (1 and 2). For this program, the
+only secure observation level is Int / >.
+
+We formally deﬁne these notions, and prove that the type system we propose enforces
+
+TRNI, in Section 4.
+
+3
+
+An Object Language for Type-Based Declassiﬁcation
+
+ó
+
+updates or classes, both unnecessary to formulate our proposal. An objectî
+
+We develop type-based declassiﬁcation and relaxed noninterference using a core objectoriented 
+language, ObSEC, whose syntax is presented in Figure 1. The syntax of ObSEC
+is similar to that of the object calculi of Abadi and Cardelli [2]. It includes three kinds of
+expressions: variables, objects and method invocations. Note that we do not include method
+z : S ⇒ m (x) e
+is a collection of method deﬁnitions, where method names are unique. The object deﬁnition
+explicitly binds the self variable z in method bodies, with ascribed security type S. The
+distinguishing feature of ObSEC are security types: as introduced in Section 2, a security type
+S is a two-faceted type T / U, where T (resp. U) is the private (resp. public) facet. The
+public facet corresponds to the declassiﬁcation policy of an object. A fully opaque secret
+has type T / > (also noted TH), exposing no method at all, while a low-conﬁdentiality object
+has type T / T (also noted TL), publicly exposing its full interface. A type T or U is either
+
+a (recursive) object type Obj(α).(cid:2)m : S → S(cid:3), where method types can use the self type
+
+variable α, or a type variable. Note that we do not model parametric polymorphism in this
+core calculus, so type variables are only used for self types. Following the tradition of Abadi
+and Cardelli [2], ObSEC does not include base (non-object) types, however they can be easily
+added or encoded.
+
+Subtyping. The ObSEC subtyping judgment Φ ‘ T <: U is presented in Figure 2. The
+subtyping environment Φ is a set of subtyping assumptions between type variables, i.e.
+Φ ::= · | Φ, α <: β.3 For all judgments in this work, we often omit the empty environment,
+e.g. we write ‘ T <: U for · ‘ T <: U.
+
+Rule (SObj) accounts for subtyping between object types. Object type T1 is a subtype of
+object type T2 if T1 has at least the same methods as T2, possibly more specialized. For this,
+the rule checks subtyping between method types under a subtyping assumption between the
+self type variable of T1 and that of T2. For instance, consider the following object types:
+
+Counter (cid:44) Obj(α). [get : UnitL → IntL, inc : UnitL → αL, dec : UnitL → αL]
+
+IncCounter (cid:44) Obj(β). [get : UnitL → IntL, inc : UnitL → βL] .
+
+3 Type variables must appear at most once in the subtyping environment.
+
+ECOOP 2017
+
+7:8
+
+Type Abstraction for Relaxed Noninterference
+
+Φ ‘ T <: T
+
+(SObj)
+
+O1 (cid:44) Obj(α).(cid:2)m : S1 → S2(cid:3) O2 (cid:44) Obj(β).(cid:2)m0 : S0
+
+(cid:3) m0 ⊆ m
+
+1 → S0
+
+2
+
+mi = m0
+
+j =⇒ (Φ, α <: β ‘ S0
+
+1j <: S1i Φ, α <: β ‘ S2i <: S0
+
+2j)
+
+Φ ‘ O1 <: O2
+
+(SVar) α <: β ∈ Φ
+Φ ‘ α <: β
+
+(SSubEq)
+
+O1 ≡ O2
+
+Φ ‘ O1 <: O2
+
+Φ ‘ S <: S
+
+(STrans) Φ ‘ T1 <: T2
+
+Φ ‘ T2 <: T3
+
+Φ ‘ T1 <: T3
+
+(TSubST) Φ ‘ T1 <: T2
+
+Φ ‘ U1 <: U2
+Φ ‘ T1 / U1 <: T2 / U2
+
+Figure 2 ObSEC: Subtyping rules.
+
+methsig(O, m) = S → S
+
+O (cid:44) Obj(α).(cid:2)m : S1 → S2(cid:3) S (cid:44) S1i [O/α] S0 (cid:44) S2i [O/α]
+
+methsig(O, mi) = S → S0
+
+m ∈ O
+
+O (cid:44) Obj(α).(cid:2)m : S1 → S2(cid:3)
+
+mi ∈ O
+
+methimpl(o, m) = x.e
+
+o (cid:44)(cid:2)z : S ⇒ m (x) e(cid:3)
+
+methimpl(o, mi) = x.ei
+
+Figure 3 ObSEC: Some auxiliary deﬁnitions.
+
+To establish that Counter is a subtype of IncCounter, the covariance between the return
+types of the inc method requires a subtyping assumption between type variables, here α <:
+β. Rule (SVar) speciﬁes subtyping between type variables, which only holds if the relation is
+in the subtyping environment. Rule (SSubEq) justiﬁes subtyping between equivalent types.
+We consider type equivalence up to renaming and folding/unfolding of self type variables;
+for instance:
+
+Obj(α). [m : S → αL] ≡ Obj(α).(cid:2)m : S → Obj(β). [m : S → βL]L
+
+Obj(α). [m : αL → αL] ≡ Obj(β). [m : βL → βL]
+
+(cid:3)
+
+(alpha equivalence)
+(fold/unfold equivalence)
+
+(Appendix A.4 provides the complete deﬁnition of type equivalence.)
+
+Rule (STrans) is standard. Rule (TSubST) justiﬁes subtyping between security types,
+
+which is covariant in both facets.
+
+Figure 3 presents auxiliary functions used to test method membership in a type (m ∈ T),
+to get the type of a method in an object type (methsig) and to get the implementation of
+a method (methimpl). These operations are standard; the only interesting thing to note is
+that in methsig we close the types in the method signature, by replacing type variables with
+their object types.
+
+Static semantics. Figure 4 shows the typing rules of ObSEC. The type judgment Γ ‘ e : S
+gives a security type to an expression under a type environment Γ that binds variables
+to types (Γ ::= · | Γ, x : S).
+In what follows, we assume well-formedness of types and
+environments: informally, an environment is well-formed if all security types are closed and
+
+R. Cruz, T. Rezk, B. Serpette, and É. Tanter
+
+7:9
+
+Γ ‘ e : S
+
+(TVar) x ∈ dom(Γ)
+Γ ‘ x : Γ(x)
+
+(TObj) S (cid:44) T / U methsig(T, mi) = S0
+
+Γ, z : S, x : S
+
+0
+i ‘ ei : S00
+
+i
+
+‘ S0 <: S
+
+Γ ‘ e : S
+
+(TSub) Γ ‘ e : S0
+Γ ‘(cid:2)z : S ⇒ m (x) e(cid:3) : S
+
+i → S00
+
+i
+
+Γ ‘ e1 : T / U
+
+m ∈ U
+
+(TmD)
+
+Γ ‘ e1 : T / U
+
+m /∈ U
+
+(TmH)
+
+Figure 4 ObSEC: Static semantics.
+
+methsig(U, m) = S1 → S2
+
+Γ ‘ e1.m(e2) : S2
+methsig(T, m) = S1 → T2 / U2
+
+Γ ‘ e2 : S1
+
+Γ ‘ e2 : S1
+
+Γ ‘ e1.m(e2) : T2 / >
+
+well-formed; a well-formed security type satisﬁes the requirement that the private type is a
+subtype of the public type. We further discuss well-formedness at the end of this section.
+
+Rules (TVar) and (TSub) are standard. The (TObj) rule accounts for objects. It requires
+each method body to be well-typed with respect to the private facet of the object.
+In
+particular, the method body must match the return type of the method signature in the
+private facet of the self type S.
+
+From a security point of view, the interesting rules are the ones for method invocation.
+Rule (TmD) applies when the invoked method is part of the public facet of the receiver. In
+this case, because the method invocation respects the declassiﬁcation policy, the overall type
+of the invocation is the return type of the method in the public facet. This expresses that
+the invocation advances a step in the progressive declassiﬁcation of the object. For instance,
+if the expression e1 has the public type StringHashEq (cid:44) [hash : UnitL → Int / IntEq], the
+invocation e1.hash() has type Int / IntEq, expressing that the returned value is a secret that
+can further be declassiﬁed by calling the method eq from IntEq.
+
+Rule (TmH) applies when the method is not in the public type U, but only in the private
+type T (if the method is not in T, the expression is ill typed). In this case, the method call is
+accessing the “secret” part of the object: the result of the method invocation must therefore
+be protected by changing its public facet to >. This rule captures the design decision that
+using a secret beyond its declassiﬁcation policy is allowed, but the result must be secret. In
+other words, only a private observer can use objects beyond their declassiﬁcation policies;
+to a public observer, the results of these interactions are unobservable.4
+
+Dynamic semantics. We deﬁne a standard call-by-value small-step semantics for ObSEC,
+based on evaluation contexts E ::= [ ] | E.m(e) | v.m(E).
+
+The language includes a single reduction rule, for method invocation, which is standard:
+
+(EMInv) o (cid:44) [z : _ ⇒ _] methimpl(o, m) = x.e
+
+E[o.m(v)] 7−→ E[e [o/z] [v/x]]
+
+4 Access modiﬁers in object-oriented languages, such as private and public in Java are a really diﬀerent 
+mechanism. Such modiﬁers are about encapsulation, not about information ﬂow. The essential
+diﬀerence can be observed in rule (TmH), which propagates privacy on return values.
+
+ECOOP 2017
+
+7:10
+
+Type Abstraction for Relaxed Noninterference
+
+Vk(cid:74)S(cid:75) = {v = [z : S1 ⇒ _]
+
+| S (cid:44) T / U
+
+‘ S1 <: S ∧
+
+(∀j < k. v ∈ Vj(cid:74)S1(cid:75) ∧
+v0 ∈ Vj(cid:74)S0(cid:75) =⇒ e [v/z] [v0/x] ∈ Cj(cid:74)S00(cid:75)))}
+
+(∀m ∈ T, v0. methsig(T, m) = S0 → S00 methimpl(v, m) = x.e
+
+Ck(cid:74)S(cid:75) = {e | ∀j < k. ∀e0.(e 7−→j e0 ∧ irred(e0)) =⇒ e0 ∈ Vk−j(cid:74)S(cid:75)}
+
+Figure 5 ObSEC: Unary logical relation for safety.
+
+Type safety. We now establish that well-typed ObSEC programs are safe. Note that type
+safety does not provide any security guarantees for ObSEC.
+(Security guarantees will be
+addressed in Section 4.) A program e is safe, noted safe(e), if it does not get stuck, i.e. if it
+either reduces to a value or diverges.
+(cid:73) Deﬁnition 1 (Safety). safe(e) ⇐⇒ ∀e0. e 7−→∗ e0 =⇒ e0 = v or ∃e00. e0 7−→ e00
+
+We prove type safety for ObSEC using a semantic interpretation of types as a unary logical 
+relation [3]. We cannot however deﬁne the logical relation based on a direct induction
+over the structure of types, because of recursive types, which would make such a deﬁnition
+ill-founded. Therefore, we use a step-indexed logical relation [4, 6]. We establish an intermediary 
+result for a ﬁxed number k of steps, meaning that a term is safe for k evaluation
+steps, and then quantify ∀k ≥ 0 to obtain the general result. Step indexing ensures the
+well-foundedness of the logical relation.
+
+Figure 5 deﬁnes the unary logical relation that captures the safety interpretation of types
+
+as values and computations, in a mutually recursive manner. The set Vk(cid:74)S(cid:75) denotes the safe
+
+value interpretation of type S for k steps; it contains all the values (i.e. objects) for which
+it is safe (for any j < k number of steps) to invoke methods of the private type T of the
+security type S (cid:44) T / U. Note that the deﬁnition needs to assume that the self object is in
+the value interpretation of S, for j < k steps; without step-indexing, this relation would be
+
+ill-founded due to the recursive nature of objects through their self variables. The set Ck(cid:74)S(cid:75)
+
+contains all the expressions that can be safely executed for k steps at the security type S. In
+the deﬁnition, the irred(e) predicate denotes irreducible expressions, i.e. expressions e such
+that (cid:64)e0.e 7−→ e0.
+We deﬁne semantic typing, written |= e : S, to denote that a closed expression e executes
+
+safely for any ﬁxed number of steps:
+
+(cid:73) Deﬁnition 2 (Semantic typing). |= e : S ⇐⇒ ∀k ≥ 0. e ∈ Ck(cid:74)S(cid:75).
+
+We then ﬁrst prove that semantic typing does imply safety as per Deﬁnition 1.
+
+(cid:73) Lemma 3 (Semantic type safety). |= e : S =⇒ safe(e)
+Proof. To show safe(e) we need to consider an arbitrary e0 such that e 7−→∗ e0 and then
+show that either e0 = v or ∃e00. e0 7−→ e00
+Let us consider an arbitrary j1 to count the step that takes e 7−→∗ e0. Let us denote l = j1+1
+
+By expanding the deﬁnition of |= e : S we have ∀k ≥ 0. e ∈ Ck(cid:74)S(cid:75). We instantiate this with
+k = l to obtain e ∈ Cl(cid:74)S(cid:75). By expanding this we have:
+∀j < l. ∀e1.(e 7−→j e1 ∧ irred(e1)) =⇒ e1 ∈ Vk−j(cid:74)S(cid:75). We instantiate e ∈ Cl(cid:74)S(cid:75) with j1
+and e0 and we obtain: (e 7−→j1 e0 ∧ irred(e0)) =⇒ e0 ∈ Vk−j1(cid:74)S(cid:75).
+∃e00. e0 7−→ e00. If irred(e0), we have that e0 ∈ Vk−j(cid:74)S(cid:75), so e0 is a value.
+
+There are two cases to consider: ¬irred(e0) and irred(e0) . If ¬irred(e0), then by deﬁnition
+(cid:74)
+
+R. Cruz, T. Rezk, B. Serpette, and É. Tanter
+
+7:11
+
+Second, we prove that syntactic typing (Figure 4) implies semantic typing.
+
+(cid:73) Lemma 4 (Syntactic typing implies semantic typing). ‘ e : S =⇒ |= e : S
+Proof. The result follows from a similar lemma on open terms: Γ ‘ e : S =⇒ Γ |= e : S.
+We deﬁne a standard notion of safe value substitutions [3], i.e. partial maps from variables
+
+Then we prove that Γ ‘ e : S =⇒ Γ |= e : S by induction on the typing derivation
+
+to safe values, γ ∈ Gk(cid:74)Γ(cid:75) and Γ |= e : S as follows:
+γ ∈ Gk(cid:74)Γ(cid:75) ⇐⇒ dom(γ) = dom(Γ) and ∀x ∈ dom(Γ).γ(x) ∈ Vk(cid:74)Γ(x)(cid:75)
+Γ |= e : S ⇐⇒ ∀k ≥ 0, ∀γ. γ ∈ Gk(cid:74)Γ(cid:75) =⇒ γ(e) ∈ Ck(cid:74)S(cid:75).
+of e. The case (TVar) is direct from the deﬁnition of γ ∈ Gk(cid:74)Γ(cid:75). The case (TSub) follows 
+directly from a subsumption lemma (e ∈ Ck(cid:74)S(cid:75) ∧ ‘ S <: S0 =⇒ e ∈ Ck(cid:74)S0(cid:75)).
+Cases (TObj), (TmD) and (TmH) are proven by unfolding the deﬁnitions of Ck(cid:74)S(cid:75) and
+Vk(cid:74)S(cid:75), and applying the induction hypotheses for smaller indexes. For these cases, we use
+i.e. e ∈ Vk(cid:74)S(cid:75) ∧ j ≤ k =⇒ v ∈ Vj(cid:74)S(cid:75).
+
+mainly a monotonicity lemma for the value interpretation of a type regarding the index,
+(cid:74)
+
+Together, Lemmas 3 and 4 imply that well-typed programs are safe.
+
+(cid:73) Theorem 5 (Syntactic type safety). ‘ e : S =⇒ safe(e)
+
+Now that we have established that ObSEC is a well-deﬁned, type-safe language, Section 4
+
+will develop its security guarantees.
+
+A note on well-formedness. Before we proceed, however, we need to mention a technical
+yet important issue that we overlooked so far. For the main results of Section 4 to hold,
+we need to ensure that we work with well-formed security types, i.e. that the private facet
+type is a subtype of the public facet type. In a language with simple, non-recursive types,
+deﬁning such subtyping constraints is straightforward. However, in the presence of recursive
+(object) types, deﬁning the rules for the subtyping constraint of security types is rather
+subtle and involved. The subtlety with type variables is that, at some point, we might
+have to check well-formedness of a security type with a type variable in one of its facets, e.g.
+α / T, without knowing any relation between α and T. To address this, we need to remember
+the surrounding recursive object type O that binds α, and to transform the check ‘ α <: T
+to ‘ O <: T. For conciseness, we leave out the well-formedness rules from the main body
+of the paper; they are fully described in Appendix A.2. In what follows, we systematically
+assume that security types (and by extension, type environments) are well-formed.
+
+4
+
+Type-Based Relaxed Noninterference
+
+Faceted security types support information-ﬂow security with declassiﬁcation. The security
+property that type-based declassiﬁcation supports is a form of relaxed noninterference [22],
+which we informally explained in Section 2. This section formally deﬁnes the notion of
+type-based relaxed noninterference (TRNI) independently of any enforcement mechanism.
+Then, we prove that the type system of ObSEC is sound with respect to this property.
+
+Type-based equivalence. As introduced in Section 2, TRNI is deﬁned in terms of a notion
+of type-based equivalence between objects: a program satisﬁes TRNI at type Sout, if given
+two inputs at type Sin, it produces two equivalent results at type Sout. Equivalence at a type
+accounts for the possible observations (i.e. method invocations) that one is allowed to make
+
+ECOOP 2017
+
+7:12
+
+Type Abstraction for Relaxed Noninterference
+
+v1 ≈k v2 : V(cid:74)S(cid:75) ⇐⇒ S (cid:44) T / U vi (cid:44) [z : _ ⇒ _]
+2. v1 ≈j v2 : V(cid:74)S(cid:75) ∧
+2 : V(cid:74)S0(cid:75) =⇒ e1 [v1/z] [v0
+
+e1 ≈k e2 : C(cid:74)S(cid:75) ⇐⇒ S (cid:44) T / U
+
+‘1 vi : T ∧ (∀m ∈ U. methsig(U, m) = S0 → S00 methimpl(vi, m) = x.ei
+∀j < k, v0
+1, v0
+1 ≈j v0
+(v0
+
+2/x] : C(cid:74)S00(cid:75)))
+‘1 ei : T ∧ (∀j < k.(e1 7−→≤j v1 ∧ e2 7−→≤j v2) =⇒ v1 ≈k−j v2 : V(cid:74)S(cid:75))
+
+1/x] ≈j e2 [v2/z] [v0
+
+Figure 6 Step-indexed logical relation for type-based equivalence.
+
+on an object. We deﬁne this equivalence as a step-indexed logical relation [4], in Figure 6.
+We deﬁne how to relate values (i.e. objects) as well as computations (i.e. expressions). Step
+indexing is required due to the recursive nature of object types, as explained below.
+
+Note that the deﬁnitions use a simple typing judgment that does not account for security
+typing at all; its sole purpose is to ensure safety. This is crucial: the public facets of security
+types only play the role of speciﬁcations of declassiﬁcation policies, and the logical relation
+speciﬁes the meaning of these speciﬁcations, without any consideration for an enforcement
+mechanism. In particular, observe that the deﬁnitions in Figure 6 do not appeal to security
+type judgments (‘), but only to simple type judgments (‘1).
+(cid:73) Deﬁnition 6 (Simple typing judgment). Based on the security typing judgment Γ ‘ e : S,
+we deﬁne the simple typing judgment Γ ‘1 e : T by focusing only on the private facet of
+security types. Formally: Γ ‘1 e : T ⇐⇒ Γ ‘ e : T / U for some U.
+(The inductive deﬁnition of simple typing is in Appendix A.5.)
+
+Intuitively, two objects v1 and v2 are equivalent at type S (cid:44) T / U for k steps, noted
+
+v1 ≈k v2 : V(cid:74)S(cid:75), when one cannot distinguish them by invoking any method m of U. More
+
+precisely, to ensure safety, we ﬁrst demand that both values are well-typed at T with the
+simple type system. Then, for each method m ∈ U and every j < k, the invocations of
+m on v1 and v2 with related arguments at the argument type S0 of m must be equivalent
+computations at the return type S00 for j steps, as deﬁned below. Finally, note that the
+deﬁnition also requires that v1 and v2 are related self objects, for j < k steps; this is
+necessary for the relation to be well-founded. (Observe that two simply well-typed objects
+are vacuously equivalent for zero steps.)
+
+e1 ≈k e2 : C(cid:74)S(cid:75), if they are both (simply) well-typed at T and, provided that they both
+
+Two expressions e1 and e2 are equivalent at security type S (cid:44) T / U for k steps, noted
+reduce to values in at most j < k steps (noted e 7−→≤j v), then both values are equivalent
+at type S for the remaining k − j steps. Note that this deﬁnition is termination insensitive:
+if one expression does not terminate in less than k steps, then both expressions are deemed
+equivalent.
+
+Deﬁning TRNI. The type-based approach to declassiﬁcation policies allows us to formulate
+the corresponding relaxed noninterference property as a modular reasoning principle, similarly 
+to the common formulation of noninterference in languages without declassiﬁcation [38],
+thereby avoiding the global and external formulation of the transformation approach [22].
+Standard noninterference is usually stated as a modular reasoning principle on open
+terms [38]: given a well-typed open term, which depends on some private variables, closing 
+the term with private inputs yields equivalent programs when observed by a lowconﬁdentiality 
+observer. This statement can be generalized using the notion of value substiR.
+ Cruz, T. Rezk, B. Serpette, and É. Tanter
+
+7:13
+
+tutions, i.e. partial maps from variables to values: given an open term that typechecks in
+a given environment Γ, applying two related substitutions yields equivalent computations.
+Applying a substitution, noted γ(e), substitutes the free variables of e with their values in
+γ.
+(cid:73) Deﬁnition 7 (Satisfactory substitution). A substitution γ satisﬁes type environment Γ,
+noted γ |= Γ, iﬀ dom(γ) = dom(Γ) ∧ ∀x ∈ dom(Γ). ‘1 γ(x) : T where Γ(x) (cid:44) T / U
+(cid:73) Deﬁnition 8 (Related substitutions). Two substitutions γ1 and γ2 are equivalent for k steps
+
+with respect to a type environment Γ, noted γ1 ≈k γ2 : G(cid:74)Γ(cid:75), if γi |= Γ and
+
+∀x ∈ dom(Γ).γ1(x) ≈k γ2(x) : V(cid:74)Γ(x)(cid:75)
+
+The statement of type-based relaxed noninterference is a direct generalization of standard
+noninterference: an open term e, simply well-typed in environment Γ, satisﬁes type-based
+relaxed noninterference at security type S, noted TRNI(Γ, e, S), if two executions of e with
+related substitutions with respect to Γ produce equivalent computational expressions at type
+S, for any number of steps.
+(cid:73) Deﬁnition 9 (Type-based relaxed noninterference).
+TRNI(Γ, e, S) ⇐⇒ S (cid:44) T / U Γ ‘1 e : T ∧
+
+∀k ≥ 0. ∀γ1, γ2. γ1 ≈k γ2 : G(cid:74)Γ(cid:75) =⇒ γ1(e) ≈k γ2(e) : C(cid:74)S(cid:75)
+
+This deﬁnition captures the semantic characterization of TRNI-secure expressions, independently 
+of any enforcement mechanism (recall that, in Figure 6, the public facets of
+security types only play the role of speciﬁcations of declassiﬁcation policies). The ObSEC
+type system is a sound, conservative enforcement mechanism for TRNI.
+
+Security type soundness. To establish that well-typed ObSEC programs satisfy TRNI, we
+ﬁrst introduce a general notion of type-based equivalence between open expressions. Two
+open expressions, well-typed under a type environment Γ, are equivalent at a security type
+S (cid:44) T / U, if both expressions have simple type T, and given two related value substitutions
+for Γ, closing each expression with a satisfactory substitution yields equivalent expressions
+at type S.
+(cid:73) Deﬁnition 10 (Equivalence of open terms).
+
+Γ ‘ e1 ≈ e2 : S ⇐⇒ S (cid:44) T / U Γ ‘1 ei : T∧
+
+∀k ≥ 0. ∀γ1, γ2. γ1 ≈k γ2 : G(cid:74)Γ(cid:75) =⇒ γ1(e1) ≈k γ2(e2) : C(cid:74)S(cid:75)
+
+As is clear from the deﬁnitions, if a term is equivalent to itself at type S, then it satisﬁes
+TRNI at S.
+(cid:73) Lemma 11 (Self-equivalence). Γ ‘ e ≈ e : S =⇒ TRNI(Γ, e, S)
+Type soundness of ObSEC follows from the fact that the ObSEC type system enforces such a
+self-equivalence.
+(cid:73) Lemma 12 (Fundamental property). Γ ‘ e : S =⇒ Γ ‘ e ≈ e : S
+Proof. The proof is by induction on the typing derivation of e. The (TVar) case follows
+if e1 ≈k
+directly from Deﬁnition 8 and the (TSub) case follows from a subtyping lemma:
+
+e2 : C(cid:74)S(cid:75) and ‘ S <: S0 then e1 ≈k e2 : C(cid:74)S0(cid:75). The (TObj) case applies the induction
+
+ECOOP 2017
+
+7:14
+
+Type Abstraction for Relaxed Noninterference
+
+hypothesis (IH) on method bodies. To use the IH results, we need to show that the value
+substitutions that result from extending the current substitutions with both self and actual
+arguments are also related. This step requires auxiliary lemmas of monotonicity of the
+logical relations regarding smaller indexes. The (TmD) case follows from applying the IH
+over both subexpressions, selecting adequate indexes. The (TmH) case is simpler because
+there is no method to invoke in the public type >.
+(cid:74)
+
+Finally, type soundness for ObSEC follows directly from Lemmas 11 and 12.
+
+(cid:73) Theorem 13 (Security type soundness). Γ ‘ e : S =⇒ TRNI(Γ, e, S)
+
+Illustration. We now illustrate the relation between the security typing and the deﬁnition
+of TRNI. In the examples we use some standard constructs like conditionals, not included
+in ObSEC, but easily encodable.
+
+As introduced in Section 2, the property TRNI(Γ, e, T / U) can be intuitively understood
+as: the initial knowledge of a public observer in Γ (i.e. the declassiﬁcation policies) implies
+the ﬁnal knowledge (i.e. the resulting public type U) that the observer has at hand to
+distinguish the results of two arbitrary executions of the secure program e of simple type T.
+Let us recall the type StringLen (cid:44) [length : UnitL → IntL] from the end of Section 2.
+Consider the open term e (cid:44) x.length under the type environment Γ (cid:44) x : String / StringLen.
+The judgment Γ ‘ e : IntL ensures that TRNI(Γ, e, IntL) holds. It says that executing e, with
+two diﬀerent strings v1 and v2 of the same length is secure because the observer does not
+learn anything new by exploiting the knowledge of distinguishing the resulting integers with
+any method of Int. In fact, if we use the deﬁnition of TRNI, for any equivalent substitutions
+
+γ1 and γ2 such that γ1 ≈k γ2 : G(cid:74)Γ(cid:75), such as γi (cid:44) x 7→ vi, we need to show γ1(x).length()
+≈k γ2(x).length() : C(cid:74)IntL(cid:75). It is easy to see that this result follows from the assumption
+
+that v1 and v2 have the same length (i.e. are equivalent at String / StringLen).
+
+Because both strings have the same length, we have "mary" ≈k "john" : V(cid:74)String / StringLen(cid:75),
+C(cid:74)IntL(cid:75), because this requires to show that 1 ≈k 2 : V(cid:74)IntL(cid:75), which is obviously false.
+
+We have a diﬀerent situation if we consider e0 (cid:44) if(x.eq("mary")) return 1 else 2, with
+the same type environment Γ. We cannot prove that TRNI(Γ, e0, IntL) holds, meaning this
+program is not secure at type IntL. Indeed, take γ1 (cid:44) x 7→ "mary" and γ2 (cid:44) x 7→ "john".
+so the two substitutions are equivalent. However, we cannot show that γ1(e0) ≈k γ2(e0) :
+The type system of ObSEC indeed rejects the judgment Γ ‘ e : IntL. It does accept the
+judgment Γ ‘ e : IntH, meaning that e0 is secure at type IntH. This is correct because then
+the public observer has no ability to compare the resulting values of e0. Note in fact that any
+simply well-typed expression of type T is secure at type TH. Such expressions are opaque to
+a public observer, but are observable by a private observer.
+
+Principles of declassiﬁcation. Our approach to type-based declassiﬁcation satisﬁes the
+declassiﬁcation principles stated by Sabelfeld and Sands [29].5 We now brieﬂy introduce
+each principle and informally argue why it is respected.
+
+Conservativity—i.e. “Security for programs with no declassiﬁcation is equivalent to non-
+interference”. It is easy to see that if a program satisﬁes TRNI(Γ, e, TL), for some T, and
+
+5 Sabelfeld and Sands mention a fourth principle, non-occlusion, which addresses the interaction between
+declassiﬁcation and covert channels, such as heap assignments, exceptions or termination behavior.
+ObSEC has neither mutation nor control operators, and termination is not considered a covert channel
+because we only deal with termination-insensitive noninterference.
+
+R. Cruz, T. Rezk, B. Serpette, and É. Tanter
+
+7:15
+
+all security types in both Γ and e are either highly conﬁdential (TH) or not conﬁdential
+at all (TL), then the deﬁnition of TRNI coincides exactly with the deﬁnition of pure
+noninterference [38]. Therefore type-based relaxed noninterference is a generalization of
+pure noninterference.
+Monotonicity of Release—i.e. “Adding further declassiﬁcations to a secure program cannot 
+render it insecure”. This lemma follows from subtyping naturally. Recall that in
+our approach, in the judgment TRNI(Γ, e, S), declassiﬁcation policies come from types
+ascribed in both Γ and e. “Adding further declassiﬁcation” in the inputs means in our
+context replacing security types in Γ with subtypes, more precisely, where the public
+facets are subtypes of the original types. The security typing judgment also holds in
+this scenario of additional declassiﬁcation in the inputs. Similarly, adding declassiﬁcation 
+in the expression e means specializing the public facets of types in object type
+declarations. Again, this does not aﬀect the semantic TRNI judgment. Note, however,
+that if argument types are specialized, the program might not be typable anymore with
+the security type system, as such a change breaks the contravariance of subtyping for
+argument method types.
+Semantic Consistency—i.e. “The (in)security of a program is invariant under semanticspreserving 
+transformations of declassiﬁcation-free subprograms.”. The principle says that
+it is possible to replace an expression that does not use declassiﬁcation with another
+semantically-equivalent expression, without aﬀecting security. As observed by Sabelfeld
+and Sands, the approach to declassiﬁcation policies of Li and Zdancewic [22] violates this
+principle, because they rely on a restricted, mostly-syntactic form of program equivalence
+to decide label ordering. Therefore, many semantically-equivalent programs are not
+deemed equivalent, hence aﬀecting their (in)security. In contrast, our notion of typebased 
+equivalence (Figure 6) is semantic, not syntactic.
+
+Limitations of security typing. The ObSEC type system is a static enforcement mechanism
+for type-based relaxed noninterference. As such, it is inherently conservative. This has two
+implications regarding Theorem 12.
+
+First, the type system can reject some programs that are in fact secure. For example,
+
+consider the following deﬁnitions:
+T (cid:44) Obj(α). [n : StringL → StringL]
+T 0 (cid:44) Obj(α). [m : StringH → StringH]
+v (cid:44) [z : TL ⇒ n (x) "hello"]
+L ⇒ m (x) v.n(x)]
+v0 (cid:44) [z : T 0
+
+Here, v0 is not well-typed using the security type system, because of the call v.n(x)
+(‘ StringH ≮: StringL). However, we can show that v0 does satisfy TRNI(·, v0, T 0
+L), because a
+public observer always obtains the same result (i.e. "hello") for any two secrets passed to
+method m; the program is not leaking any information.
+
+Second, the type system can assign the security type T / > to an expression, despite the
+fact that > is not the tighter secure type for TRNI to hold. For instance, let us assume that
+Int has built-in methods mod2 and mod4 with the standard mathematical meaning, and we
+deﬁne the type IntMod4 (cid:44) [mod4 : UnitL → IntL]. Consider Γ (cid:44) v : Int / IntMod4 and e (cid:44)
+v.mod2(). The type system admits Γ ‘ e : IntH, which implies TRNI(Γ, e, IntH), but it does
+not admit Γ ‘ e : IntL; despite the fact that TRNI(Γ, e, IntL) also holds—because if a and b
+are equivalent modulo 4, then they are also equivalent modulo 2.
+
+ECOOP 2017
+
+7:16
+
+Type Abstraction for Relaxed Noninterference
+
+Expressiveness of Declassiﬁcation Policies
+
+5
+Our approach to type-based declassiﬁcation policies builds upon an underlying type system.
+While we have chosen a simple model of recursive object types to develop the approach in
+the previous sections, it is interesting to explore how the expressiveness of the underlying
+type discipline aﬀects the range of declassiﬁcation policies that can be deﬁned.
+
+Recursive types.
+It is possible to exploit the idea of type-based declassiﬁcation policies
+without recursive object types. We only need a type abstraction mechanism, such as that
+enabled by subtyping. In fact, with only record types and subtyping, we can already capture
+a set of interesting policies, such as those mentioned at the begin of Section 2 (e.g. StringEq,
+StringHashEq). TRNI depends on the notion of equivalence between values and computations,
+ which can be easily simpliﬁed for the non-recursive setting; in particular, we can get
+rid of step-indexing in the logical relations.
+
+Of course, without recursive object types in the core formalism, we lose the ability
+to express recursive declassiﬁcation policies (which are useful to declassify recursive data
+structures, as illustrated in Section 2). With records but without objects, we can add
+general recursive types of the form µX.T to support recursive declassiﬁcation policies. Note
+however that combining general recursive types and subtyping is challenging, and there are
+diﬀerent deﬁnitions that may not be complete (i.e. unable to establish a subtyping relation
+that indeed holds); in particular, our subtyping rules are not complete regarding subtyping
+between inﬁnite trees [5]. This challenge solely aﬀects the kinds of security types that can
+be deﬁned and deemed well-formed.
+
+Finally, one characteristic of recursive declassiﬁcation policies is that they potentially
+allow to chain arbitrarily many invocations of a declassiﬁcation method. For instance,
+consider an inﬁnite stream of strings, and a declassiﬁcation that allows equality comparisons
+on its elements:
+
+StrEqStream (cid:44) [head : UnitL → StringEqL, tail : UnitL → StrEqStreamL]
+
+In case tolerating an unbounded number of observations would represent an unacceptable
+accumulated leak, the programmer can deﬁne a more restrictive declassiﬁcation policy that
+restricts the number of tolerated calls by explicitly nesting interface types instead of deﬁning
+a fully recursive one. Obviously, to be practical, one would need to deﬁne a convenient
+surface syntax such as:
+
+StrEqStream (cid:44) [head : UnitL → StringEqL, tail : UnitL → StrEqStreamL@k]
+
+to specify that the declassiﬁcation policy only supports at most k unfoldings of StrEqStream
+through tail, and to desugar it to a ﬁnite nesting of interface types.
+
+Universal types. Universal types allow programmers to deﬁne programs that are parameterized 
+by types. This can be used to deﬁne generic data structures, such as lists:
+List [X] (cid:44) {isEmpty : UnitL → BoolL, head : UnitL → XL, tail : UnitL → List[X]L}
+If we add parametric polymorphism to ObSEC, then in addition to get polymorphism
+over implementation types, we naturally get a general form of security label polymorphism,
+which is very useful (and supported in Jif [24]). For example, we can deﬁne generic data
+structures that are polymorphic with respect to the security labels of their inner data; the
+list structure deﬁned above is a speciﬁc example.
+
+R. Cruz, T. Rezk, B. Serpette, and É. Tanter
+
+7:17
+
+Similarly, a declassiﬁcation policy can exploit parametric polymorphism. Recall the
+recursive declassiﬁcation example of Section 2, in which we allow traversing a list and only
+comparing its elements with a given public element. We can express a generic version of
+this declassiﬁcation policy with the following type:
+ListEq [X] (cid:44) [isEmpty : UnitL → BoolL, head : UnitL → X / Eq[X], tail : UnitL → ListEq[X]L]
+
+Eq [X] (cid:44) [eq : XL → BoolL]
+
+Note that the above deﬁnition is however invalid, because ListEq is not well-formed: in order
+to satisfy the subtyping constraint between the facets of a security type such as X / Eq[X],
+we need to bound the type variable X, which leads us to bounded parametric polymorphism.
+Then, the type ListEq can be correctly deﬁned as follows:
+
+ListEq [X <: Eq [X]] (cid:44)
+
+[isEmpty : UnitL → BoolL, head : UnitL → X / Eq[X], tail : UnitL → ListEq[X]L]
+
+Reﬁnement types. Reﬁnement types, as found in e.g. LiquidHaskell [35], enrich standard
+types with predicates over a decidable logic. For instance, the type {x : Int | x ≥ 0} denotes
+natural numbers. Additionally, reﬁnement types usually support a form of dependent types,
+allowing reﬁnements to refer to variables in scope as well as function arguments. Combining
+such expressive types with our approach allows interesting declassiﬁcation policies to be
+deﬁned, such as restricting successive arguments of a progressive declassiﬁcation.
+
+As an example, consider the following policy:
+
+IntModProd (cid:44) [mod : {x : IntL} → [mult : {y : IntL | x = y} → IntL]L]
+
+This progressive declassiﬁcation allows revealing the result of the chain of invocations
+mod then mult, only if the argument to both invocations is the same. Note that IntModProd
+is a proper supertype of Int, since {y : Int | x = y} is a subtype of Int.
+
+More advanced scenarios. There are other interesting declassiﬁcation policies that seem
+more challenging to support with our type-based approach. An interesting example is specifying 
+that a string secret can be leaked only after it has been encrypted; it is highly unlikely
+that the standard String class exposes an encryption method. However, our approach does
+appeal to the actual interface of an object in order to deﬁne its declassiﬁcation. Hicks et
+al. [21] introduce special declassiﬁer functions to express arbitrary declassiﬁcation that can
+involve operations that are not deﬁned on the declassiﬁed object itself. Therefore a possible
+solution to address this example in our setting would be to rely on an external method
+speciﬁcation mechanism, such as open classes or mixin-based composition of traits in Scala.
+Nevertheless, the above approach would still fall short of expressing global declassiﬁcation
+policies, as described by Li and Zdancewic [22], which can relate the declassiﬁcation of different 
+secrets at once. While the value dependencies can be expressed using, e.g. reﬁnement
+types, the challenge is to ensure that the obtained security types are still well-formed (i.e. the
+public facet must be a supertype of the private facet). These are interesting challenges for
+future development of the approach.
+
+A note about casts.
+In Section 2 we alluded to the challenge of integrating explicit downcasts 
+in a language that adopts type-based declassiﬁcation policies. Casts can be soundly
+incorporated in such a language provided that we only allow casting values from a security
+
+ECOOP 2017
+
+7:18
+
+Type Abstraction for Relaxed Noninterference
+
+type to another one that has the same public type, i.e. casts cannot aﬀect the declassiﬁcation
+policy. Therefore the interesting typing rule for a cast expression hTi e is:
+
+(TCast) Γ ‘ e : T 0 / U
+
+‘ T <: T 0
+
+Γ ‘ hTi e : T / U
+
+As usual in security languages with casts, cast errors are seen as a non-termination
+
+channel, hence not aﬀecting the security deﬁnitions.
+
+Related work
+
+6
+Information ﬂow security in general, and declassiﬁcation in particular, are very active areas
+of research. We now discuss the most salient proposals related to this work.
+
+Secure information ﬂow and type abstraction. Our work shows a connection between
+type abstraction and declassiﬁcation policies for secure information ﬂow. Previous works
+also attempt to connect type abstraction and secure information ﬂow.
+
+Tse and Zdancewic [32] encode the Dependency Core Calculus (DCC) [1] in System F.
+The correctness theorem of their translation aims at showing that the parametricity theorem
+of System F implies the noninterference property. Unfortunately, Shikuma and Igarashi
+identify a mistake in the proof of their main result [30]; they also gave a noninterferencepreserving 
+translation for a version of DCC to the simply-typed lambda calculus. However,
+this translation left open the connection between parametricity and noninterference, initially
+aimed by Tse and Zdancewic.
+
+Recently, Bowman and Ahmed [14] provide a translation from DCC to System Fω, successfully 
+demonstrating that noninterference can be encoded via parametricity. Our work
+generalizes this by showing that type abstraction implies relaxed noninterference. Information 
+ﬂow analyses have been proposed to generalize parametricity in the presence of runtime
+type analysis [37]. Using security labels, a programmer can specify data structures that
+should remain conﬁdential in order to hide implementation details and rely on type abstraction 
+for abstract datatypes.
+
+An interesting research direction is to investigate whether our proposal of solving information 
+ﬂow problems via type abstraction, here through subtyping, can be used to generalize
+parametricity as proposed by Washburn and Weirich [37].
+
+Declassiﬁcation. As extensively discussed, our policies and security property are based on
+the work of Li and Zdancewic [22], which proposes two kinds of downgrading policies (which
+we call here declassiﬁcation policies, since they only relate to conﬁdentiality):
+local and
+global policies. The declassiﬁcation policies in this paper directly correspond to local policies,
+as discussed in the introduction. Global policies refer to declassiﬁcations that involve more
+than one secret simultaneously. As discussed in Section 5, it is unclear if and how global
+policies can be supported using our type-driven approach; further exploration is necessary
+to settle this issue. Additionally, in contrast to the deﬁnition of relaxed noninterference of Li
+and Zdancewic [22], our deﬁnition is independent from the security enforcement mechanism.
+This allows us to distinguish programs that are not secure from programs that are not
+typable due to a necessarily conservative static security mechanism (see Section 4). Also,
+our deﬁnition of relaxed noninterference is formulated as a generalization of the semantic
+characterization of pure noninterference [38], providing a modular reasoning principle, as
+opposed to the global translation approach of Li and Zdancewic.
+
+R. Cruz, T. Rezk, B. Serpette, and É. Tanter
+
+7:19
+
+In the following, we focus on the closest related work on declassiﬁcation policies starting
+
+from 2005 and refer the reader to [29] for a survey prior to 2005.
+
+Typing declassiﬁcation in object-oriented languages. Since 2005, several works have studied 
+static enforcement of declassiﬁcation in object-oriented languages [9, 21, 11, 16].
+
+Banerjee and Naumann [9] study the interaction between security typing for noninterference 
+and access control in a Java-like language. Security levels are not ﬁxed but rather
+depend on access permissions. In contrast to our work, security levels are independent of
+method signatures or types and thus their typing does not relate to type abstraction.
+
+Hicks et al. [21] propose trusted declassiﬁcation for an object calculus. Principals in
+a program have access to speciﬁed trusted declassiﬁer functions or methods. Typeable
+programs are secure for noninterference modulo trusted methods, in the same spirit as
+typing of noninterference of programs with cryptographic functions [20].
+In contrast to
+relaxed noninterference, trusted declassiﬁcation does not consider declassiﬁers as part of
+security levels. Instead, declassiﬁers need to be associated by a policy to diﬀerent principals
+(security labels in our setting) in the lattice.
+
+Barthe et al. [11] propose a modular method to extend type systems and proofs for
+noninterference to declassiﬁcation and discuss how the method extends to object-oriented
+languages. The declassiﬁcation property called delimited non-disclosure [23] does not support 
+ﬁne-grained speciﬁcation of how to declassify a given secret, as supported by relaxed
+noninterference.
+
+Tse and Zdancewic [33] propose a security-typed language for robust declassiﬁcation:
+declassiﬁcation cannot be triggered unless there is a digital certiﬁcate to assert the proper
+authority. Their language inherits many features from System F<: and uses monadic labels
+as in DCC [1]. The monadic style allows them to integrate computational eﬀects, which
+we do not support. In contrast to our work, security labels are based on the Decentralized
+Label Model (DLM) [25], and are not semantically uniﬁed with the standard safety types of
+the language.
+
+Chong and Myers [16] propose hybrid typing to enforce declassiﬁcation and erasure
+policies and implement it in Jif [24]. Their language features a special declassiﬁcation function 
+that takes as input the expression and levels to declassify and also the conditions under
+which declassiﬁcation can occur. Security policies are speciﬁed by means of security levels
+and conditions to downgrade them. This resembles our declassiﬁcation policies, which specify 
+the methods that can be applied in order to (partially) declassify; at a more abstract
+level, the interface types of the public facet can be seen as “conditions” for declassifying.
+The type system developed by Chong and Myers statically checks that conditions in declassiﬁcation 
+commands comply with the speciﬁed security policies. A dynamic mechanism
+enforces this, or returns a dummy value (instead of the declassiﬁed value) at runtime. In
+contrast to our work, their type system signiﬁcantly departs from standard typing rules, and
+dynamic checks are required for guaranteeing security.
+
+Extensional speciﬁcation of declassiﬁcation policies. The language Air [31] expresses
+declassiﬁcation policies as security automata. The policies, seen as automata, transition
+when a release obligation is satisﬁed. When an accepting state is reached, declassiﬁcation
+is performed. These policies resemble relaxed noninterference and our own declassiﬁcation
+policies but they require very speciﬁc typing rules.
+
+Banerjee et al. [10] study declassiﬁcation properties using ideas from epistemic logic can
+capture global policies (as in the original work of relaxed noninterference) with an extensional
+property. Their policies are not expressed using standard types as in our work.
+
+ECOOP 2017
+
+7:20
+
+Type Abstraction for Relaxed Noninterference
+
+The language Paralocks [15] supports declassiﬁcation policies represented as Horn clauses,
+whose antecedents are conditions that should be satisﬁed for a ﬂow to occur. There is a natural 
+order between declassiﬁcation policies that correspond to the logical entailment when
+viewing policies as Horn clauses. The policies together with the logical entailment order
+deﬁne a lattice that supports an extensional speciﬁcation of secrets and their intended declassiﬁcation,
+ as in our work. However, declassiﬁcation policies in Paralocks are not speciﬁed
+by using the standard types of the language, and thus their enforcement requires speciﬁc
+typing rules.
+
+Multiple facets for dynamic enforcement of declassiﬁcation. Austin and Flanagan introduce 
+Multiple Facets [8] as a dynamic mechanism to enforce secure information ﬂow. The
+main idea behind multiple facets is to execute a program using multiple values, one value or
+facet for each security level of observation. A value considered conﬁdential will only ﬂow to
+a public facet by facet declassiﬁcation, based on robust declassiﬁcation [40]. Robust declassiﬁcation 
+requires the decision to declassify to be trusted according to integrity labels used
+to model trust. In our work, we do not consider integrity labels or robust declassiﬁcation.
+However, the idea of multiple facets (having a facet for each observer at a given security
+level) is similar to our faceted types. Just as Austin and Flanagan can run a program for different 
+facets simultaneously, we type check programs providing diﬀerent views to observers
+with diﬀerent security clearances.
+
+Multiple facets are also inspired by Secure Multi Execution (SME) [19, 12], a dynamic
+mechanism that roughly executes a program multiple times in order to enforce noninterference.
+ Hence, observers with diﬀerent security clearances will potentially observe diﬀerent
+values during the execution of a program. Several works have studied declassiﬁcation in
+the context of SME [27, 34, 13]. Rafnsson and Sabelfeld [27] propose declassiﬁcation in
+SME based on the gradual release property [7]. This property diﬀers from the property we
+consider in our work in that it is not possible to extensionally specify what is being released
+or declassiﬁed. The latest works on SME declassiﬁcation [34, 13] generalize security levels
+as declassiﬁer functions, resembling declassiﬁcation policies of both Li and Zdancewic and
+ours. Since SME is a dynamic enforcement mechanism, these declassiﬁcation policies are
+not used for relating declassiﬁcation and type abstraction.
+
+7
+
+Conclusion
+
+One of the open challenges in the area of information ﬂow security is integrating information 
+ﬂow mechanisms with existing infrastructures [39]. Our work partially addresses this
+challenge by showing a connection between type abstraction, more precisely that induced
+by the the subtyping relation in an object-oriented language, and the order relation in security 
+lattices. In particular, we exploit an intuitive connection between object interfaces
+and declassiﬁcation policies: an object interface already gives a way to control the exposed
+behavior of an object. These connections imply that standard type systems can be used as
+a direct means to enforce secure information ﬂow, when types express security policies. It is
+left to explore how this connection scales in practice, but we expect the economy of concepts
+to be an important asset for adoption.
+
+We plan to study the impact of more advanced typing disciplines on the expressiveness of
+type-based declassiﬁcation, especially dependent object types [28] and reﬁnement types [35].
+It remains to be seen whether global policies can be expressed, and how. Another venue
+for future work is to develop our approach in a setting that relies on other forms of type
+
+R. Cruz, T. Rezk, B. Serpette, and É. Tanter
+
+7:21
+
+abstraction, such as existential types. Finally, we intend to explore how to infer the minimal
+knowledge that has to be exposed to a public observer in order to guarantee a relaxed
+noninterference guarantee at a given type. Inferring the minimal input declassiﬁcations of a
+secure program can for instance be useful to assess the impact some refactoring or extensions
+of that program have on security.
+
+References
+
+1 Martín Abadi, Anindya Banerjee, Nevin Heintze, and Jon G. Riecke. A core calculus of
+dependency. In Proceedings of the 26th ACM Symposium on Principles of Programming
+Languages (POPL 99), pages 147–160, San Antonio, TX, USA, January 1999. ACM Press.
+
+2 Martin Abadi and Luca Cardelli. A Theory of Objects. Springer-Verlag, 1996.
+3 Amal Ahmed. Semantics of Types for Mutable State. PhD thesis, Princeton University,
+
+2004.
+
+4 Amal Ahmed. Step-indexed syntactic logical relations for recursive and quantiﬁed types. In
+Peter Sestoft, editor, Proceedings of the 15th European Symposium on Programming (ESOP
+2006), volume 3924 of Lecture Notes in Computer Science, pages 69–83. Springer-Verlag,
+2006.
+
+5 Roberto M. Amadio and Luca Cardelli. Subtyping recursive types.
+
+In David S. Wise,
+editor, Conference Record of the Eighteenth Annual ACM Symposium on Principles of
+Programming Languages (POPL 91), pages 104–118. ACM Press, 1991.
+
+6 Andrew W. Appel and David McAllester. An indexed model of recursive types for foundational 
+proof-carrying code. ACM Transactions on Programming Languages and Systems,
+23(5):657–683, September 2001.
+
+7 Aslan Askarov and Andrei Sabelfeld. Gradual release: Unifying declassiﬁcation, encryption
+In Proceedings of the 27th IEEE Symposium on Security and
+
+and key release policies.
+Privacy (S&P 2007), pages 207–221. IEEE Computer Society Press, May 2007.
+
+8 Thomas H. Austin and Cormac Flanagan. Multiple facets for dynamic information ﬂow. In
+Proceedings of the 39th ACM SIGPLAN-SIGACT Symposium on Principles of Programming 
+Languages (POPL 2012), pages 165–178. ACM Press, January 2012.
+
+9 Anindya Banerjee and David A. Naumann. Stack-based access control and secure information 
+ﬂow. Journal of Functional Programmming, 15(2):131–177, September 2005.
+
+10 Anindya Banerjee, David A. Naumann, and Stan Rosenberg. Expressive declassiﬁcation
+policies and modular static enforcement. In Proceedings of the IEEE Symposium on Security
+and Privacy (S&P 2008), pages 339–353. IEEE Computer Society Press, May 2008.
+
+11 Gilles Barthe, Salvador Cavadini, and Tamara Rezk. Tractable enforcement of declassiﬁcation 
+policies. In Proceedings of the 21st IEEE Computer Security Foundations Symposium
+(CSF 2008), pages 83–97. IEEE Computer Society Press, June 2008.
+
+12 Natalia Bielova and Tamara Rezk. Spot the diﬀerence: Secure multi-execution and multiple
+facets. In Proceedings of the 21st European Symposium on Research in Computer Security
+(ESORICS 2016), pages 501– 519, 2016.
+Iulia Bolosteanu and Deepak Garg. Asymmetric secure multi-execution with declassiﬁcation.
+
+In Proceedings of the 5th International Conference on Principles of Security and
+Trust (POST 2016), pages 24–45. Springer-Verlag, April 2016.
+
+14 William J. Bowman and Amal Ahmed. Noninterference for free. In Proceedings of the 20th
+ACM SIGPLAN Conference on Functional Programming (ICFP 2015), pages 101–113.
+ACM Press, August 2015.
+
+15 Niklas Broberg and David Sands. Paralocks: role-based information ﬂow control and beyond.
+ In Proceedings of the 37th annual ACM SIGPLAN-SIGACT Symposium on Principles
+of Programming Languages (POPL 2010), pages 431–444. ACM Press, January 2010.
+
+13
+
+ECOOP 2017
+
+7:22
+
+Type Abstraction for Relaxed Noninterference
+
+16
+
+Stephen Chong and Andrew C. Myers. End-to-end enforcement of erasure and declassiﬁcation.
+ In Proceedings of the 21st IEEE Computer Security Foundations Symposium (CSF
+2008), pages 98–111. IEEE Computer Society Press, June 2008.
+
+17 William R. Cook. On understanding data abstraction, revisited. ACM SIGPLAN Notices,
+
+44(10):557–572, 2009.
+
+ACM, 19(5):236–243, May 1976.
+
+18 Dorothy E. Denning. A lattice model of secure information ﬂow. Communications of the
+
+22
+
+19 Dominique Devriese and Frank Piessens. Noninterference through Secure Multi-execution.
+In Proceedings of the 31st IEEE Symposium on Security and Privacy (S&P 2010), pages
+109–124. IEEE Computer Society Press, May 2010.
+
+20 Cédric Fournet, Jérémy Planul, and Tamara Rezk. Information-ﬂow types for homomorphic
+encryptions. In Proceedings of the Conference on Computer and Communications Security
+(CCS 2011), pages 351–360. ACM Press, October 2011.
+
+21 Boniface Hicks, Dave King, Patrick McDaniel, and Michael Hicks. Trusted declassiﬁcation:
+high-level policy for a security-typed language. In Proceedings of the workshop on Programming 
+Languages and Analysis for Security (PLAS 2006), pages 65–74. ACM Press, June
+2006.
+Peng Li and Steve Zdancewic. Downgrading policies and relaxed noninterference. In Proceedings 
+of the 32nd ACM SIGPLAN-SIGACT Symposium on Principles of Programming
+Languages (POPL 2005), pages 158–170. ACM Press, January 2005.
+
+23 Ana Almeida Matos and Gérard Boudol. On declassiﬁcation and the non-disclosure policy.
+In Proceedings of the IEEE Computer Security Foundations Workshop (CSFW 2005), pages
+549–597. IEEE Computer Society Press, October 2005.
+
+24 Andrew C. Myers. Jif homepage. http://www.cs.cornell.edu/jif/, accessed May 2017.
+25 Andrew C. Myers and Barbara Liskov. Protecting privacy using the decentralized label
+model. ACM Transactions on Software Engineering and Methodology, 9:410–442, October
+2000.
+
+26 Benjamin C. Pierce. Types and programming languages. MIT Press, Cambridge, MA, USA,
+
+2002.
+
+27 Willard Rafnsson and Andrei Sabelfeld.
+
+Fine-grained,
+declassiﬁcation-aware, and transparent.
+In Proceedings of the 26th IEEE Computer Security 
+Foundations Symposium (CSF 2013), pages 33–48. IEEE Computer Society Press,
+June 2013.
+
+Secure multi-execution:
+
+28 Tiark Rompf and Nada Amin. Type soundness for dependent object types (DOT). In Eelco
+Visser and Yannis Smaragdakis, editors, Proceedings of the 2016 ACM SIGPLAN International 
+Conference on Object-Oriented Programming, Systems, Languages, and Applications
+(OOPSLA 2016), pages 624–641. ACM Press, November 2016.
+
+29 Andrei Sabelfeld and David Sands. Declassiﬁcation: Dimensions and principles. Journal
+
+of Computer Security, 17(5):517–548, 2009.
+
+30 Naokata Shikuma and Atsushi Igarashi. Proving noninterference by a fully complete translation 
+to the simply typed lambda-calculus.
+In Mitsu Okada and Ichiro Satoh, editors,
+Proceedings of the 11th Asian Computing Science Conference (ASIAN 2006), volume 4435
+of Lecture Notes in Computer Science, pages 301–315. Springer-Verlag, 2006.
+
+31 Nikhil Swamy and Michael Hicks. Veriﬁed enforcement of stateful information release
+policies. In Úlfar Erlingsson and Marco Pistoia, editors, Proceedings of the Workshop on
+Programming Languages and Analysis for Security (PLAS 2008), pages 21–32. ACM Press,
+December 2008.
+Stephen Tse and Steve Zdancewic. Translating dependency into parametricity.
+In Proceedings 
+of the 7th ACM SIGPLAN Conference on Functional Programming (ICFP 2004),
+pages 115–125, Snowbird, Utah, USA, September 2004. ACM Press.
+
+32
+
+R. Cruz, T. Rezk, B. Serpette, and É. Tanter
+
+7:23
+
+33
+
+Stephen Tse and Steve Zdancewic. A design for a security-typed language with certiﬁcatebased 
+declassiﬁcation. In Proceedings of the 14th European Symposium on Programming
+Languages and Systems (ESOP 2005), volume 2986 of Lecture Notes in Computer Science,
+pages 279–294. Springer-Verlag, 2005.
+
+34 Mathy Vanhoef, Willem De Groef, Dominique Devriese, Frank Piessens, and Tamara Rezk.
+Stateful declassiﬁcation policies for event-driven programs. In Proceedings of the 27th IEEE
+Computer Security Foundations Symposium (CSF 2014). IEEE Computer Society Press,
+2014.
+
+35 Niki Vazou, Eric L. Seidel, Ranjit Jhala, Dimitrios Vytiniotis, and Simon Peyton-Jones.
+Reﬁnement types for haskell. In Proceedings of the 19th ACM SIGPLAN Conference on
+Functional Programming (ICFP 2014), pages 269–282. ACM Press, August 2014.
+
+36 Dennis Volpano, Cynthia Irvine, and Geoﬀrey Smith. A sound type system for secure ﬂow
+
+analysis. Journal of Computer Security, 4(2-3):167–187, January 1996.
+
+38
+
+37 Geoﬀrey Washburn and Stephanie Weirich. Generalizing parametricity using informationﬂow.
+ In Proceedings of the 20th IEEE Symposium on Logic in Computer Science (LICS
+2005), pages 62–71. IEEE Computer Society Press, June 2005.
+Steve Zdancewic. Programming Languages for Information Security. PhD thesis, Cornell
+University, August 2002.
+Steve Zdancewic. Challenges for information-ﬂow security. In Proceedings of Programming
+Language Interference and Dependence, 2004.
+Steve Zdancewic and Andrew C. Myers. Robust declassiﬁcation. In Proceedings of the 14th
+IEEE Computer Security Foundations Workshop (CSFW-14), pages 15–23. IEEE Computer 
+Society Press, June 2001.
+
+39
+
+40
+
+ECOOP 2017
+
+7:24
+
+Type Abstraction for Relaxed Noninterference
+
+Auxiliary Deﬁnitions
+
+A
+A.1 Environments
+Γ ::= · | Γ, x : S
+(type environment)
+Φ ::= · | Φ, α <: β
+(subtyping environment)
+∆ ::= · | ∆, α
+(type variable environment)
+Σ ::= · | Σ, α (cid:44) O (type deﬁnition environment)
+
+Γ is a ﬁnite map from variables to closed and well-formed security types. Σ is a ﬁnite
+map from type variables to object types. Φ is a set of subtyping relations between type
+variables. ∆ is a set of type variables.
+dom(Env) (where Env could be Γ, Σ or Φ) is the set of variables for which the ﬁnite
+map Env is deﬁned. In the case of dom(Φ), it is the set of the type variables in the left
+part of the subtyping relation.
+We also use the notations Γ, x : S or Σ, α (cid:44) O or Φ, α <: β to extend the environments
+Γ, Σ , Φ with a new binding or relation, respectively. If x ∈ dom(Γ), α ∈ dom(Σ) or
+either α or β ∈ dom(Φ)∪ cod(Φ) the extension operation is not deﬁned for the respective
+environment.
+The notation ∆, α extends the set ∆ with a new type variable. If α ∈ ∆ the operation
+is not deﬁned.
+We use the following functions to access to the elements of the environments:
+Γ(x) returns the security type associated to x in Γ. If x /∈ dom(Γ), then Γ(x) is undeﬁned.
+Σ(α) returns the type associated to α in Σ. If α /∈ dom(Σ), then Σ(α) is undeﬁned.
+α <: β ∈ Φ is true if Φ(α) = β, false otherwise. Φ(α) returns the type variable in the
+right part of the subtyping relation with α in Φ. If α /∈ dom(Φ), then Φ(α) is undeﬁned.
+
+A.2 Well-formedness of types and environments
+For the main results of the Section 4 to hold we need to ensure we work with well-formed
+security types.
+
+Well formed types. We use the predicate valid(S) to denote that a security type S is closed
+and that the object types that S contains have unique method members. The deﬁnition of
+valid(S) is based on a standard notion well-formedness of object types [2] (Figure 7).
+To check for well-formed security types, i.e. that the private type is a subtype of the
+public type we deﬁne the judgment Σ ‘s S (Figure 8). The (WFS-ST) rule is the most
+important. For this rule to hold, the subtyping relation between both facets must hold and
+also the same principle must hold for the all the security types in each facet.
+
+The presence of type variables in the facets of a security type and the corresponding
+subtyping constraint introduces subtle cases to manage before using the subtyping judgment.
+Consider the following object type: O (cid:44) Obj(α). [m : S → α / Obj(β). [m : S → α / β]]. For
+‘s O to hold, α (cid:44) O ‘s α / Obj(β). [m : S → α / β] must hold. It implies to check ‘ α <:
+Obj(β). [m : S → α / β]. Note that, we can not justify that subtyping judgment, because we
+do not have a subtyping premise involving the type variable α. To address this, we need to
+remember (in Σ) the surrounding recursive object type O that binds α, and to transform the
+check α (cid:44) O ‘s α / Obj(β). [m : S → α / β] to ‘ O <: Obj(β). [m : S → O / β] by closing α
+with the mappings in Σ (i.e. O). We use the notation Σ [T] to substitute the free variables
+in type T according to the bindings in Σ.
+
+R. Cruz, T. Rezk, B. Serpette, and É. Tanter
+
+7:25
+
+∆ ‘t T
+
+∆ ‘t S
+
+T ≡ Obj(α).(cid:2)m : S1 → S2(cid:3)
+
+(i 6= j =⇒ mi 6= mj)
+
+∆, α ‘t S1i
+
+∆, α ‘t S2i
+
+∆ ‘t T
+
+(WF-V) α ∈ ∆
+∆ ‘t α
+
+(WF-O)
+
+(WF-ST) ∆ ‘t T ∆ ‘t U
+
+∆ ‘t T / U
+
+· ‘t S
+valid(S)
+
+Figure 7 Standard well-formedness of object types and type variables, and its lifting to security
+
+types.
+
+Σ ‘s T
+
+Σ ‘s S
+
+(WFS-ST)
+
+T ≡ Obj(α).(cid:2)m : S1 → S2(cid:3)
+
+Σ, α : T ‘s S1i
+
+Σ, α : T ‘s S2i
+
+Σ ‘s T
+
+‘ S
+
+(WFS-V) Σ ‘s α
+
+Σ ‘s T Σ ‘s U · ‘ Σ [T ] <: Σ [U]
+
+Σ ‘s T / U
+
+(WF)
+
+valid(S) · ‘s S
+
+‘ S
+
+Figure 8 Well-formedness of security types.
+
+Finally, we say that a security type S is well-formed (notation ‘ S) if the type is valid
+
+and the subtyping constraints for S hold (· ‘s S)
+
+Well-formedness of a type environment. A type environment is well formed, noted Γ ‘ (cid:5),
+if all types in the environment are well-formed:
+
+(EEnvOk)
+
+· ‘ (cid:5)
+
+(EnvOk)
+
+Γ ‘ (cid:5)
+
+x /∈ dom(Γ)
+
+‘ S
+Γ, x : S ‘ (cid:5)
+
+A.3 Subtyping
+The gray parts in the subtyping rules of the Figure 9 were not included in the Figure 2 of the
+main document. They prevent justifying inconsistent subtyping judgments by controlling
+the uses of type variables.
+For example, consider the following types:
+T1 (cid:44) Obj(α). [n : S → Obj(β). [m1 : βL → S0 m2 : S1 → S2]L]
+T2 (cid:44) Obj(β). [n : S → Obj(α). [m1 : αL → S0]L]
+For ‘ T1 <: T2 to hold, after using the rule (SObj) twice, the contravariance of m1 parameters
+·, α <: β, β <: α ‘ α <: β must hold. We can justify this by applying the rule (SVar) because
+we have the assumption α <: β in the subtyping environment. So, we justify ‘ T1 <: T2 and
+it is not the case that T1 is subtype of T2. The problem is the occurrence of the variables
+α and β in both types, that creates subtyping assumptions in both directions and it allows
+to justify subtyping between type variables that represent unrelated types (by subtyping).
+The well-formedness condition of the subtyping environment Φ prevents this kind of cases,
+
+ECOOP 2017
+
+7:26
+
+Type Abstraction for Relaxed Noninterference
+
+Φ ‘ T <: T
+
+O1 (cid:44) Obj(α).(cid:2)m : S1 → S2(cid:3) O2 (cid:44) Obj(β).(cid:2)m0 : S0
+
+(cid:3) m0 ⊆ m
+
+1 → S0
+
+2
+
+mi = m0
+
+j =⇒ (Φ, α <: β ‘ S0
+
+1j <: S1i Φ, α <: β ‘ S2i <: S0
+
+2j)
+
+Φ ‘ (cid:5)
+
+dom(Φ) ∪ cod(Φ) ‘t Oi
+Φ ‘ O1 <: O2
+
+(SSubEq)
+
+T1 ≡ T2
+
+Φ ‘ T1 <: T2
+
+(STrans) Φ ‘ T1 <: T2
+
+Φ ‘ T2 <: T3
+
+Φ ‘ T1 <: T3
+
+(TSubST) Φ ‘ T1 <: T2
+
+Φ ‘ U1 <: U2
+Φ ‘ T1 / U1 <: T2 / U2
+
+(SObj)
+
+Φ ‘ (cid:5)
+
+α <: β ∈ Φ
+Φ ‘ α <: β
+
+(SVar)
+
+Φ ‘ S <: S
+
+Figure 9 Subtyping.
+
+Φ ‘ (cid:5)
+
+(EEnvSubOk)
+
+· ‘ (cid:5)
+
+(EnvSubOk)
+
+Φ ‘ (cid:5)
+
+αi /∈ dom(Φ) ∪ cod(Φ)
+Φ, α1 <: α2 ‘ (cid:5)
+
+Figure 10 Well-formedness of the subtyping environment.
+
+because we cannot extend the environment with a subtyping premise, where one of the
+involved variables is already in the environment (Figure 10).
+
+A.4 Type equivalence
+Two types are equivalent (Figure 11) if the equivalence can be derived through the congruence 
+induced by rules (Alpha-Eq) and (Fold-Unfold). For example:
+Obj(α). [m : α → α] ≡ Obj(β). [m : β → β]
+Obj(α). [m : > → α] ≡ Obj(α). [m : > → Obj(β). [m : > → β]]
+
+A.5 Simple type system
+The simple typing judgment Γ ‘1 e : T is deﬁned in terms of “single-facet typing” (Figure 
+12). Single-facet typing Γ ‘sf e : S is a simpliﬁcation of security typing: the rules
+(TmD) and (TmH) are replaced by a single rule (T1mI) that simply ignores the public type.
+Furthermore, the subtyping judgment Φ ‘ S1 <: S2 is replaced by the simple subtyping
+judgment Φ ‘sf S1 <: S2 that only takes care of subtyping between the private facets of the
+security types. Its deﬁnition is direct and omitted here.
+(cid:73) Lemma 14. Γ ‘ (cid:5) ∧ Γ ‘ e : T / U then Γ ‘1 e : T
+Proof. Trivial induction on typing derivations of e.
+(cid:73) Lemma 15.
+
+(cid:74)
+
+Γ ‘ (cid:5) ∧ Γ ‘1 e : T =⇒ ∃U. Γ ‘ e : T / U
+
+R. Cruz, T. Rezk, B. Serpette, and É. Tanter
+
+7:27
+
+T ≡ T
+
+(Sym)
+
+T ≡ T
+
+(Alpha-Eq)
+
+S ≡ S
+
+(Reﬂ) T1 ≡ T2
+(Trans) T1 ≡ T2
+T2 ≡ T1
+Obj(α).(cid:2)m : S1 → S2(cid:3) ≡ Obj(α).(cid:2)m : S0
+
+S1i ≡ S0
+1i
+
+S2i ≡ S0
+2i
+
+T2 ≡ T3
+
+T1 ≡ T3
+
+(cid:3)
+
+1 → S0
+
+2
+
+(O-Congr)
+
+O (cid:44) Obj(α).(cid:2)m : S1 → S2(cid:3)
+
+O ≡ O [β/α]
+
+β fresh
+
+(Fold-Unfold)
+
+O ≡ O [O/α]
+
+T1 ≡ T2
+U1 ≡ U2
+T1 / U1 ≡ T2 / U2
+
+Figure 11 Type equivalence.
+
+Γ ‘sf e : S
+
+(T1Obj)
+
+Γ ‘1 e : T
+
+(T1Var)
+
+‘ S
+
+x ∈ dom(Γ)
+Γ ‘sf x : Γ(x)
+S (cid:44) T / U
+
+Γ ‘sf e1 : T / U
+
+(T1mI)
+
+(T1Sub) Γ ‘sf e : S0
+Γ ‘sf(cid:2)z : S ⇒ m (x) e(cid:3) : S
+
+i → S00
+
+methsig(T, mi) = S0
+
+i
+
+methsig(T, m) = S1 → S2
+Γ ‘sf e1.m(e2) : S2
+
+Γ ‘sf e2 : S1
+
+‘sf S0 <: S
+
+Γ ‘sf e : S
+
+‘ S
+
+Γ, z : S, xi : S
+
+0
+i ‘sf ei : S00
+
+i
+
+Γ ‘sf e : T / U
+
+Γ ‘1 e : T
+
+Figure 12 Simple typing, deﬁned in terms of single-facet typing.
+
+Proof. By induction of the typing derivation of Γ ‘1 e : T.
+choose U to be the private type T.
+
+In all the cases, we simply
+(cid:74)
+
+ECOOP 2017
+
+

@@ -1,0 +1,945 @@
+On Index-Free Similarity Search
+
+in Metric Spaces
+
+Tom´aˇs Skopal1 and Benjamin Bustos2
+
+1 Department of Software Engineering, FMP, Charles University in Prague,
+
+Malostransk´e n´am. 25, 118 00 Prague, Czech Republic
+
+2 Department of Computer Science, University of Chile,
+
+skopal@ksi.mff.cuni.cz
+
+Av. Blanco Encalada 2120 3er Piso, Santiago, Chile
+
+bebustos@dcc.uchile.cl
+
+Abstract. Metric access methods (MAMs) serve as a tool for speeding
+similarity queries. However, all MAMs developed so far are index-based;
+they need to build an index on a given database. The indexing itself is
+either static (the whole database is indexed at once) or dynamic (inser-
+tions/deletions are supported), but there is always a preprocessing step
+needed. In this paper, we propose D-ﬁle, the ﬁrst MAM that requires
+no indexing at all. This feature is especially beneﬁcial in domains like
+data mining, streaming databases, etc., where the production of data is
+much more intensive than querying. Thus, in such environments the indexing 
+is the bottleneck of the entire production/querying scheme. The
+idea of D-ﬁle is an extension of the trivial sequential ﬁle (an abstraction
+over the original database, actually) by so-called D-cache. The D-cache
+is a main-memory structure that keeps track of distance computations
+spent by processing all similarity queries so far (within a runtime ses-
+sion). Based on the distances stored in D-cache, the D-ﬁle can cheaply
+determine lower bounds of some distances while the distances alone have
+not to be explicitly computed, which results in faster queries. Our experimental 
+evaluation shows that query eﬃciency of D-ﬁle is comparable to
+the index-based state-of-the-art MAMs, however, for zero indexing costs.
+
+1 Introduction
+
+The majority of problems in the area of database systems concern the eﬃciency
+issues – the performance of DBMS. For decades, the number of accesses to disk
+required by I/O operations was the only important factor aﬀecting the DBMS
+performance. Hence, there were developed indexing structures [16,2], storage
+layouts [4], and also disk caching/buﬀering techniques [7]; all of these designs
+aimed to minimize the number of physical I/Os spent during a database transaction 
+ﬂow. In particular, disk caching is extremely eﬀective in situations where
+repeated access to some disk pages happens within a single runtime session.
+In some modern databases, like multimedia DBs (MMDBs), DNA DBs, time
+series DBs, etc., we need to use a similarity function δ(·,·) which serves as a
+relevance measure, saying how much a DB object is relevant to a query object. To
+
+S.S. Bhowmick, J. K¨ung, and R. Wagner (Eds.): DEXA 2009, LNCS 5690, pp. 516–531, 2009.
+c(cid:2) Springer-Verlag Berlin Heidelberg 2009
+
+On Index-Free Similarity Search in Metric Spaces
+
+517
+
+speedup similarity search in MMDBs, there have been many indexing techniques
+developed, some being domain-speciﬁc and some others more general. The new
+important fact is that the performance of MMDBs is more aﬀected by CPU costs
+than by I/O costs. In particular, in MMDBs community a single computation of
+similarity value δ(·,·) is employed as the logical unit for indexing/retrieval cost,
+because of its dominant impact on overall MMDB performance [18,5] (algorithms
+computing δ(·,·) are often super-linear in terms of DB object size). Thus, the I/O
+costs are mostly regarded as a minor component of the overall cost because of the
+computational complexity of similarity measures. The number of computations
+δ(·,·) needed to answer a query or to index a database is referred to as the
+computation costs.
+
+1.1 Metric Access Methods
+
+Among the similarity search techniques, metric access methods (MAMs) are suitable 
+in situations where the similarity measure δ is a metric distance (in mathematical 
+meaning). The metric postulates – reﬂexiveness, positiveness, symmetry,
+triangle inequality – allow us to organize the database within classes that represent 
+some occupied partitions of the underlying metric space. The classes are
+usually organized in a data structure (either persistent or main-memory), called
+index, that is created during a preprocessing step (the indexing).
+
+The index is later used to quickly answer typical similarity queries – either a
+k nearest neighbors (kNN) query like “return the 3 most similar images to my
+image of horse”, or a range query like “return all voices more than 80% similar 
+to the voice of nightingale”. In particular, when issued a similarity query1,
+the MAMs exclude many non-relevant classes from the search (based on metric
+properties of δ), so only several candidate classes of objects have to be sequentially 
+searched. In consequence, searching a small number of candidate classes
+turns out in reduced computation costs of the query.
+
+There were developed many MAMs so far, addressing various aspects –
+main-memory/database-friendly methods,
+static/dynamic indexing, exact/
+approximate search, centralized/distributed indexing, etc. (see [18,12,5,11]). Although 
+various MAMs often diﬀer considerably, they all share the two following
+properties:
+
+1. MAMs are all index-based. For a given database, an index must exist in
+order to be able to process queries. Hence, the ﬁrst query must be always
+preceded by a more or less expensive data preprocessing which results in an
+index (either main-memory or persistent).
+
+2. Once its index is built, a MAM solves every query request separately, that is,
+every query is evaluated as it would be the only query to be ever answered.
+In general, no optimization for a stream of queries is considered by MAMs
+up to date. Instead, enormous research has been spent in “materializing” the
+data-pruning/-structuring knowledge into the index ﬁle itself.
+
+1 A range or kNN query can be viewed as a ball in the metric space (centered in query
+object Q with radius of the range/distance to kNN), so we also talk about query ball.
+
+518
+
+T. Skopal and B. Bustos
+
+In the following, we consider three representatives out of dozens of existing
+MAMs – the M-tree, the PM-tree, and GNAT.
+
+M-tree. The M-tree [6] is a dynamic (easily updatable) index structure that
+provides good performance in secondary memory, i.e., in database environments.
+The M-tree index is a hierarchical structure, where some of the data objects are
+selected as centers (also called references or local pivots) of ball-shaped regions,
+while the remaining objects are partitioned among the regions in order to build
+up a balanced and compact hierarchy of data regions.
+
+PM-tree. The idea of PM-tree [13,14] is to enhance the hierarchy of M-tree
+by using information related to a static set of p global pivots Pi. In a PM-tree’s
+non-leaf region, the original M-tree-inherited ball region is further cut oﬀ by
+a set of rings (centered in the global pivots), so the region volume becomes
+smaller. Similarly, the PM-tree leaf entries are extended by distances to the
+pivots, which are also interpreted as rings due to quantization. Each ring stored
+in a non-leaf/leaf entry represents a distance range bounding the underlying data
+with respect to a particular pivot. The combination of all the p entry’s ranges
+produces a p-dimensional minimum bounding rectangle, hence, the global pivots
+actually map the metric regions/data into a “pivot space” of dimensionality p.
+
+GNAT. The Geometric Near-Neighbor Access Tree (GNAT) [3] is a metric
+access method that extends the Generalized-Hyperplane Tree [15]. The main idea
+behind GNAT is to partition the space into zones that contain close objects. The
+root node of the tree contains m objects selected from the space, the so-called
+split-points. The rest of the objects is assigned to their closest split-point. The
+construction algorithm selects with a greedy algorithm the split-points, such that
+they are far away from each other. Each zone deﬁned by the selected split-points
+is partitioned recursively in the same way (possibly using a diﬀerent value for
+m), thus forming a search hierarchy. At each node of the tree, a O(m2) table
+stores the range (minimum and maximum distance) from each split-point to each
+zone deﬁned by the other split-points.
+
+1.2 Motivation for Index-Free Similarity Search
+
+As mentioned earlier, the existing MAMs are all index-based. However, there
+emerge many real and potential needs for access methods that should provide
+index-free similarity search. We brieﬂy discuss three cases where any data preprocessing 
+(like indexing) is undesirable:
+“Changeable” databases. In many applications, there are databases which
+content is intensively changing over time, like streaming databases, archives,
+logs, temporal databases, where new data arrives and old data is discarded frequently.
+ Alternatively, we can view any database as “changeable” if the proportion 
+of changes to the database exceeds the number of query requests. In highly
+changeable databases, the indexing eﬀorts lose their impact, since the expensive 
+indexing is compensated by just a few eﬃcient queries. In the extreme case
+
+On Index-Free Similarity Search in Metric Spaces
+
+519
+
+(e.g., sensory-generated data), the database could have to be massively updated
+in real time, so that any indexing is not only slow but even impossible.
+
+Isolated searches. In complex tasks, e.g., in data mining, a similarity query
+over a single-purpose database is used just as an isolated operation in the chain
+of all required operations to be performed. In such case, the database might
+be established for a single or several queries and then discarded. Hence, indexbased 
+methods cannot be used, because, in terms of the overall costs (index-
+ing+querying), the simple sequential search would perform better.
+
+Arbitrary similarity function. Sometimes, the similarity measure is not deﬁned 
+a priori and/or can change over the time. This includes learning, userdeﬁned 
+or query-deﬁned similarity, while in such case any indexing would lead
+to many diﬀerent indexes, or it is not possible at all.
+
+1.3 Paper Contribution
+
+In this paper, we propose the D-ﬁle, an index-free MAM employing a mainmemory 
+structure – the D-cache. The D-cache (distance cache) stores distances
+computed during querying within a single runtime session. Hence, the aim of
+D-ﬁle is not to use an index, but to amortize the query costs by use of Dcache,
+ similarly like I/O-oriented access methods amortize the I/O costs using
+disk cache. As in the case of simple sequential search, querying the D-ﬁle also
+means a sequential traversal of the entire database. However, whenever a DB
+object is to be checked against a query, instead of computing the DB object-
+to-query object distance, we request the D-cache for its tightest lower bound.
+This lower-bound distance is subsequently used to ﬁlter the DB object. Since
+many distances could have been computed during previous querying (for other
+query objects, of course), the lower bounds could be transitively inferred from
+the D-cache “for free”, which results in reduced query costs.
+
+2 Related Work
+
+In this section, we brieﬂy discuss existing index-free attempts to metric similarity
+search. In fact, to the best of our knowledge, there exist just one non-trivial
+approach applicable directly to the index-free metric search, as mentioned in
+Section 2.2. But ﬁrst, in the following section we discuss the simple sequential
+scan – in a role of trivial index-free MAM.
+
+2.1 Simple Sequential Scan
+
+If no index structure is provided, the only way of answering a similarity query in
+metric spaces is to perform a sequential search of the database. By this approach,
+for both range and k-NN queries the search algorithm computes the distances
+between the query object and all objects in the database. With the computed
+distances it is trivial to answer both types of queries. This approach has, of
+
+520
+
+T. Skopal and B. Bustos
+
+course, the advantage that neither space nor preprocessing CPU time is required
+to start performing similarity queries. It follows that the cost of a sequential scan
+is linear in the size of the database. This, however, may be already prohibitively
+expensive, for example if the database is too large, e.g., it contains tens of millions
+of objects, or if the distance function is expensive to compute, e.g., the edit
+distance between strings is O(nm) for sequences of lengths n and m.
+
+For the particular case of vector spaces, the VA-ﬁle [17] is a structure that
+stores compressed feature vectors, providing thus an eﬃcient sequential scan of
+the database. At query time, an approximation of the distances between query
+objects and compressed features are computed, discarding at this ﬁltering step
+as many objects as possible. The search algorithm reﬁnes this result by computing 
+the real distances to database objects only for the non-discarded vectors.
+While this approach could be a good alternative to the plain sequential scan, it
+only works in vector spaces and cannot be easily generalized to the metric case.
+Moreover, though the idea is based on sequential search, it is not index-free
+approach, because the compressed vectors form a persistent index – the VA-ﬁle.
+
+2.2 Query Result Caching
+
+Recently, the concept of metric cache for similarity search was introduced, providing 
+a caching mechanism that prevents any underlying MAM (i.e., also simple
+sequential scan) to process as many queries as possible [8,9]. Basically, the metric
+cache stores a history of similarity queries and their answers (ids and descriptors 
+of database objects returned by the query). When a next query is to be
+processed, the metric cache either returns the exact answer in case the same
+query was already processed in the past and its result still sits in the cache. Or,
+in case of a new query, such old queries are determined from the metric cache,
+that spatially contain the new query object inside their query balls. If the new
+query is entirely bounded by a cached query ball, a subset of the cached query
+result is returned as an exact answer of the new query. If not, the metric cache
+is used to combine the query results of spatially close cached queries to form an
+approximate answer of the new query. In case the approximated answer is likely
+to exhibit a large retrieval error, the metric cache gives up and forwards the
+query processing to the underlying retrieval system/MAM (updating the metric
+cache by the query answer afterwards).
+
+We have to emphasize that metric cache is a higher-level concept that can be
+combined with any MAM employed in a content-based retrieval system. Hence,
+metric cache is just a standalone front-end subpart in the whole retrieval system,
+while the underlying MAM alone is not aware of the metric cache. On the other
+hand, the proposal of D-cache in the following text is a low-level concept that
+plays the role of integral part of a metric access method (the D-ﬁle, actually).
+
+3 D-File
+
+We propose an index-free metric access method, the D-ﬁle, which is a set of
+methods extending simple sequential search over the database. Unlike the
+
+On Index-Free Similarity Search in Metric Spaces
+
+521
+
+VA-ﬁle mentioned earlier, we emphasize that D-ﬁle is just an abstraction above
+the original database, hence, there is no additional “ﬁle” materialized alongside 
+the database, that is, no additional persistent data structure is maintained,
+nor any preprocessing is performed. In other words, the D-ﬁle is the original
+database ﬁle equipped by a set of querying methods. Instead, the D-ﬁle uses
+a main-memory structure called D-cache (described in the next section). The
+D-cache has a simple objective – to gather (cache) distances already computed
+between DB and query objects within a single runtime session. Based on the
+stored distances, the D-cache can be asked to cheaply infer lower bound of some
+distance between a query object and a DB object. The D-ﬁle’s query algorithms
+then use these lower bounds when ﬁltering DB objects, see Algorithms 1 and 2.
+
+Algorithm 1. (D-ﬁle kNN query)
+set kNNQuery(Q, k) {
+Dcache.StartQueryProcessing(Q)
+let NN be array of k pairs [Oi, δ(Q, Oi)] sorted asc. wrt δ(Q, Oi), initialized to NN = [[−, ∞], ..., [−, ∞]]
+let rQ denotes the actual distance component in NN[k]
+for each Oi in database do
+if Dcache.GetLowerBoundDistance(Q, Oi) ≤ rQ then
+compute δ(Q, Oi); Dcache.AddDistance(Q, Oi, δ(Q, Oi))
+if δ(Q, Oi) ≤ rQ then insert [Oi, δ(Q, Oi)] into NN
+
+// D-cache ﬁltering
+
+// basic ﬁltering
+
+return NN as result }
+
+Algorithm 2. (D-ﬁle range query)
+set RangeQuery(Q, rQ) {
+Dcache.StartQueryProcessing(Q)
+for each Oi in database do
+if Dcache.GetLowerBoundDistance(Q, Oi) ≤ rQ then
+compute δ(Q, Oi); Dcache.AddDistance(Q, Oi, δ(Q, Oi))
+if δ(Q, Oi) ≤ rQ then add Oi to the query result }
+
+4 D-Cache
+
+// D-cache ﬁltering
+
+// basic ﬁltering
+
+The main component of D-ﬁle is the D-cache (distance cache) – a non-persistent
+(memory resident) structure, which tracks distances computed between query
+objects and DB objects, considering a single runtime session, i.e., contiguous
+sequence of queries. The track of distance computations is stored as a set of
+triplets, each of the form [id(Qi), id(Oj), δ(Ri, Oj)], where Qi is a query object,
+Oj is a DB object, and δ(Qi, Oj) is their distance computed during the current
+session. We assume query as well as DB objects are uniquely identiﬁed.
+
+Instead of considering a set of triplet entries, we can view the content of
+
+D-cache as a sparse matrix
+
+⎛
+
+O1 O2 O3
+d13
+
+d12
+
+. . .
+
+. . .
+dm3
+
+D =
+
+d21
+
+⎜⎜⎜⎝
+
+Q1
+Q2
+Q3
+. . .
+. . .
+Qm dm1
+
+⎞
+
+⎟⎟⎟⎠
+
+. . . On
+. . .
+. . . d2n
+. . .
+. . .
+. . .
+
+. . .
+
+522
+
+T. Skopal and B. Bustos
+
+where the columns refer to DB objects, the rows refer to query objects, and the
+cells store the respective query-to-DB object distances. Naturally, as new DB
+objects and query objects arrive into D-cache during the session, the matrix gets
+larger in number of rows and/or columns. Note that at the beginning of session
+the matrix is empty, while during the session the matrix is being ﬁlled. However,
+at any time of the session there can still exist entirely empty rows/columns.
+
+Note that query objects do not need to be external, that is, a query object
+could originate from the database. From this point of view, an object can have
+(at diﬀerent moments) the role of query as well as the role of DB object, however,
+the unique identiﬁcation of objects ensures the D-cache content is correct.
+
+Because of frequent insertions into D-cache, the matrix should be eﬃciently
+updatable. Moreover, due to operations described in the next subsection, we
+have to be able to quickly retrieve a cell, column, or row values. To achieve this
+goal, we have to implement the matrix by a suitable data structure(s).
+
+4.1 D-Cache Functionality
+The desired functionality of D-cache is twofold:
+
+– First, given a query object Q and a DB object O on input (or even two
+DB objects or two query objects), the D-cache should quickly determine the
+exact value δ(Q, O), provided the distance is present in D-cache.
+
+– The second functionality is more general. Given a query object Q and a DB
+object O on input, the D-cache should determine the tightest possible lower
+bound of δ(Q, O) without the need of an explicit distance computation.
+
+Both of the functionalities allow us to ﬁlter some non-relevant DB objects from
+further processing, making the search more eﬃcient. However, in order to facilitate 
+the above functionality, we have to feed the D-cache with information
+about the involved objects. To exploit the ﬁrst functionality, the current query
+object could have to be involved in earlier queries either as query object or as
+DB object the distance of which was computed against another query object.
+
+1 ), δ(Q, DP Q
+
+To exploit the second functionality, we need to know distances to some past
+query objects DP Q
+i which are very close to the current query Q. Suppose for a
+while we know δ(Q, DP Q
+2 ), . . . – these will serve as dynamic pivots
+made-to-measure to Q. Since the dynamic pivots are close to Q, they should be
+very eﬀective when pruning as they provide tight approximations of δ(Q, Oi).
+Having the dynamic pivots DP Q
+i , O) still
+sitting in the D-cache matrix, where they were inserted earlier during the current
+session. Then, with respect to the pivots and available distances δ(DP Q
+i , O) in
+i , Q)} is the tightest lowerthe 
+matrix, the value maxDP Q
+i , Q)} is the
+i , O) + δ(DP Q
+bound distance of δ(Q, O). Similarly, minDP Q
+tightest upper-bound distance of δ(Q, O). See the situation in Figure 1a.
+
+i , O) − δ(DP Q
+{δ(DP Q
+
+i , we can reuse some distances δ(DP Q
+
+{δ(DP Q
+
+i
+
+i
+
+4.2 Determining Dynamic Pivots
+In principle, we consider two ways to obtain k dynamic pivots out of (all) previously 
+processed queries:
+
+On Index-Free Similarity Search in Metric Spaces
+
+523
+
+Fig. 1. (a) Lower/upper bounds to δ(Q, O). (b) Internal selection of dynamic pivot
+(k = 1) by closeness approximation (Q1
+
+old is the winner).
+
+(a) Recent. We choose k past query objects immediately, that is, before the current 
+query processing actually starts. More speciﬁcally, we choose the k recently
+processed (distinct) query objects.
+(b) Internal. When the current query processing is started, the ﬁrst x distance
+computations of δ(Q, Oi) are used just to update D-cache, that is, the D-cache
+is still not used for ﬁltering. After insertion of the respective x triplets into Dcache,
+ the D-cache could be requested to select the k most promising dynamic
+pivots out of the past query objects Qi
+
+The reason for computing x triplets is based on an expectation, that there
+could appear so-called mediator objects in D-cache, that is, objects Om for which
+distances δ(Q, Om) and δ(Om, Qj) will appear in D-cache. Such mediator objects
+provide an indirect distance approximation of δ(Q, Qj) (remember that because
+of the triangle inequality δ(Q, Qj) ≤ δ(Q, Om) + δ(Qm, Rj)). The mediators can
+be used for selection of dynamic pivots as follows:
+A dynamic pivot DPj is chosen as DPj ∈ {Qi
+old|∃Om(δ(Q, Om) + δ(Om,
+{·} is the kth minimum
+old) ≤ k-minOl
+Qi
+value; with respect to any Ol for which D-cache stores distances δ(Q, Ol) and
+δ(Ol, Qi
+old). This means that an old query object will be selected as a dynamic
+pivot if its associated smallest “through-mediator approximation” of δ(Q, DPj)
+is within the k smallest among all old query objects.
+
+old))}}. The k-minOl
+
+{δ(Q, Ol)+ δ(Ol, Qi
+
+old.
+
+Figure 1b shows an example for k = 1. The really closest pivot Q4
+
+selected because the mediator O3 is an outlier, while no better mediator for Q4
+was found in D-cache. Also note that for Q3
+
+old there is no mediator at all.
+
+After we determine the dynamic pivots, we compute their distances to Q.
+Note that this is the only place where we explicitly compute some extra distance
+computations (not computed when not employing D-cache).
+
+old was not
+old
+
+4.3 D-Cache Implementation
+
+The D-cache is initialized by D-ﬁle when the session begins. Besides this global
+initialization, the D-cache is also notiﬁed by D-ﬁle that a query has been started
+
+524
+
+T. Skopal and B. Bustos
+
+(method StartQueryProcessing). At that moment, a new query object is being
+processed so the current dynamic pivots have to be dismissed. Every time a distance 
+δ(Q, Oi) value is explicitly computed, the triplet [id(Q), id(Oi), δ(Q, Oi)]
+is inserted into the D-cache (method AddDistance).
+
+Besides the retrieval of the hopefully available exact distance between objects 
+Q, Oi (method GetDistance(Q, Oi)), the main functionality is operated by
+method GetLowerBoundDistance, see Algorithm 3.
+
+Algorithm 3. (GetLowerBoundDistance)
+double GetLowerBoundDistance(Q, Oi) {
+let x be the number of computations ignored
+let k be the number of pivots to use
+let DP be the set of dynamic pivots and their distances to Q
+mComputed = mComputed + 1
+value = 0
+if mComputed ≤ x and determineMethod = internal then {
+value = compute δ(Q, Oi)
+AddDistance(Q, Oi, value)
+if mComputed = x then
+} else {
+for each P in DP do
+
+DP = DeterminePivotsByMediatorDistances(Q, k)
+
+if cell(P, Oi) is not empty then
+value = max(value, cell(P, Oi) − δ(Q, P )) }
+
+return value }
+
+// mComputed=0 initialized at query start
+
+// internal pivot selection
+
+// lower bound construction/update
+
+The structure of D-cache itself is implemented by two substructures – the
+
+CellCache and the RowCache:
+CellCache Structure. As the main D-cache component, the CellCache stores
+the distance matrix as a set of triplets (id1, id2, δ(Qid1, Oid2)) in a hash table,
+ and provides retrieval of individual triplets. As a hash key, (min(id1, id2),
+max(id1, id2)) is used. When applying the recent dynamic pivot selection, as
+deﬁned in Section 4.2, the CellCache is the only D-cache component. Naturally,
+the hash-based implementation of CellCache is very fast (constant access time).
+RowCache Structure. However, when applying internal selection of dynamic
+pivots, we need to retrieve rows from the distance matrix. This cannot be eﬃciently 
+accomplished by CellCache, hence, we use the RowCache as a redundant
+data structure. In particular, the RowCache aims at eﬃciently computing the
+dynamic pivots to be used with the current query object. Thus, it must determine 
+the mediator objects and compute the intersection between rows of the
+D-cache. It could also be used to obtain bounds of the distances between objects
+as with the CellCache, however the CellCache may be more eﬃcient than the
+RowCache for this particular function.
+
+The RowCache is implemented as a main-memory inverted ﬁle. Each row
+of this cache stores all the computed distances for a single query, and it is
+implemented as a linked list. Each time a distance between the query and an
+object from the database is computed, a node is added to the list. When a new
+query object is inserted in the cache, the algorithm creates a new row and stores
+there the computed distances to the new query object.
+
+On Index-Free Similarity Search in Metric Spaces
+
+525
+
+To compute the best dynamic pivots for a given query object, the RowCache
+determines ﬁrstly its mediator objects. That is, given two query objects, the current 
+one and one from the cache, it returns the intersection of the corresponding
+rows in the RowCache. This is repeated for all query objects in the cache. Once
+the mediator objects are found, the algorithm determines the best dynamic pivots 
+by selecting the k query objects with smallest indirect distance (i.e., obtained
+through a mediator) to the current query (see Algorithm 4). This algorithm can
+be eﬃciently implemented with a priority queue (max-heap), that keeps the k
+best pivots found so far, and replaces the worst of them when a better pivot
+is found. With our actual implementation of RowCache2, in the worst case this
+algorithm takes O(A ∗ log(A) + A ∗ C + A ∗ log(k)) time, where A is the number
+of rows in the RowCache, C is the maximum number of cells per row, and k is
+the number of pivots. In practice, however, there are usually only a few valid
+mediators per query objects, thus the average cost is closer to O(log(k)).
+
+Algorithm 4. (DeterminePivotsByMediatorDistances)
+set DeterminePivotsByMediatorDistances(Q, k) {
+old = the set of past query objects Qi
+winners = ∅ // set of k pairs [object, distance] ordered ASC on distance
+for each Qi
+// determine mediators, i.e. objects having distance to both Q and Qi
+// row(·) ∩ row(·) stands for all DB objects having deﬁned both values on their position in the rows
+mediators = row(Qi
+for each M in mediators do
+return [winners, computed distances δ(Q, winners(i))] }
+
+old, cell(Q, M) + cell(Qi
+
+old) ∩ row(Q)
+
+update winners by [Qi
+
+old, M)]
+
+old
+
+old in old do
+
+old in D-cache
+
+The CellCache and RowCache are not necessarily synchronized, that is, both
+caches may not contain the distances for the same pair of objects. However, if a
+query is deleted from the CellCache this is also reﬂected in the RowCache.
+
+Distance Replacement Policies. Since the storage capacity of D-cache is
+limited, the hash table of CellCache as well as the inverted list of RowCache
+are of user-deﬁned size (in bytes, usually equally divided between CellCache and
+RowCache3). Once either of the structures has no space to accommodate a new
+distance, some old distance (near to the intended location) has to be released.
+We consider two policies for distance replacement:
+
+LRU. A distance is released, which has been least recently used (read). The
+hypothesis is that keeping just the frequently used distances leads to tighter
+distance lower/upper bounds, thus to better pruning.
+
+2 The depicted implementation of the RowCache structure is not optimized. However,
+in the experimental evaluation we will show that the eﬀectiveness of the “internal
+pivot determination” is worse than the simple “recent query objects”, anyways.
+
+3 If the internal dynamic pivot selection (and RowCache) is not used, the entire
+
+D-cache capacity is given to CellCache.
+
+526
+
+T. Skopal and B. Bustos
+
+Smallest distance. The hypothesis is an anticipation that small distances between 
+queries and DB objects represent overlapped query and data regions; in
+such case (even the exact) small distance is useless for pruning, so we release it.
+
+5 Experimental Evaluation
+
+We have extensively tested the D-ﬁle, while we have compared its performance
+with M-tree, PM-tree, and GNAT. We have observed just the computation costs,
+that is, the number of distance computations spent by querying. For the indexbased 
+MAMs, we have also recorded the construction costs in order to give an
+idea about the indexing/querying trade-oﬀ.
+
+5.1 The Testbed
+We used 3 databases and 3 metrics (two continuous and one discrete):
+– A subset of Corel features [10], namely 65,615 32-dimensional vectors of color
+moments, and the L1 distance (the sum of the diﬀerence of coordinate values
+between two vectors). Note: L2 is usually used with color histograms, but from
+the indexing point of view any Lp norm (p ≥ 1) gives similar results.
+– A synthetic Polygons set; 500,000 randomly generated 2D polygons varying in
+the number of vertices from 10 to 15, and the Hausdorﬀ distance (maximum
+distance of a point set to the nearest point in the other set). This set was
+generated as follows: The ﬁrst vertex of a polygon was generated at random; the
+next one was generated randomly, but the distance from the preceding vertex
+was limited to 10% of the maximum distance in the space. Since we have used
+the Hausdorﬀ distance, one could view a polygon as a cloud of 2D points.
+– A subset of GenBank ﬁle rel147 [1], namely 50,000 protein sequences of
+lengths from 50 to 100, and the edit distance (minimum number of insertions,
+deletions, and replacements needed to convert a string into another).
+
+Index-based MAM settings. The databases were indexed with M-tree and
+PM-tree, while GNAT was used to index just Corel and Polygons. For (P)M-tree,
+the node size was set to 2kB for Corel, and to 4kB for Polygons and GenBank
+databases (the node degree was 20–35). The PM-tree used 16 (static) pivots in
+inner nodes and 8 pivots in leaf nodes. Both M-tree and PM-tree used mM RAD
+node splitting policy and the single-way object insertion. The GNAT arity (node
+degree) was set to 50 for Corel and to 20 for Polygons. For most querying experiments,
+ we have issued 1,000 queries and averaged the results.
+
+D-ﬁle settings. Unless otherwise stated, the D-cache used 100 MB of main
+memory and unlimited history of query objects’ ids, i.e., we keep track of all
+the queries issued so far (within a session). The recent and internal dynamic
+pivot selection techniques were considered. Concerning internal selection, the
+number of initial ﬁxed distance computations was set to x = 1, 000. The smallest
+distance replacement policy was used in all tests. Furthermore, unless otherwise
+stated, the D-ﬁle used 100 dynamic pivots. The D-cache was reset/initialized
+before every query batch was started.
+
+On Index-Free Similarity Search in Metric Spaces
+
+527
+
+Table 1. Index construction costs (total distance computations)
+
+index
+
+M-tree
+PM-tree
+GNAT
+D-ﬁle
+
+Corel
+4,683,360
+7,509,804
+60,148,055
+0
+
+GenBank
+3,729,887
+6,605,421
+
+Polygons
+38,008,305
+55,213,829
+497,595,605 n/a
+0
+
+0
+
+5.2 Indexing
+
+The ﬁrst experiment was focused on indexing – the results are summarized in
+Table 1. Because of its static nature, note that GNAT is an order of magnitude
+more expensive than (P)M-tree. By the way, due to the expensive construction
+and the expensive edit distance, we could not index GenBank by GNAT.
+
+5.3 Unknown Queries
+
+The second set of tests was focused on the impact of D-ﬁle on querying when
+considering “unknown” queries, that is, query objects outside the database. It
+has to be emphasized that for unknown queries the D-ﬁle cannot take advantage
+of the trivial method GetDistance, because for an arriving query object there
+cannot be any record stored within D-cache at the moment the query starts.
+Thus, D-ﬁle can eﬀectively use just the D-cache’s non-trivial method GetLowerBoundDistance.
+
+
+First, for the Corel database we have sampled queries with “snake distribu-
+tion” – for an initially randomly sampled query object, its nearest neighbor was
+found, then the nearest neighbor’s nearest neighbor, and so on. The intention for
+snake distribution was led by an anticipation that processing of a single “slowly
+moving” query will beneﬁt from D-cache (which might provide tighter lower
+bounds). Because the D-cache should beneﬁt from a long sequence of queries,
+we were interested in the impact of growing query batch size, see Figure 2a. As
+we can see, this assumption was not conﬁrmed, the D-ﬁle costs generally follow
+
+(a)
+
+(b)
+
+Fig. 2. Unknown 10NN queries on Corel: (a) queries only (b) indexing + queries
+
+528
+
+T. Skopal and B. Bustos
+
+the other MAMs – the performance gain of D-ﬁle queries is rather constant.
+Although in this test the query performance of D-ﬁle is not very good when
+compared to the other MAMs, in Figure 2b the situation takes into account also
+indexing costs. When just a smallor 
+medium-sized query batch is planned for
+a database, the costs (total number of distance computations spent on indexing
++ all queries) show the D-ﬁle beats GNAT and PM-tree considerably. Note that
+in Figure 2b the costs are not averaged per query but total (because of correct
+summing with indexing costs).
+
+The second “unknown” set of queries (randomly sampled range queries having
+radius r = 5) was performed on the GenBank database, considering growing
+number of D-cache’s dynamic pivots, see Figure 3a. The costs decrease with
+growing number of pivots, the D-ﬁle shows a reduction of costs by 45%, when
+compared to the sequential search. The recent dynamic pivot selection is the
+winning one. In Figure 3b the situation is presented in indexing + querying costs
+(total costs for 100 queries were considered).
+
+5.4 Database Queries
+
+For the third set of experiments, we have considered database (DB) queries. As
+opposed to unknown queries, the DB queries consisted of query objects randomly
+sampled from the databases and having also the same ids as in the database. Although 
+not as general as unknown queries, the DB queries are legitimate queries
+– let us bring some motivation. In a typical general-purpose image retrieval scenario,
+ the user does not have the perfect query image (s)he wants. Instead, (s)he
+issues any available “yet-satisfactory” image query (being an unknown query)
+and then iteratively browses (navigates) the database by issuing subsequent DB
+queries given by an image from the previous query result.
+
+The browsing is legitimate also for another reason. Even if we have the right
+query image, the similarity measure is often imperfect with respect to the speciﬁc 
+user needs, and so the query result may be unsatisfactory. This could be
+compensated by further issuing of DB queries matching the user’s intent better.
+
+(a)
+
+(b)
+
+Fig. 3. Unknown range queries on GenBank: (a) queries only (b) indexing + queries
+
+On Index-Free Similarity Search in Metric Spaces
+
+529
+
+(a)
+
+(b)
+
+Fig. 4. (a) DB 10NN queries on Corel. (b) DB range queries on GenBank.
+
+(a)
+
+(b)
+
+Fig. 5. DB 10NN queries on Polygons: (a) queries only (b) indexing + queries
+
+For DB queries, we have anticipated much greater impact of D-cache, because
+distances related to a newly arriving query (being also DB object) could reside
+within D-cache since previous query processing. Consequently, for DB queries
+also the trivial GetDistance method can eﬀectively take advantage, so that we
+could obtain an exact distance for ﬁltering, rather than only a lower bound.
+
+In Figure 4a, the results of 1NN queries on Corel are presented, considering
+varying D-cache storage capacity (we actually performed 2NN search, because
+the query object is DB object). We observe that a small D-cache is rather an
+overhead than a beneﬁt, but for growing D-cache size the D-ﬁle costs dramatically 
+decrease (to 6% of seq. search). At 10–20 MB the D-cache is large enough
+to store all the required distances, so beyond 20 MB the performance gain stagnates.
+ However, note that there is a signiﬁcant performance gap between D-ﬁles
+employing recent and internal pivot selection. This should be an evidence that
+exact distances retrieved from D-cache are not the dominant pruning factor even
+
+530
+
+T. Skopal and B. Bustos
+
+for DB queries, because the GetDistance method is pivot-independent. Hence, the
+eﬀect of non-trivial “lowerbounding” is signiﬁcant also for DB queries.
+
+In the fourth experiment, see Figure 4b, the growing GenBank database was
+queried on range. Here, the D-ﬁle performance approaches M-tree, while the
+performance scales well with the database growth. In the last experiment, see
+Figure 5a, we tested the eﬀect of the number of dynamic pivots on the largest
+database – Polygons. For D-ﬁle, the costs fell down to 1.7% of sequential search,
+while they were decreasing with the increasing number of D-cache’s dynamic
+pivots. In Figure 5b, the total indexing + querying costs are presented for 100
+10NN queries, beating the competitors by up to 2 orders of magnitude.
+
+6 Conclusions
+
+In this paper, we presented the D-ﬁle – the ﬁrst index-free metric access method
+for similarity search in metric spaces. The D-ﬁle operates just on the original
+database (i.e., it does not use any indexing), while, in order to support eﬃcient 
+query processing, it uses lower bound distances cheaply acquired from the
+D-cache structure. The D-cache is a memory-resident structure which keeps track
+of distances already computed during the actual runtime session.
+
+The experiments have shown that D-ﬁle can compete with the state-of-theart 
+index-based MAMs (like M-tree, PM-tree, GNAT). Although in most cases
+the separate query costs are higher for D-ﬁle, if we consider the total index-
+ing+querying costs, the D-ﬁle performs better for smalland 
+middle-sized query
+batches. Thus, the usage of D-ﬁle could be beneﬁcial either in tasks where only a
+limited number of queries is expected to be issued, or in tasks where the indexing
+is ineﬃcient or not possible at all (e.g., highly changeable databases).
+
+Future Work. In the future, we would like to employ the D-cache also by the
+index-based MAMs, since its ability to provide lower/upper bounds to distances
+is not limited just to D-ﬁle. Moreover, by using D-cache the index-based MAMs
+could take advantage not only from the improved query processing, but also
+from an increased performance of indexing.
+
+Acknowledgments
+
+This research was supported by Czech Science Foundation project no. 201/09/
+0683 (ﬁrst author), and by FONDECYT (Chile) Project 11070037 (second
+author).
+
+References
+
+1. Benson, D.A., Karsch-Mizrachi, I., Lipman, D.J., Ostell, J., Rapp, B.A., Wheeler,
+
+D.L.: Genbank. Nucleic Acids Res. 28(1), 15–18 (2000)
+
+2. B¨ohm, C., Berchtold, S., Keim, D.: Searching in High-Dimensional Spaces – Index
+Structures for Improving the Performance of Multimedia Databases. ACM Computing 
+Surveys 33(3), 322–373 (2001)
+
+On Index-Free Similarity Search in Metric Spaces
+
+531
+
+3. Brin, S.: Near neighbor search in large metric spaces. In: Proc. 21st Conference
+on Very Large Databases (VLDB 1995), pp. 574–584. Morgan Kaufmann, San
+Francisco (1995)
+
+4. Carson, S.D.: A system for adaptive disk rearrangement. Software - Practice and
+
+Experience (SPE) 20(3), 225–242 (1990)
+
+5. Ch´avez, E., Navarro, G., Baeza-Yates, R., Marroqu´ın, J.L.: Searching in metric
+
+spaces. ACM Computing Surveys 33(3), 273–321 (2001)
+
+6. Ciaccia, P., Patella, M., Zezula, P.: M-tree: An Eﬃcient Access Method for Similarity 
+Search in Metric Spaces. In: VLDB 1997, pp. 426–435 (1997)
+
+7. Eﬀelsberg, W., Haerder, T.: Principles of database buﬀer management. ACM
+
+Transactions on Database Systems (TODS) 9(4), 560–595 (1984)
+
+8. Falchi, F., Lucchese, C., Orlando, S., Perego, R., Rabitti, F.: A metric cache for
+similarity search. In: LSDS-IR 2008: Proceeding of the 2008 ACM workshop on
+Large-Scale distributed systems for information retrieval, pp. 43–50. ACM Press,
+New York (2008)
+
+9. Falchi, F., Lucchese, C., Orlando, S., Perego, R., Rabitti, F.: Caching content-based
+queries for robust and eﬃcient image retrieval. In: EDBT 2009: Proceedings of the
+12th International Conference on Extending Database Technology, pp. 780–790.
+ACM Press, New York (2009)
+
+10. Hettich, S., Bay, S.: The UCI KDD archive (1999), http://kdd.ics.uci.edu
+11. Hjaltason, G.R., Samet, H.: Index-driven similarity search in metric spaces. ACM
+
+Trans. Database Syst. 28(4), 517–580 (2003)
+
+12. Samet, H.: Foundations of Multidimensional and Metric Data Structures. Morgan
+
+Kaufmann, San Francisco (2006)
+
+13. Skopal, T.: Pivoting M-tree: A Metric Access Method for Eﬃcient Similarity
+Search. In: Proceedings of the 4th annual workshop DATESO, Desn´a, Czech Republic,
+ ISBN 80-248-0457-3, also available at CEUR, vol. 98, pp. 21–31 (2004) ISSN
+1613-0073, http://www.ceur-ws.org/Vol-98
+
+14. Skopal, T., Pokorn´y, J., Sn´aˇsel, V.: Nearest Neighbours Search Using the PM-Tree.
+In: Zhou, L.-z., Ooi, B.-C., Meng, X. (eds.) DASFAA 2005. LNCS, vol. 3453, pp.
+803–815. Springer, Heidelberg (2005)
+
+15. Uhlmann, J.: Satisfying general proximity/similarity queries with metric trees. Information 
+Processing Letters 40(4), 175–179 (1991)
+
+16. Vitter, J.S.: External memory algorithms and data structures: dealing with massive
+
+data. ACM Computing Surveys 33(2), 209–271 (2001)
+
+17. Weber, R., Schek, H.-J., Blott, S.: A quantitative analysis and performance study
+for similarity-search methods in high-dimensional spaces. In: VLDB 1998: Proceedings 
+of the 24rd International Conference on Very Large Data Bases, pp. 194–205.
+Morgan Kaufmann Publishers Inc., San Francisco (1998)
+
+18. Zezula, P., Amato, G., Dohnal, V., Batko, M.: Similarity Search: The Metric Space
+
+Approach (Advances in Database Systems). Springer, Secaucus (2005)
+
+

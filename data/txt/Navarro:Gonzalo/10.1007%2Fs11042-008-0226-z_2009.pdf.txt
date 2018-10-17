@@ -1,0 +1,1955 @@
+Multimed Tools Appl (2009) 41:215–233
+DOI 10.1007/s11042-008-0226-z
+
+Improving the space cost of k-NN search in metric
+spaces by using distance estimators
+Benjamin Bustos· Gonzalo Navarro
+
+Published online: 17 September 2008
+© Springer Science + Business Media, LLC 2008
+
+Abstract Similarity searching in metric spaces has a vast number of applications in
+several ﬁelds like multimedia databases, text retrieval, computational biology, and
+pattern recognition. In this context, one of the most important similarity queries is
+the k nearest neighbor (k-NN) search. The standard best-ﬁrst k-NN algorithm uses
+a lower bound on the distance to prune objects during the search. Although optimal
+in several aspects, the disadvantage of this method is that its space requirements
+for the priority queue that stores unprocessed clusters can be linear in the database
+size. Most of the optimizations used in spatial access methods (for example, pruning
+using MinMaxDist) cannot be applied in metric spaces, due to the lack of geometric
+properties. We propose a new k-NN algorithm that uses distance estimators, aiming to
+reduce the storage requirements of the search algorithm. The method stays optimal,
+yet it can signiﬁcantly prune the priority queue without altering the output of the
+query. Experimental results with synthetic and real datasets conﬁrm the reduction
+in storage space of our proposed algorithm, showing savings of up to 80% of the
+original space requirement.
+Keywords Similarity search· Metric spaces· k-NN search
+
+Funded by Millennium Nucleus Center for Web Research, Grant P04-067-F, Mideplan,
+Chile (both authors), and FONDECYT Projects 11070037 (B. Bustos) and 1-080019
+B
+(G. Navarro).
+) · G. Navarro
+
+B. Bustos (
+Center for Web Research, Department of Computer Science,
+University of Chile, Santiago, Chile
+e-mail: bebustos@dcc.uchile.cl
+
+G. Navarro
+e-mail: gnavarro@dcc.uchile.cl
+
+216
+
+1 Introduction
+
+Multimed Tools Appl (2009) 41:215–233
+
+The concept of similarity search has applications in a vast number of ﬁelds. For
+example, content-based retrieval of similar objects in multimedia databases can be
+very useful for industrial applications, medicine, molecular biology, among others.
+In the case of industrial applications, the engineering and industrial design, the
+animation, and the entertainment industry heavily rely on digitized models of
+products or parts thereof. Given effective retrieval capabilities, the re-use of content
+from existing repositories can support a more efﬁcient production processes [8]. In
+medical imaging applications, often 2D and 3D volume data are generated, e.g., using
+MRI scans. A possible application lies in automatic diagnosis support by analysis
+of organ deformations, via matching the actual images with medical databases of
+known deformations [15]. In molecular biology, structural classiﬁcation is a basic
+task. This classiﬁcation can be supported by geometric similarity search, where
+proteins and molecules are modeled as 3D objects, which can be compared against
+bio-molecular reference databases using similarity measures that consider geometry,
+electric properties, and others [1].
+
+Other applications for similarity search include machine learning and classiﬁcation
+(where a new element must be classiﬁed according to its closest existing element);
+image quantization and compression (where only some vectors can be represented
+and those that cannot must be coded as their closest representable point); text
+retrieval (where we look for words in a text database allowing a small number of
+errors, or we look for documents which are similar to a given query or document);
+sequence comparison in computational biology (where we want to ﬁnd a DNA or
+protein sequence in a database allowing some errors due to typical variations); etc.
+
+All those applications have some common characteristics [5]. There is a universe
+of objects, and a nonnegative distance function deﬁned among them, which in many
+interesting cases satisﬁes the triangle inequality. The smaller the distance between
+two objects, the more similar they are. This distance is assumed to be expensive to
+compute. We have a ﬁnite database, which is a subset of the universe of objects and
+can be preprocessed (to build an index, for instance). Later, given a new object from
+the universe, we must retrieve all similar elements found in the database.
+
+A particular case of this problem arises when the space is Rd (a vector space).
+There are effective methods for this case, such as the kd-tree, R-tree, and X-tree,
+among others [2]. However, there are many applications where the space cannot be
+regarded as d-dimensional, for example in string similarity problems that appear in
+text retrieval or computational biology applications. We focus in this paper in general
+metric spaces, although the solutions are well suited also for d-dimensional spaces.
+Moreover, when d is large, methods tailored for vector spaces tend to fail and the
+metric space approach might be more successful.
+
+We focus on a popular type of query called k-NN query, which aims at ﬁnding the
+k database objects closest to a given query. The best known solutions to this problem
+(in terms of distance computations) have a serious memory problem, as they might
+require to maintain in memory a priority queue of database objects. This priority
+queue can be as large as the database itself. We propose an improved version of
+these k-NN search algorithms, which uses distance estimators to reduce their storage
+requirements without altering the number of distance evaluations nor the outcome
+of the algorithm.
+
+Multimed Tools Appl (2009) 41:215–233
+
+217
+
+We present experimental results on various synthetic and real datasets. The
+experiments conﬁrm the reduction in storage space necessary to run our proposed
+algorithm compared to the original one. The speciﬁc numbers depend on the
+database and the query, and can be as low as 8% in some cases. However, in other
+cases we show savings of more than 80%, that is, our algorithm needs less than 20%
+of the space required to run the original algorithm.
+
+The paper is organized as follows. Section 2 introduces the basic concepts of
+efﬁcient similarity search in metric spaces. Section 3 depicts the proposed algorithm
+and analyzes its cost. An experimental evaluation using well known metric indices is
+presented in Section 4. Finally, in Section 5 we present our conclusions and outline
+the future work.
+
+2 Searching in metric spaces
+
+There are excellent books [20, 23] and surveys [2, 5, 9, 14] on efﬁcient similarity
+queries in metric and multidimensional databases. In this chapter, we will brieﬂy
+introduce the main indexing techniques for similarity search and will motivate the
+space cost problem of the optimal search algorithm.
+Let X be the universe of valid objects, and δ : X × X → R a distance function
+in X. If δ satisﬁes the properties of a metric, that is, strict positiveness (δ(x, y) ≥ 0
+and δ(x, y) = 0 ⇔ x = y), symmetry (δ(x, y) = δ(y, x)), and the triangle inequality
+(δ(x, z) ≤ δ(x, y) + δ(y, z)), then the pair (X, δ) is a metric space. Let U ⊆ X be our
+ﬁnite database, with |U| = n. There are two typical similarity queries in metric spaces:
+• Range query. A range query (q, r), q ∈ X, r ∈ R
++
+, reports all database objects
+•
+
+that are within distance r to q, that is, {u ∈ U, δ(u, q) ≤ r}.
+k nearest neighbors query (k-NN). Reports the k objects from U that are closest to
+q, that is, a set C ⊆ U such that |C| = k and ∀x ∈ C, y ∈ U − C, δ(x, q) ≤ δ(y, q).
+Indexes for metric spaces can be classiﬁed into two main categories [5]: based on
+
+pivots and based on compact partitions.
+
+Pivot-based indexes [5, 7, 21] select a number of “pivot” objects from the database,
+and classify all the other objects according to their distance to the pivots. The
+canonical pivot-based range query algorithm is as follows: Given a range query
+(q, r) and a set of k pivots {p1, . . . , pk}, pi ∈ U, by the triangle inequality it follows
+for any x ∈ X and 1 ≤ i ≤ k that δ(q, x) ≥ |δ(pi, x) − δ(pi, q)|. The objects u ∈ U of
+interest are those that satisfy δ(q, u) ≤ r, so one can exclude all the objects that satisfy
+|δ(pi, u) − δ(pi, q)| > r for some pivot pi (exclusion condition), without actually
+evaluating δ(q, u). The index consists of the kn distances δ(u, pi) between every
+object of the database and every pivot. At query time it is necessary to compute
+the k distances between the pivots and the query q in order to apply the exclusion
+condition. The list of objects {u1, . . . , um} ⊆ U that do not satisfy the exclusion
+condition must be directly checked against the query. Several indexes resort to a tree
+structure to avoid considering the exclusion condition for each u ∈ U individually.
+Each tree node p is a pivot and its subtrees correspond to ranges of distances δ(u, p).
+At search time, we compute δ(q, p) and need only to enter tree branches whose
+ranges of distances intersect [δ(q, p) − r, δ(q, p) + r].
+
+218
+
+Multimed Tools Appl (2009) 41:215–233
+
+Indexes based on compact partitions [4–6, 17] divide the space into zones as
+compact as possible. Each zone stores a representative point, called the center,
+and data that permit discarding the entire zone at query time without measuring
+the actual distance from the objects of the zone to the query. Each zone can be
+recursively partitioned into more zones, inducing a search hierarchy. There are two
+general criteria for partitioning the space: Voronoi partition and covering radius. The
+Voronoi diagram of a set of objects is a partition of the space into cells, each of which
+consisting of the objects closer to one particular center than to any other. A set of m
+centers is selected and the rest of the objects are assigned to the zone of their closest
+center. Given a range query (q, r), the distances between q and the m centers are
+computed. Let c be the closest center to q. Every zone of center ci (cid:9)= c which satisﬁes
+δ(q, ci) > δ(q, c) + 2r can be discarded, because its Voronoi area cannot intersect the
+query ball. On the other hand, the covering radius cr(c) is the maximum distance
+between a center c and an object that belongs to its zone. Given a range query (q, r),
+if δ(q, ci) − r > cr(ci) then zone i cannot intersect the query ball and all its objects
+can be discarded.
+
+In most cases, authors focus on solving range queries, as these can be regarded as
+being more basic than k-NN queries [5]. Given a technique to solve range queries,
+one can derive k-NN query solutions. The most naive way is to try range queries with
+increasing radii until retrieving k objects or more. A more sophisticated method is to
+launch a range search with inﬁnite radius, and reduce it on the ﬂy as new database
+objects are compared and better candidates for the k-NN answer appear (that is, if
+we have already found k database objects with maximum distance r to q, then our
+search radius becomes r). This has been explored especially with tree-like indexes
+(the most popular category).
+
+Unlike the case of range searching, where the tree traversal order is irrelevant,
+for k-NN search we wish to ﬁnd close candidates as soon as possible, as this will
+determine how much of the tree is traversed. The most common traversal order is
+depth-ﬁrst traversal. In this case, the tree traversal is recursive, and the criterion to
+try to ﬁnd soon good k-NN candidates translates into traversing the children of the
+current node from most to least promising. Given a criterion to prefer one node
+over another, depth-ﬁrst traversal does not achieve the optimal node traversing order
+because it is forced to be depth-ﬁrst. On the other hand, the amount of memory it
+requires does not exceed the height of the tree index.
+
+An optimal, best-ﬁrst traversal ordering [12, 22] uses a global priority queue where
+unprocessed tree nodes are inserted, giving higher priority to the more promising
+ones, and the tree is traversed in the order given by the queue. Each extracted node
+inserts its children in the queue. If this priority is deﬁned as a lower bound to the
+distance between q and any element in the subtree rooted at the tree node, then the
+search can ﬁnish as soon as the most promising node has a lower bound larger than
+the distance to the current kth NN. This algorithm has been proved to be optimal
+in the number of nodes (i.e., disk page accesses) required [2]. It was also proved to
+be range-optimal [13], that is, the number of distance computations to ﬁnd the k-NN
+answer is exactly that of a range search with distance δ(q, ok), where ok is the kth
+NN. This range search would give the same answer as the k-NN search, so there is no
+penalty for not knowing δ(q, ok) beforehand.
+
+The algorithm has, however, an important problem, which may discourage its use
+in practice. The problem is the amount of memory required for the queue, which
+
+Multimed Tools Appl (2009) 41:215–233
+
+219
+
+can store as many elements as the database itself. The non-optimal depth-ﬁrst-search
+algorithm may be preferable for its much lower space consumption, proportional
+to the depth of the hierarchy. Samet [19, 20] proposed a technique to alleviate this
+problem, based on computing an upper bound to the distance between q and any
+subtree element, and using the fact that one knows that a subtree must have at least
+one element within that upper bound distance to q. We reﬁne this idea, which will
+be described later as a particular case of ours. Our reﬁnement consists in using the
+information on the number of elements in the ball, all of which lie within that upper
+bound. Unlike Samet’s approach, ours translates into a relevant contribution even
+on Euclidean spaces, where Samet’s approach is never better than the MinMaxDist
+estimator [18].
+
+3 Algorithm description
+
+Table 1 lists the notation used throughout this section. We assume that the database
+index is a hierarchical data structure which groups close objects in clusters. We will
+refer to these clusters in our metric space as balls (for their shape resemblance in
+Euclidean spaces, in many index structures). A ball B from the index contains a
+number of objects from the database, represented by B.bsize. The center of B is a
+distinguished object B.c ∈ B, usually selected trying to minimize the covering radius
+of B, B.cr = max{δ(B.c, b ), b ∈ B}, that is, the maximum distance between B.c and
+any other object in B. Those elements b ∈ B can be recursively organized into balls,
+which descend from B forming a search hierarchy. As seen in Section 2, this type of
+hierarchical clustering index is very popular (for example see [4, 6, 17]). There are
+other indexes that, although less obviously, can be considered as belonging to this
+scheme (for example, pivot-based indexes organized in trees).
+Given a query q and a ball B, the lower bound distance from q to B, B.lbound, is a
+lower bound to δ(q, b ) for any b ∈ B. Similarly, the upper bound distance from q to
+
+Table 1 Summary of symbols
+
+Symbol
+k ∈ N
+B ⊆ U
+B.c ∈ U
+B.cr ∈ R
+B.bsize ∈ N
+B.children
+B.lbound ∈ R
+B.ubound ∈ R
+Bb
+x.csize ∈ N
+Q
+C
+C.maxU B ∈ R
+C.size ∈ N
+x.distq ∈ R
+
+Deﬁnition
+# of NN to be retrieved
+Ball (cluster of objects)
+Center of ball B
+Covering radius of B
+# objects inside B
+Set of children balls of B
+Lower bound distance from B to q
+Upper bound distance from B to q
+Bubble of B
+Size of bubble or object in C
+Queue with unprocessed balls
+Queue with NN candidates
+Max. upper bound distance in C
+Sum of all x.csize in C
+Distance from x to q
+
+220
+
+Multimed Tools Appl (2009) 41:215–233
+
+B.cr
+
+B.c
+
+q
+
+δ
+(q,b.c)-B.cr
+(lower bound)
+
+B.cr
+
+B.c
+
+δ
+(q,B.c)+B.cr
+(upper bound)
+
+q
+
+Fig. 1 Distance estimators: Lower and upper bound distance from q to any object on the ball. This
+example shows the estimators based on the covering radius
+
+B, B.ubound, is an upper bound to δ(q, b ) for any b ∈ B.1 Figure 1 illustrates both
+bounds in 2D space using the Euclidean distance and the covering radius. On index
+structures for vector spaces that use minimum bounding rectangles (MBRs), the
+lower (upper) bound distance can be deﬁned as the minimum (maximum) distance
+from q to the MBR. These distance bounds can be used to prune the search while
+performing a similarity query. For example, if we know that the upper bound distance
+to the kth NN candidate at some point of the search is maxU B, and we know that
+maxU B < B.lbound for a ball B, then it is not possible that an object inside B is
+closer to q than any of the current k-NN candidates. Thus, one can safely discard B
+and all its descent.
+
+3.1 Standard best-ﬁrst k-NN algorithm
+
+The best-ﬁrst k-NN search algorithm [12, 22] uses two priority queues, one (Q) that
+contains the balls not yet processed (also called active page list in the literature),
+and the other (C) with the k-NN candidate list. A ball is stored in Q if it is not
+yet processed but its parent was already processed. At each step of the search, the
+algorithm removes the ball B from Q with smallest B.lbound. The distance between
+the center of each children of B and q is computed, inserting in C all centers that are
+closer than the current kth NN candidate. The children balls are inserted in Q. The
+algorithm ends when Q becomes empty or when the minimum lbound from a ball in
+Q is greater than the distance to q of the current kth NN candidate, as at this point
+no other ball can improve the current candidate list.
+
+Note that the size of C never exceeds k, but Q can be as large as the database itself.
+As explained before (Section 2), this algorithm is optimal in several aspects but it has
+a serious memory usage problem (for Q), which our proposal seeks to alleviate.
+
+1Our proposed algorithms are general and will work with any hierarchical index structure with
+appropriately deﬁned distance estimators. For simplicity, we will describe them using the covering
+radius for computing the distance bounds.
+
+Multimed Tools Appl (2009) 41:215–233
+
+221
+
+3.2 Our proposal
+
+As in the basic algorithm, we use two priority queues, Q and C. Q still contains
+unprocessed balls whose center has already been processed, and is sorted by lbound.
+C is still sorted by ubound, but now it will contain a mixture of objects and bubbles.
+A bubble Bb in C corresponds to a ball B that exists in Q, but the bubble itself
+does not contain any element. From the bubble Bb we only know the upper bound
+B.ubound and size B.bsize of its corresponding ball B (that is, B.bsize indicates the
+number of objects u ∈ U that are inside B). The existence of bubble Bb in C just
+tells us that there exist B.bsize elements at distance at most B.ubound from q, yet
+we still do not know those elements. With this upper bound information, we can
+prune irrelevant elements from Q earlier. For example, assume we ﬁnd B such that
+(cid:10).lbound ≥
+B.bsize > k. Before knowing the elements of B, we ﬁnd B
+, as we know that we will get enough better
+B.ubound. At this point we can discard B
+k-NN candidates from B, even when we have not yet obtained them.
+
+such that B
+
+(cid:10)
+
+(cid:10)
+
+Our algorithm maintains the following invariants. We assume that there are at
+least k elements in the database, otherwise the query is trivial. For simplicity we
+assume that balls do not directly contain objects in general, just further balls. The
+leaf balls of the tree contain balls that have only one element, so the balls become
+empty once one removes their center. This does not restrict the algorithm in any way,
+it is just a way to present it.
+
+1. We process the database hierarchy starting at the root, and never process a node
+
+without having processed its parent.
+
+centers of balls in Q have already been processed.
+
+2. Any hierarchy ball not yet processed is in Q or descends from a ball in Q, yet the
+3. Any object c in C is the center of a ball already processed, c.csize = 1.
+4. Any bubble Bb in C corresponds to a ball B currently in Q, Bb .csize = B.bsize −
+5. C.size ≥ k is the sum of csize’s of objects and bubbles in C. C.maxU B is the
+
+1 > 0.
+maximum ubound in C, taking c.ubound = c.distq for objects.
+
+6. C contains the objects and bubbles with smallest ubound processed so far.
+7.
+If we remove any element from C with ubound equal to C.maxU B, then
+C.size < k.
+8. For any ball B, B.lbound ≤ B.ubound, and the lbound (ubound) of any descen9.
+
+
+dant of B is not smaller (larger) than B.lbound (B.ubound).
+(optional) For any ball B such that B.bsize > 1, B.lbound < B.ubound. This
+holds for many indexes and we can take advantage of it (as shown in the second
+point below).
+
+The above invariants ensure the correctness of the following termination
+
+conditions.
+• Assume Q = ∅ at some point. Then we have processed all the database objects
+(1, 2). Moreover, there cannot be bubbles in C (4), so C contains just objects,
+of csize = 1 (3). Therefore, C contains exactly k objects (5, 7), and those are the
+objects with smallest distq in the database (6). Thus C is the correct answer to
+the query.
+
+222
+
+Multimed Tools Appl (2009) 41:215–233
+
+• Assume, at some point, that B has the smallest lbound in Q and B.lbound >
+C.maxU B. Because of condition (8), ubound ≥ lbound for any element and
+lbound for a descendant of B can never be smaller than B.lbound. Thus,
+condition (6) holds for all the database, not only for the elements processed
+.lbound ≤
+(cid:10)
+(cid:10)
+so far (2). Moreover, C cannot contain any bubble B
+b , because B
+.ubound ≤ C.maxU B < B.lbound for any ball B in Q, and ball B
+(cid:10)
+b
+must be in
+B
+Q (4). Thus the same arguments as before show that C is the correct answer to
+the query.
+
+(cid:10)
+b
+
+The second point above makes clear the correctness of the following observation,
+
+which is the key to the space reduction we achieve.
+Observation 1 If, for some B, B.lbound > C.maxU B [or B.lbound ≥ C.maxU B
+if (9) holds], then the output of the algorithm does not vary if we remove B and
+all its descent from Q.
+
+(cid:10)
+b
+
+.lbound < B
+
+If condition (9) holds, then, if B
+
+(cid:10).csize > 1 (4), and
+.ubound, and it would be sufﬁcient that B.lbound ≥ C.maxU B
+thus B
+to know that we have already the correct answer in C. For simplicity, we assume for
+the rest of the paper that condition (9) holds; it is already clear how to modify the
+algorithms otherwise.
+
+(cid:10)
+b were in C, it would hold B
+
+(cid:10)
+b
+
+(cid:10)
+
+(cid:10)
+
+of B such that B
+
+We explain now how we set and maintain the invariants throughout the algorithm.
+We initialize Q with the only ball that roots the whole index (for simplicity, we
+assume there is only one such root, it is easy to insert several roots if so is the index
+structure). Its center and corresponding bubble are inserted in C (only the center
+if k = 1 or the bubble size is zero). This satisﬁes all the invariants. At each step of
+the algorithm, we extract the ball B from Q with smallest B.lbound. Recall that B.c
+has already been processed. Now, to restore invariant (2), we must insert in Q every
+(cid:10).lbound < C.maxU B (otherwise, we know that the descent
+child B
+objects of B
+can be immediately pruned from the search, by Obs. 1). Then, to restore
+(cid:10)
+invariants (3, 4), we must insert into C every center B
+b , as well as
+remove bubble Bb from C, if present. Actually, if Bb is in C, we will replace it with
+(cid:10)
+b , which add up the same Bb .csize. This replacement
+the centers B
+cannot affect invariants (5, 6) as the new ubounds are never larger than that of Bb
+(8; note that C.maxU B adjusts automatically as the maximum of the priority queue
+C). Yet, we have to restore invariant (7). We must remove from C the elements
+with largest ubound as long as C.size ≥ k. We choose those with largest ubound so
+as to maintain (6), and update C.size and C.maxU B to maintain (5). The remaining
+invariant (1) holds because we only access B
+from its already processed parent B.
+Although not necessary for the correctness of the algorithm, we remove balls of Q
+that become irrelevant each time C.maxU B is reduced (according to Observation 1).
+This further diminishes the memory requirement for Q.
+
+(cid:10).c and bubbles B
+
+(cid:10).c and bubble B
+
+(cid:10)
+
+Algorithm 1 shows the pseudocode of the proposed k-NN search algorithm. Note
+that we enforce that lbound is increasing and ubound is decreasing as we descend
+in the hierarchy (8). Although this should hold, it might not occur automatically if
+we simply use, for example B
+child of B, because
+
+(cid:10).ubound = δ(q, B
+
+(cid:10).cr for B
+
+(cid:10).c) + B
+
+(cid:10)
+
+Multimed Tools Appl (2009) 41:215–233
+
+223
+
+Algorithm1: Our proposed k-NN search algorithm
+
+;
+
+;
+;
+
+ ←
+ ←
+
+ ←
+0;
+
+Input:  Index, q       , k     
+Output: k-NN
+Q
+C
+C.maxU B
+ ←
+C.size
+ ←
+root of Index;
+B
+B .c.distq
+B.lbound ← B.c.distq – B.cr;
+Q.Add(B, B.lbound);
+C.Add2(B.c, B.c.distq, 1);
+C.Add2(B, B.c.distq + B.cr, B.bsize − 1);
+while Q
+
+(q, B.c);
+
+ ←
+
+do
+
+B ← Q.DequeueMin();
+if Bb      C then
+ubound  ←
+ ←
+C.size
+C.Remove(Bb);
+
+Bb.ubound;
+C.size – Bb .csize;
+
+else ubound
+foreach
+
+.c.distq
+C:Add2(
+if
+
+;
+
+ ←
+B.children do
+ ←
+.c,
+
+δ(q,
+.c.distq, 1);
+
+.c);
+
+.bsize > 1 then
+.lbound ← max(B.lbound ,
+
+.c.distq –
+.lbound < C.maxUB then Q.Add(
+
+if
+minub ← min{ubound,
+C:Add2(    , minub,     .bsize – 1);
+
+.c.distq + .cr};
+
+.cr);
+
+,
+
+.lbound);
+
+Q.Shrink();
+
+returnC
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+
+17
+18
+19
+20
+21
+22
+23
+24
+25
+
+26
+
+27
+
+(cid:10)
+
+(cid:10)
+
+(cid:10).ubound = min(B.ubound, δ(q, B
+
+could exceed spatially that of B, although we know that there cannot
+the ball of B
+in the exceeded area (Fig. 2 illustrates). Thus, the correct value
+be objects of B
+(cid:10).cr). We make the correction only if
+is B
+Bb is in C, otherwise B.ubound > C.maxU B and the correction is irrelevant. The
+(cid:10).c.distq − B
+(cid:10).cr), which might permit
+same holds for B
+pruning B
+
+(cid:10).c) + B
+(cid:10).lbound = max(B.lbound, B
+
+from Q earlier.
+
+(cid:10)
+
+Add2 is a special procedure to insert into C, which in addition to the element and
+its ubound takes the csize of the element. Add2 takes care of updating C.size and
+C.maxU B, and of maintaining invariants (6, 7). Algorithm 2 shows the pseudocode
+of the Add2 function for C. The algorithm assumes that C is a priority queue sorted
+decreasingly by ubound, and in case of ties, it is sorted increasingly by csize. This is
+necessary to ensure that condition (8) is maintained.
+
+224
+
+Multimed Tools Appl (2009) 41:215–233
+
+(cid:10).cr}. The index
+
+is min{B.ubound,
+(cid:10).c) + B
+
+Fig. 2 The correct ubound
+(cid:10)
+for B
+δ(q, B
+hierarchy ensures that no
+object farther than B.cr from
+B.c can be stored in B
+
+(cid:10)
+
+B’.c
+
+B.c
+
+δ (q,B.c)+B.cr
+
+q
+
+δ (q,B’.c)+B’.cr
+
+Algorithm 3 shows the pseudocode for the pruning of Q, Shrink, called each time
+the maximum upper bound distance C.maxU B might change, to reduce the storage
+requirements of the search algorithm. Note that, thanks to the use of Shrink, we
+can always ﬁnish when Q becomes empty, since if the other termination condition
+holds, then Shrink will take care of removing all the remaining elements from Q. To
+reduce the CPU cost associated to Shrink, one should call it only when C.maxU B has
+changed (not when it might have changed, as shown for simplicity), and implement
+Q as a min-max heap.
+
+A key element of our k-NN algorithm is B.bsize. If this value is not stored in
+the index, then the proposed algorithm cannot run and the best that one can do in
+that case is to assume B.bsize = 2 for internal hierarchy nodes (since B.bsize ≥ 2, for
+the center and at least another point). This is precisely what was done by Samet in
+previous work [19], and we reﬁne it here assuming B.bsize is known. Slightly better
+than assuming B.bsize = 2 is, if B has cb child balls and co child objects, assume
+B.bsize = 2 · cb + co.
+
+Algorithm 2: Add2 algorithm for C
+, csize
+
+Input: B, ubound
+if ubound < C.maxU B then
+
+Bb ← CreateBubble(B);
+Bb .ubound ← ubound;
+Bb.csize ← csize;
+C.size ← C.size + Bb.csize;
+C.Add(Bb, Bb.ubound);
+while C.size – C.Max().csize ≥ k do
+C.size ← C:size – C:Max().csize;
+C.DequeueMax();
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+
+10
+
+if C.size ≥ k then C.maxUB  ← C.max().ubound;
+
+Multimed Tools Appl (2009) 41:215–233
+
+225
+
+Algorithm 3: Shrink algorithm for Q
+
+while Q
+
+and Q.Max().lbound ≥ C.MaxUB do
+
+1
+2
+
+Q.DequeueMax();
+
+3.3 Example
+
+Figure 3 shows an example of a k-NN query for some k > 1. The index consists of a
+ball B which has three child balls: B1, B2, and B3. From the ﬁgure, it follows that
+B.bsize = 1 + X + Y + Z , and let us suppose that X ≥ k. The ﬁgure shows the index
+hierarchy up to the ﬁrst level. In the beginning, B.c is inserted into C, as well as the
+bubble Bb with upper bound B.c.distq + B.cr. Thus, C.size = 1 + X + Y + Z ≥ k
+and if we extract the bubble with greater ubound then C.size = 1 < k, thus the
+invariants hold. Ball B is inserted into Q and the algorithm enters the loop. Ball B is
+extracted from Q, and then Bb is removed from C. Now the algorithm processes the
+children of B. The object B1.c and the bubble B1b are inserted into C. Meanwhile,
+B.c is removed from C because B1.ubound < B.c.distq and C.size ≥ k with B1b
+and B1.c in C. The maximum upper bound C.maxU B is updated to C.maxU B =
+B1.ubound, B1 is inserted into Q, and the algorithm invokes Q.Shrink(). B2 and
+B3 will never be inserted into Q, because C.maxU B < B2.lbound < B3.lbound.
+Therefore, the maximum length of Q until this step was 1. Using the standard
+algorithm, B2 and B3 will be inserted into Q, even when they will never be removed
+from the queue (the algorithm will stop searching before removing them), thus
+wasting storage space.
+
+Fig. 3 Example of a k-NN
+query. Note (visually) that all
+k-NN are on B1 and
+B1.ubound < B.c.distq
+
+B3.c
+
+B3.bsize=Z
+
+B3.lbound
+
+B1.bsize=X>=k
+
+B1.c
+
+B1.ubound
+
+q
+
+B.c
+
+B.c.distq
+
+B2.c
+
+B2.bsize=Y
+
+B2.lbound
+
+226
+
+Multimed Tools Appl (2009) 41:215–233
+
+Assume now that B1, B2, and B3 are inserted into Q (for example, this could be
+the case if the index contained several roots). The algorithm removes B1 from Q and
+processes each of its children. Then, it updates C.maxU B. Note that the algorithm
+ensures that C.maxU B ≤ B1.ubound. Next, procedure Q.Shrink() is invoked, which
+removes balls B2 and B3 from Q, thus diminishing the average length of Q during
+the search.
+
+In both cases, the algorithm was able to prune balls B2 and B3 without processing
+them and at a very early stage of the search. Therefore, the storage requirements for
+Q was successfully diminished using our proposed algorithm.
+
+3.4 Cost analysis of the proposed algorithm
+
+Now we compare the computational complexity of the original and our proposed
+k-NN search algorithms. Firstly, as both algorithms perform a best-ﬁrst traversal
+of the index, it follows that they carry out exactly the same number of distance
+computations for the same query object. Thus, for this concept the CPU cost is the
+same on both algorithms. Moreover, this implies that our algorithm is also optimal
+in the number of node accesses required to answer k-NN queries, and it is rangeoptimal 
+(see Section 2).
+Regarding the insertion/deletions of elements in Q, the CPU cost of the original
+algorithm is O(totQ · log maxQ), where totQ is the overall number of balls ever
+inserted into Q and maxQ the maximum size of Q across the process. The cost for
+our proposed algorithm is the same, noting that in our case totQ and maxQ will be
+smaller, given that we avoid some insertions into Q.
+With respect to C, the CPU cost of the original algorithm is in the worst case
+O(totQ · log k), since all centers from balls in Q may be inserted into C, and it is
+ensured that only one object per iteration may be extracted from C. For our proposed
+algorithm, in the worst case it may be possible that totQ objects and totQ bubbles are
+inserted into C, but then the algorithm may extract up to k elements from C after an
+insertion (cf. Algorithm 2, lines 7–9 of the pseudocode). However, it is not possible to
+extract more elements that those inserted into C, therefore the total CPU cost in the
+worst case is also O(totQ · log k), that is, it is the same CPU cost compared with the
+original algorithm. Note that the query “Bb ∈ C” in line 13 of Algorithm 1 requires a
+dictionary data structure built on top of C (such as a hash table) if one wants to avoid
+an O(k) time linear traversal. Such a table involves spending O(k) extra memory,
+but this is usually irrelevant as k is very small in all meaningful cases.
+
+Thus, our proposed algorithm has the same CPU cost as the original one, but
+it always uses less memory for Q. As previously observed, our algorithm needs to
+know how many objects are within each ball of the index, which also uses some
+memory space (one integer value per internal node, which is usually very modest).
+Many indexes already store this value. Otherwise, in most practical situations, there
+is always some free room on each index node, because it is almost impossible to
+completely use its assigned space (equal to the size of a disk data page), so the extra
+integer can be stored “for free”. Also, we experimentally observed that the memory
+savings are at least an order of magnitude higher than the extra space used. Although
+not easy to guarantee analytically, the next section shows that the space savings are
+very signiﬁcant in practice.
+
+Multimed Tools Appl (2009) 41:215–233
+
+227
+
+4 Experimental evaluation
+
+For our experiments, we used several synthetic and real-world databases:
+
+In this section, we show empirically that our proposed technique can achieve
+signiﬁcant space savings. The exact amount will depend on the type of metric space
+and queries posed to it.
+• Gaussian: This is a set of synthetic databases that are formed by clusters in a
+vector space using different dimensionalities (8-D, 16-D, and 32-D), where the
+objects that conform each cluster follows a Gaussian distribution. Each Gaussian
+database contains 1,000 clusters, and their centers are random points with coordinates 
+uniformly distributed in [0, 1]. The variance for the Gaussian distribution
+was set equal to 0.001 for each coordinate, to produce compact clusters. The size
+of each cluster is similar but not necessarily equal, and the whole dataset contains
+100,000 objects. We generated 1,000 random query points, which follow the same
+data distribution as the database.
+• Corel Features: The Corel image features contains features from 68,040 images
+extracted from a Corel image collection. The features are based on the color
+histogram (32-D), color histogram layout (32-D), co-occurrence texture (16-D),
+and color moments (9-D). This database is available at the UCI KDD Archive
+[10]. For our experiments, we used the color histogram (CH) and the layout
+histogram (LH) databases. We selected a subset of this database consisting on
+65,515 images, because there were some missing features for some of the images.
+For each database, we choose 1,000 images at random to be used as queries.
+• Edge structure: This database contains 20,197 feature vectors (edge structure,
+18-D) extracted from the Corel image database. We selected 1,000 random
+objects from the database as query points.
+• English String DB: It contains 69,069 strings (a dictionary of English words). We
+
+selected 1,000 random strings as query points.
+
+We used the Manhattan distance as the metric for the multidimensional databases.
+Other metrics (e.g., Euclidean) may be used, but better results have been obtained
+with respect to the effectiveness of the search using the Manhattan distance [3]
+(which is in accordance with theoretical results [11]), and it is the (computationally 
+speaking) cheapest Minkowski distance. For the English String DB, we used
+the edit distance (the minimum number of insertions, deletions and replacements
+performed to convert one string into another) as the metric, as it is relevant for many
+applications [16].
+
+The number of objects per cluster was selected depending on the dimensionality of
+the dataset, in such a way that all objects from the cluster (plus a small header) could
+ﬁt on a disk datapage. Setting the datapage size to 4 Kb, we obtained the following
+cluster size values: 127 (8-D), 63 (16-D), 56 (18-D), and 31 (32-D). For the English
+String DB, we used a cluster size of 16.
+
+We compared the standard best-ﬁrst k-NN algorithm (labeled HS) against ours
+(labeled Ours) and the best-ﬁrst version proposed by Samet [19] (labeled Samet).2
+
+2Actually, Samet speaks mostly of depth-ﬁrst algorithms [19], but the paper mentions that the bestﬁrst 
+algorithm could be handled as well. As we are interested only in the optimal traversal order in
+this paper, we compare only its best-ﬁrst version.
+
+228
+
+Multimed Tools Appl (2009) 41:215–233
+
+)
+
+B
+D
+%
+
+(
+ 
+|
+
+Q
+
+ 
+
+|
+ 
+x
+a
+m
+n
+a
+e
+M
+
+ 0.9
+
+ 0.8
+
+ 0.7
+
+ 0.6
+
+ 0.5
+
+ 0.4
+
+ 0.3
+
+ 0.2
+
+ 0.1
+
+ 0
+ 50
+
+Gaussian 8−D
+
+Gaussian 8−D
+
+)
+
+B
+D
+%
+
+(
+ 
+|
+
+Q
+
+|
+ 
+
+g
+v
+A
+
+ 0.5
+ 0.45
+ 0.4
+ 0.35
+ 0.3
+ 0.25
+ 0.2
+ 0.15
+ 0.1
+ 0.05
+ 0
+ 50
+
+List of Clusters − HS
+List of Clusters − Samet
+List of Clusters − Ours
+M − tree − HS
+M − tree − Samet
+M − tree − Ours
+ 150
+
+k
+
+ 200
+
+ 100
+
+List of Clusters − HS
+List of Clusters − Samet
+List of Clusters − Ours
+M − tree − HS
+M − tree − Samet
+M − tree − Ours
+ 150
+
+k
+
+ 100
+
+ 200
+
+Fig. 4 Gaussian 8-D: Mean of the maximum queue length (left) and average queue length (right)
+
+As representative index structures, we used the list of clusters [4] and the M-tree [6].
+The list of clusters can be seen as a “list of balls”, that is, a search hierarchy with only
+one level, while the M-tree is a more general hierarchical index structure. The former
+usually performs better on higher dimensional spaces. To compare the storage
+requirements of each search algorithm, we computed the mean of the maximum
+queue lengths (max{|Q|}) obtained on each query, and the average length of Q over
+all queries. The ﬁrst measure indicates how much memory (on average) needs the
+search algorithm to answer the k-NN query. The second measure is related with the
+number of disk accesses made if the queue were stored on secondary memory. All
+results are shown as percentages of the database size.
+
+Figures 4, 5, 6 show the results obtained with the Gaussian databases. Our
+algorithm needs considerably less memory than the standard algorithm, especially
+for high dimensions. For example, our algorithm used only 18% of the memory
+required by the standard algorithm in 32-D and using list of clusters (k = 50). In low
+
+ 2.5
+
+ 2
+
+ 1.5
+
+ 1
+
+ 0.5
+
+)
+
+B
+D
+%
+
+(
+ 
+|
+
+Q
+
+ 
+
+|
+ 
+x
+a
+m
+n
+a
+e
+M
+
+ 0
+ 50
+
+ 100
+
+Gaussian 16−D
+
+List of Clusters − HS
+List of Clusters − Samet
+List of Clusters − Ours
+M − tree − HS
+M − tree − Samet
+M − tree − Ours
+ 150
+
+k
+
+Gaussian 16−D
+
+List of Clusters − HS
+List of Clusters − Samet
+List of Clusters − Ours
+M − tree − HS
+M − tree − Samet
+M − tree − Ours
+
+ 2
+
+ 1.5
+
+)
+
+B
+D
+%
+
+(
+ 
+|
+
+Q
+
+|
+ 
+
+g
+v
+A
+
+ 1
+
+ 0.5
+
+ 200
+
+ 0
+ 50
+
+ 100
+
+ 150
+
+k
+
+ 200
+
+Fig. 5 Gaussian 16-D: Mean of the maximum queue length (left) and average queue length (right)
+
+Multimed Tools Appl (2009) 41:215–233
+
+229
+
+ 8
+
+ 7
+
+ 6
+
+ 5
+
+ 4
+
+ 3
+
+ 2
+
+ 1
+
+)
+
+B
+D
+%
+
+(
+ 
+|
+
+Q
+
+ 
+
+|
+ 
+x
+a
+m
+n
+a
+e
+M
+
+ 0
+ 50
+
+Gaussian 32−D
+
+List of Clusters − HS
+List of Clusters − Samet
+List of Clusters − Ours
+M − tree − HS
+M − tree − Samet
+M − tree − Ours
+
+Gaussian 32−D
+
+List of Clusters − HS
+List of Clusters − Samet
+List of Clusters − Ours
+M − tree − HS
+M − tree − Samet
+M − tree − Ours
+
+ 4.5
+
+ 4
+
+ 3.5
+
+ 3
+
+ 2.5
+
+ 2
+
+ 1.5
+
+ 1
+
+ 0.5
+
+)
+
+B
+D
+%
+
+(
+ 
+|
+
+Q
+
+|
+ 
+
+g
+v
+A
+
+ 100
+
+ 150
+
+k
+
+ 200
+
+ 0
+ 50
+
+ 100
+
+k
+
+ 150
+
+ 200
+
+Fig. 6 Gaussian 32-D: Mean of the maximum queue length (left) and average queue length (right)
+
+ 5
+
+ 4
+
+)
+
+B
+D
+%
+
+ 3
+
+(
+ 
+|
+
+Q
+
+ 
+
+|
+ 
+x
+a
+m
+n
+a
+e
+M
+
+ 2
+
+ 1
+
+Corel Features − Color Histogram
+
+Corel Features − Color Histogram
+
+List of Clusters − HS
+List of Clusters − Samet
+List of Clusters − Ours
+M − tree − HS
+M − tree − Samet
+M − tree − Ours
+
+ 2.5
+
+ 2
+
+ 1.5
+
+ 1
+
+ 0.5
+
+)
+
+B
+D
+%
+
+(
+ 
+|
+
+Q
+
+|
+ 
+
+g
+v
+A
+
+List of Clusters − HS
+List of Clusters − Samet
+List of Clusters − Ours
+M − tree − HS
+M − tree − Samet
+M − tree − Ours
+
+ 0
+ 50
+
+ 100
+
+k
+
+ 150
+
+ 200
+
+ 0
+ 50
+
+ 100
+
+k
+
+ 150
+
+ 200
+
+Fig. 7 Corel features CH: Mean of the maximum queue length (left) and average queue length
+(right)
+
+ 3.5
+
+ 3
+
+ 2.5
+
+ 2
+
+ 1.5
+
+ 1
+
+ 0.5
+
+)
+
+B
+D
+%
+
+(
+ 
+|
+
+Q
+
+|
+ 
+x
+a
+m
+ 
+n
+a
+e
+M
+
+ 0
+ 50
+
+ 100
+
+Corel Features − Layout Histogram
+
+Corel Features − Layout Histogram
+
+ 3
+
+ 2.5
+
+ 2
+
+ 1.5
+
+)
+
+B
+D
+%
+
+(
+ 
+|
+
+List of Clusters − HS
+List of Clusters − Samet
+List of Clusters − Ours
+M − tree − HS
+M − tree − Samet
+M − tree − Ours
+
+List of Clusters − HS
+List of Clusters − Samet
+List of Clusters − Ours
+M − tree − HS
+M − tree − Samet
+M − tree − Ours
+ 150
+
+k
+
+Q
+
+|
+ 
+g
+v
+A
+
+ 1
+
+ 0.5
+
+ 200
+
+ 0
+ 50
+
+ 100
+
+k
+
+ 150
+
+ 200
+
+Fig. 8 Corel features LH: Mean of the maximum queue length (left) and average queue length (right)
+
+230
+
+)
+
+B
+D
+%
+
+(
+ 
+|
+
+Q
+
+|
+ 
+x
+a
+m
+ 
+n
+a
+e
+M
+
+ 1.8
+
+ 1.6
+
+ 1.4
+
+ 1.2
+
+ 1
+
+ 0.8
+
+ 0.6
+
+ 0.4
+
+ 0.2
+
+ 0
+ 50
+
+Edge Structure
+
+List of Clusters − HS
+List of Clusters − Samet
+List of Clusters − Ours
+M − tree − HS
+M − tree − Samet
+M − tree − Ours
+ 150
+
+k
+
+ 100
+
+Multimed Tools Appl (2009) 41:215–233
+
+Edge Structure
+
+List of Clusters − HS
+List of Clusters − Samet
+List of Clusters − Ours
+M − tree − HS
+M − tree − Samet
+M − tree − Ours
+
+ 1.4
+
+ 1.2
+
+ 1
+
+ 0.8
+
+ 0.6
+
+ 0.4
+
+ 0.2
+
+)
+
+B
+D
+%
+
+(
+ 
+|
+
+Q
+
+|
+ 
+g
+v
+A
+
+ 200
+
+ 0
+ 50
+
+ 100
+
+ 150
+
+ 200
+
+k
+
+Fig. 9 Edge structure: Mean of the maximum queue length (left) and average queue length (right)
+
+dimensions, the gain was smaller (48% of the memory requirement of the standard
+algorithm), but still considerable. The list of clusters performed better than the
+M-tree in terms of storage usage. In this index, our algorithm was consistently better
+than the simpler version by Samet. The average length of the queue was up to ﬁve
+times shorter than the standard algorithm. In the M-tree, on the other hand, all
+the space performances were rather similar. The charts also show that the storage
+efﬁciency degrades as k grows, especially in the case of the M-tree.
+
+We obtained similar results with real-world datasets (see Figs. 7, 8 and 9). For
+example, with the color histogram database, our algorithm only used 34% of the
+storage requirement of the standard algorithm with list of clusters. The average
+queue length was always smaller than 32% of that of the standard algorithm. Similar
+improvements were obtained with the layout histogram and the edge structure
+databases. Finally, the obtained results with the English String DB were not as good
+as with the other database, but the algorithm was able to save 16% of the memory
+used by the standard algorithm on average (Fig. 10).
+
+Table 2 summarizes the improvements in storage requirements of our algorithm
+
+over the standard k-NN search.
+
+)
+
+B
+D
+%
+
+(
+ 
+|
+
+Q
+
+ 
+
+|
+ 
+x
+a
+m
+n
+a
+e
+M
+
+ 8
+
+ 7
+
+ 6
+
+ 5
+
+ 4
+
+ 3
+
+ 2
+
+ 1
+
+ 0
+ 20
+
+ 40
+
+English String DB
+
+List of Clusters - HS
+List of Clusters - Samet
+List of Clusters - Ours
+M-tree - HS
+M-tree - Samet
+M-tree - Ours
+
+ 60
+k
+
+ 80
+
+ 100
+
+ 4
+
+ 3.5
+
+ 3
+
+ 2.5
+
+ 2
+
+ 1.5
+
+ 1
+
+ 0.5
+
+)
+
+B
+D
+%
+
+(
+ 
+|
+
+Q
+
+|
+ 
+
+g
+v
+A
+
+ 0
+ 20
+
+ 40
+
+English String DB
+
+List of Clusters - HS
+List of Clusters - Samet
+List of Clusters - Ours
+M-tree - HS
+M-tree - Samet
+M-tree - Ours
+
+ 60
+k
+
+ 80
+
+ 100
+
+Fig. 10 English String DB: Mean of the maximum queue length (left) and average queue length
+(right)
+
+Multimed Tools Appl (2009) 41:215–233
+
+231
+
+Table 2 Storage requirements (maximum and average queue length) of our algorithm (standard
+algorithm: 100%, k = 50)
+Database
+Gaussian 8-D
+Gaussian 16-D
+Gaussian 32-D
+Color histogram
+Layout histogram
+Edge structure
+English string DB (k = 100)
+
+MT-max (%)
+93.7
+96.2
+96.3
+93.4
+93.7
+86.8
+98.4
+
+MT-avg (%)
+86.5
+88.3
+89.1
+89.1
+88.9
+81.3
+92.1
+
+LC-max (%)
+49.4
+19.5
+18.5
+34.6
+30.8
+26.1
+95.6
+
+LC-avg (%)
+48.3
+19.2
+18.2
+32.3
+28.4
+23.4
+83.4
+
+5 Conclusions
+
+We presented an improved version of the optimal-order k-NN search algorithm,
+using distance estimators (such as the upper and lower bound distance to the query
+object) in order to reduce the storage requirements of the search algorithm. Our
+proposed algorithm aims to prune from the active page list, as soon as possible, all
+nodes from the index where it is ensured that no relevant objects can be found.
+We also introduce the concept of bubbles, which are “abstract” index nodes with
+no elements inside. Bubbles can be used to prune index nodes from the active page
+list using the distance estimators, even if the algorithm has not yet visited the index
+nodes which actually contain the objects inside the bubble. We tested our algorithm
+with several synthetic and real-world datasets, using two state-of-art index structures
+for metric spaces. Our experimental results conﬁrm that the storage requirements of
+our proposed algorithm are considerably smaller compared with the standard k-NN
+algorithm (up to ﬁve times smaller).
+
+We observed that the best results (i.e., the larger savings in space) were obtained
+with the list of clusters. This result can be explained as follows: the list of clusters
+produces more compact balls (regions) than the M-tree, due to the dynamic nature of
+the latter. For example, for the color histogram database the average covering radius
+using the M-tree was 0.32, while the average covering radius using list of clusters
+was only 0.18. Also, the M-tree creates more balls than the list of clusters, and not
+all them are necessarily full (as in the case of the list clusters). This means that the
+“density” of each ball in the M-tree is smaller than in the balls of the list of clusters.
+Thus, the search algorithm is able to ﬁnd better distance estimations to the balls with
+the list of clusters, which allows this index to discard balls from Q sooner than the
+M-tree.
+
+We plan to continue exploring the trade-off between the index size and the storage
+requirements for the active page list. Further improvements on the average length of
+Q may be obtained if one has more structural information about the balls, at the cost
+of storing more information on each index node.
+
+Although we focused in this paper on indexes for metric spaces, our technique
+is general and can be adapted with minimal effort to be used with spatial access
+methods. In that case, each subtree is usually bounded by a hyperrectangle. Our
+heuristic translates into the following rule: Assume a tree node contains bsize elements
+within a hyperrectangle. Then there are bsize elements at distance max δ(q, c), where c
+ranges among all the corners of the hyperrectangle. This heuristic is different from the
+usual MinMaxDist [18], which gives a better distance estimator but holds only for one
+
+232
+
+Multimed Tools Appl (2009) 41:215–233
+
+object per tree node. If we use the simpler rule by Samet [19] our work builds on, and
+translate it to a spatial data structure, the result is always inferior to the MinMaxDist
+heuristic.
+
+Acknowledgement We thank Christian Rohrdantz for implementing the algorithms and the index
+structures, and for running the experimental evaluation.
+
+References
+
+1. Baroni M, Cruciani G, Sciabola S, Perruccio F, Mason J (2007) A common reference framework
+for analyzing/comparing proteins and ligands. Fingerprints for ligands and proteins (FLAP):
+theory and applications. J Chem Inf Model 47:279–294
+
+2. Böhm C, Berchtold S, Keim D (2001) Searching in high-dimensional spaces: Index structures for
+
+improving the performance of multimedia databases. ACM Comput Surv 33(3):322–373
+
+3. Bustos B, Keim D, Saupe D, Schreck T, Vrani´c D (2006) An experimental effectiveness comparison 
+of methods for 3D similarity search. Special issue on Multimedia Contents and Management
+in Digital Libraries. Int J Digit Libr 6(1):39–54
+
+4. Chávez E, Navarro G (2005) A compact space decomposition for effective metric indexing.
+
+5. Chávez E, Navarro G, Baeza-Yates R, Marroquín J (2001) Searching in metric spaces. ACM
+
+Pattern Recogn Lett 26(9):1363–1376
+
+Comput Surv 33(3):273–321
+
+6. Ciaccia P, Patella M., Zezula P (1997) M-tree: an efﬁcient access method for similarity search
+in metric spaces. In: Proc. 23rd Intl. Conf. on Very Large Databases (VLDB’97), Morgan
+Kaufmann, pp 426–435
+
+7. Dohnal V, Gennaro C, Savino P, Zezula P (2003) D-index: distance searching index for metric
+
+data sets. Multimed Tool Appl 21(1):9–33
+
+8. Funkhouser T, Kazhdan M, Shilane P, Min P, Kiefer W, Tal A, Rusinkiewicz S, Dobkin D (2004)
+
+Modeling by example. ACM Trans Graph 23(3):652–663
+
+9. Gaede V, Günther O (1998) Multidimensional access methods. ACM Comput Surv 30(2):
+
+170–231
+
+10. Hettich S, Bay S (1999) The UCI KDD archive [http://kdd.ics.uci.edu]
+11. Hinneburg A, Aggarwal C, Keim D (2000) What is the nearest neighbor in high dimensional
+spaces? In: Proc. 26th international conference on very large databases (VLDB’00), Morgan
+Kaufmann, pp 506–515
+
+12. Hjaltason G, Samet H (1995) Ranking in spatial databases. In: Proc. 4th intl. symp. on advances
+
+in spatial databases, LNCS, vol 951. Springer, pp 83–95
+
+13. Hjaltason G, Samet H (2000) Incremental similarity search in multimedia databases. Technical
+
+report CS-TR-4199, University of Maryland, Computer Science Department
+
+14. Hjaltason G, Samet H (2003) Index-driven similarity search in metric spaces. ACM Trans Database 
+Syst 28(4):517–580
+
+15. Keim DA (1999) Efﬁcient geometry-based similarity search of 3D spatial databases. In: Proc.
+ACM international conference on management of data (SIGMOD’99), ACM Press, pp 419–430
+16. Navarro G (2001) A guided tour to approximate string matching. ACM Comput Surv 33(1):
+
+31–88
+
+17. Navarro G (2002) Searching in metric spaces by spatial approximation. The VLDB J 11(1):28–46
+18. Roussopoulos N, Kelley S, Vincent F (1995) Nearest neighbor queries. In: Proc. ACM international 
+conference on management of data (SIGMOD’95), ACM Press, pp 71–79
+
+19. Samet H (2003) Depth-ﬁrst k-nearest neighbor ﬁnding using the MaxNearestDist estimator. In:
+Proc. 12th intl. conf. on image analysis and processing (ICIAP’03), IEEE Computer Society,
+pp 486–491
+
+20. Samet H (2006) Foundations of multidimensional and metric data structures. Morgan Kaufmann,
+
+San Francisco, CA, USA
+
+21. Santos-Filho R, Traina A, Traina C Jr, Faloutsos C (2001) Similarity search without tears:
+the OMNI family of all-purpose access methods. In: Proc. 17th intl. conf. on data engineering
+(ICDE’01), IEEE Computer Society, pp 623–630
+
+22. Uhlmann J (1991) Implementing metric trees to satisfy general proximity/similarity queries. In:
+
+Code 5570 NRL Memo Report, Naval Research Laboratory
+
+23. Zezula P, Amato G, Dohnal V, Batko M (2006) Similarity search: the metric space approach
+
+(advances in database systems). Springer, New York
+
+Multimed Tools Appl (2009) 41:215–233
+
+233
+
+Benjamin Bustos is an assistant professor in the Department of Computer Science at the University
+of Chile. He is also a researcher at the Millennium Nucleus Center for Web Research. His research
+interests are similarity searching and multimedia information retrieval. He has a doctoral degree in
+natural sciences from the University of Konstanz, Germany. Contact him at bebustos@dcc.uchile.cl.
+
+Gonzalo Navarro earned his PhD in Computer Science at the University of Chile in 1998, where he is
+now Full Professor. His research interests include similarity searching, text databases, compression,
+and algorithms and data structures in general. He has coauthored a book on string matching and
+around 200 international papers. He has (co)chaired international conferences SPIRE 2001, SCCC
+2004, SPIRE 2005, SIGIR Posters 2005, IFIP TCS 2006, and ENC 2007 Scalable Pattern Recognition
+track; and belongs to the Editorial Board of Information Retrieval Journal. He is currently Head of
+the Department of Computer Science at University of Chile, and Head of the Millenium Nucleus
+Center for Web Research, the largest Chilean project in Computer Science research.
+
+

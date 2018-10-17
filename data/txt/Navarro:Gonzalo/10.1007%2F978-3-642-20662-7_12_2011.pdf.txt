@@ -1,0 +1,1288 @@
+Compressed String Dictionaries
+
+Nieves R. Brisaboa1,(cid:2), Rodrigo C´anovas2,(cid:2)(cid:2), Francisco Claude3,(cid:2)(cid:2)(cid:2),
+
+Miguel A. Mart´ınez-Prieto2,4,(cid:2)(cid:2),†, and Gonzalo Navarro2,(cid:2)(cid:2)
+
+1 Database Lab, Universidade da Coru˜na, Spain
+
+2 Department of Computer Science, University of Chile, Chile
+3 School of Computer Science, University of Waterloo, Canada
+
+4 Department of Computer Science, Universidad de Valladolid, Spain
+
+Abstract. The problem of storing a set of strings – a string dictionary
+– in compact form appears naturally in many cases. While classically it
+has represented a small part of the whole data to be processed (e.g., for
+Natural Language processing or for indexing text collections), recent applications 
+in Web engines, RDF graphs, Bioinformatics, and many others,
+handle very large string dictionaries, whose size is a signiﬁcant fraction
+of the whole data. Thus eﬃcient approaches to compress them are necessary.
+ In this paper we empirically compare time and space performance
+of some existing alternatives, as well as new ones we propose. We show
+that space reductions of up to 20% of the original size of the strings is
+possible while supporting dictionary searches within a few microseconds,
+and up to 10% within a few tens or hundreds of microseconds.
+
+1 Introduction
+
+String dictionaries arise naturally in a large number of applications. We associate
+them classically to Natural Language (NL) processing: ﬁnding the lexicon of a
+text corpus is the ﬁrst step in analyzing it [25]. They also arise, together with
+inverted indexes, when indexing text collections formed by NL [2,33].
+
+In those NL applications, there has not been much concern about the size of
+the dictionary. This is because, in classical NL collections, the dictionary grows
+sublinearly with the text size: Heaps’ law [19] establishes that in a text of length
+n, the dictionary size is O(nβ), for some 0 < β < 1 depending on the type of
+text. This β value is usually in the range 0.4–0.6 [2], and thus the dictionary of
+terabyte-size collections should occupy just a few megabytes and would easily
+ﬁt in the main memory of a commodity PC.
+
+Heaps’ law, however, does not model well the reality of Web search engines.
+ Web collections are much less “clean” than text collections whose content 
+quality is carefully controlled. Dictionaries of Web crawls easily exceed
+(cid:2) Funded by Ministry of Science and Innovation of Spain (PGE and FEDER)
+
+TIN2009-14560-C03-02 and Xunta de Galicia ref. 09TIC060E.
+
+(cid:2)(cid:2) Funded by Millennium Institute for Cell Dynamics and Biotechnology (ICDB),
+
+Grant ICM P05-001-F, Mideplan, Chile.
+
+(cid:2)(cid:2)(cid:2) Funded by the David R. Cheriton scholarships program.
+
+†
+
+Funded by Ministry of Science and Innovation of Spain, TIN2009-14009-C02-02.
+
+P.M. Pardalos and S. Rebennack (Eds.): SEA 2011, LNCS 6630, pp. 136–147, 2011.
+c(cid:2) Springer-Verlag Berlin Heidelberg 2011
+
+Compressed String Dictionaries
+
+137
+
+the gigabytes, due to typos and unique identiﬁers that are taken as “words”,
+but also for “regular words” from multiple languages. The ClueWeb09 dataset
+(http://boston.lti.cs.cmu.edu/Data/clueweb09; thanks to Leonid Boystov)
+is a real example which comprises close to 200 million diﬀerent words obtained
+from 1 billion web pages on 10 languages. This results in a large dictionary of
+far more than 1GB.
+
+Web graphs are another application where the size of the URL names, classically 
+neglected, is becoming very relevant with the advances of the techniques
+that compress the graph topology. The nodes of a Web graph are typically the
+pages of a crawl, and the edges are the hyperlinks. Typically there are 15 to 30
+links per page. Compressing Web graphs has been an area of intense study, as it
+permits caching larger graphs in main memory, for tasks like Web mining, Web
+spam detection, ﬁnding communities of interest, etc. [21,9]. URL names are used
+to improve the mining quality [34,27].
+
+In an uncompressed graph, 15 to 30 links per page would require 60 to 120
+bytes if represented as a 4-byte integer. This posed a more serious memory
+problem compared to the name of the URL itself once some simple compression
+procedure was applied to those names (such as Front-Coding, see Section 2).
+For example, Broder et al. [5] reports 27.2 bits per edge (bpe) and 80 bits per
+node (bpn). This means that each node takes around 400–800 bits to represent
+its links, compared to just 80 bits used for storing its URL. In the same way, an
+Internet Archive graph of 115M nodes and 1.47 billion edges required [31] 13.92
+bpe plus around 50 bpn, so 200–400 bits are used to encode the links and only 50
+for the URL. In both cases, the space required to encode the URLs was just 10%-
+25% of that required to encode the links. However, the advances in compressing
+the edges have been impressive in recent years, achieving compression ratios
+around 1–2 bits per edge [3,1]. At this rate, the edges leaving a node require on
+average 2 to 8 bytes, compared to which the name of the URL certainly becomes
+an important part of the overall space.
+
+Another application is Bioinformatics. Popular alignment software like BLAST
+[18] indexes all the diﬀerent substrings of length q of a text, storing the positions
+where they occur in the sequence database. For DNA sequences q = 11, 12 is
+common, whereas for proteins they use q = 3, 4. Over a DNA alphabet of size 4,
+or a protein alphabet of size 20, this amounts to up to 200 million characters.
+Using a larger q would certainly allow one improve the quality in searching for
+conserved regions, but this is infeasible for memory constraints.
+
+The emergent Linked Data Project (http://linkeddata.org) focuses on the
+publication of RDF (http://www.w3.org/TR/rdf-syntax-grammar) data and
+their connection between diﬀerent data sources in the “Web of Data”. This
+movement results in huge and heterogeneous RDF datasets from diverse ﬁelds.
+The dictionary is an essential component in the logical division of an RDF
+database [10]. However, its eﬀective representation has not been studied in depth.
+Our experience with the tool HDT-It! (http://code.google.com/p/hdt-it)
+shows that the dictionary for dataset DBpedia-en (http://downloads.dbpedia.
+org/3.5.1/en) takes about 80% of the total size.
+
+138
+
+N.R. Brisaboa et al.
+
+Finally, Internet routing poses another interesting problem on dictionary
+strings. Domain name servers map domain names to IP addresses, and routers
+map IP addresses to physical addresses. They may handle large dictionaries of
+domain names or IP addresses, and serve many requests per second.
+
+This short tour over various example applications shows that handling very
+large string dictionaries is an important and pervasive problem. Curiously, we
+have not seen much research on compressing them, perhaps because a few years
+ago the space of these dictionaries was not a serious problem, and at most FrontCoding 
+was suﬃcient. In this paper we study Front-Coding and other solutions
+we propose for compressing large string dictionaries, so that two basic operations
+are supported: (1) given a string, return its position in the dictionary or tell it
+is not in the dictionary; (2) given a position, retrieve its string content.
+
+Our study over various application scenarios spots a number of known and
+novel alternatives that dominate diﬀerent niches of the space/time tradeoﬀ map.
+The least space-consuming variants perform eﬃciently while compressing the
+dictionary to 9%–22% of its original size, depending on the type of dictionary.
+
+2 Basic Concepts and Related Work
+
+Rank and select on bitmaps. Let B[1, n] be a 0, 1 string (bitmap) of length n and
+assume there are m ones in the sequence. We deﬁne rankb(B, i) as the number
+of occurrences of bit b in B[1, i] and selectb(B, i) as the position of the i-th
+occurrence of b in B.
+
+In this paper we will use two diﬀerent succinct data structures (implementations 
+available at http://libcds.recoded.cl) that answer rank and select
+queries. The ﬁrst one, that we will refer to as RG [16], uses (1 + x)n bits to
+represent B. It supports rank using two random accesses to memory plus 4/x
+contiguous (i.e., cached) accesses. Select requires and additional binary search.
+The second data structure, that we will call RRR [29], is a compressed bitmap
+15 +x)n bits (our logarithms are in base 2),
+that uses in practice about log
+answering rank within two random accesses plus 3 + 8/x accesses to contiguous
+memory, and select with an extra binary search. In practice this compresses the
+bitmap when m < 0.2 n.
+
++( 4
+
+n
+m
+
+(cid:2)
+
+(cid:3)
+
+Huﬀman and Hu-Tucker codes. For compressing sequences, statistical methods
+assign shorter codes (i.e., bit streams) to more frequent symbols. Huﬀman coding
+[20] is the optimal code (i.e., it achieves the minimum length of encoded data)
+that is uniquely decodable. In this paper we use canonical Huﬀman codes [26],
+which have various advantages.
+
+Hu-Tucker codes [22] are optimum among those that maintain the lexicographical 
+order of the symbols. Two sequences encoded using Hu-Tucker can
+be lexicographically compared bytewise directly in encoded form. We use both
+codes in this paper, in some cases padding them (with zeros) to the next byte
+in order to simplify alignment and bytewise comparisons.
+
+Compressed String Dictionaries
+
+139
+
+Hashing. Hashing [8] is a folklore method to store a dictionary of any kind. A
+hash function transforms the elements into indexes in a hash table, where the
+corresponding value is to be inserted or sought. A collision arises when two
+diﬀerent elements are mapped to the same array cell. In this paper we use closed
+hashing: If the cell where an element is to be found is occupied, one successively
+probes other cells until ﬁnding a free cell (insertions and unsuccessful searches)
+or until ﬁnding the element (successful searches).
+
+We will consider two policies to determine the next cells to probe when a
+collision is detected at cell x. Double hashing computes another hash function y
+that depends on the key and probes x + y, x + 2y, etc. modulo the table size.
+Linear probing is a simpler policy. It tries the successive cells of the hash table,
+x + 1, x + 2, etc. modulo the table size.
+
+The load factor is the fraction of occupied cells, and it inﬂuences space usage
+and time performance. Using good hash functions, insertions and unsuccessful
+searches require on average 1/(1 − α) probes with double hashing, whereas successful 
+searches require ln(1/(1 − α))/α probes. Linear probing requires more
+probes on average: (1 + 1/(1 − α)2)/2 for insertions and unsuccessful searches,
+and (1 + 1/(1 − α))/2 for successful searches. Despite its poorer complexities,
+we consider also linear probing because it has advantages on some compressed
+representations we try.
+
+Front-coding. Front-coding [33] is the folklore compression technique for lexicographically 
+sorted dictionaries. It is based on the fact that consecutive entries
+are likely to share a common preﬁx. Each entry in the dictionary is be diﬀerentially 
+encoded with respect to the preceding one. Two values are stored: an
+integer that encodes the length of their common preﬁx, and the remaining suﬃx
+of the current entry.
+
+To allow searches, Front-Coding partitions the dictionary into buckets, where
+the ﬁrst element is explicitly stored and the rest are diﬀerentially encoded. This
+allows the dictionary to be eﬃciently searched using a two-step process: ﬁrst, a
+binary search on the ﬁrst entry of the buckets locates the candidate bucket, and
+second a sequential scan of this candidate bucket rebuilds each element on the
+ﬂy and compares it with the query. The bucket size yields a time/space tradeoﬀ.
+Front-coding has been sucessfully used in many applications. We emphasize
+its use in WebGraph (http://webgraph.dsi.unimi.it) to encode URL dictionaries 
+from Web graphs.
+Compressed text self-indexes. A compressed text self-index takes advantage of
+the compressibility of a text T [1, N] to represent it in space close to that of the
+compressed text, while supporting random access and search operations. More
+precisely, a self-index supports at least operations extract(i, j), which returns
+T [i, j], and locate(p), which returns the positions in T where pattern p occurs.
+There are several self-indexes [28,11]. For this paper we are interested in particular 
+in the FM-index family [12,13], which is based on the Burrows-Wheeler
+transform (BWT) [6]. FM-indexes achieve the best compression among selfindexes 
+and are very fast to determine whether p occurs in T . Many self-indexes
+are implemented in the PizzaChili site (http://pizzachili.dcc.uchile.cl).
+
+140
+
+N.R. Brisaboa et al.
+
+The BWT of T [1, N], T bwt[1, N], is a permutation of its symbols. If the suﬃxes
+T [i, N] of T are sorted lexicographically, then T bwt[j] is the character preceding
+the jth smallest suﬃx. We use the BWT properties in this paper to represent a
+dictionary as the FM-index of a text T .
+FM-indexes support two basic operations on T bwt. One is the LF-step, which
+moves from T bwt[j] that corresponds to the suﬃx T [i, N] to T bwt[j(cid:3)] that corresponds 
+to the suﬃx T [i − 1, N] (or T [N, N] if i = 1), that is j(cid:3) = LF (j).
+The second is the backward step, which moves from the lexicographical interval 
+T bwt[sp, ep] of all the suﬃxes of T that start with string x to the interval
+T bwt[sp(cid:3), ep(cid:3)] of all the suﬃxes that start with cx, for a character c.
+
+Grammar-based compression. Grammar-based compresson is about ﬁnding a
+small grammar that generates a given text [7]. These methods exploit repetitions
+in the text to derive good grammar rules, so they are particularly suitable for
+texts containing many identical substrings. Finding the smallest grammar for a
+given text is NP-hard [7], so grammar-based compressors look for good heuristics.
+We use Re-Pair [23] as a concrete compressor, as it runs in linear time and yields
+good results in practice.
+Re-Pair ﬁnds the most-repeated pair xy in the text and replaces all its ocurrences 
+by a new symbol R. This adds a new rule R → xy to the grammar. The
+process iterates until all remaining pairs are unique in the text. Then Re-Pair
+outputs the set of r rules and the compressed text, C. We use a public implementation 
+(http://www.dcc.uchile.cl/gnavarro/software) for the compressor;
+each value (elements of a rule and symbols in C) is stored in log(σ + r) bits.
+
+Variable-length and direct-access codes. Brisaboa et al. [4] introduce a symbol
+reordering technique called directly addressable variable-length codes (DACs).
+Given a concatenated sequence of variable-length codes, DACs reorder the target
+symbols so that direct access to any code is possible. The overhead is at most
+one bit per target symbol, which is not too much if the target alphabet is large.
+All the ﬁrst symbols of the codes are concatenated in a ﬁrst array A1. A
+bitmap B1 stores one bit per code in A1, marking with a 1 the codes of length
+more than 1. The second symbols of the codes of length more than one are
+concatenated in a second array A2, with B2 marking which are longer than two,
+and so on. To extract the ith code, one ﬁnds its ﬁrst symbol in A1[i]. If B1[i] = 0,
+we are done. Otherwise we continue in A2[rank1(B1, i)], and so on.
+
+A variable-length coding we use in this paper (albeit not in combination with
+DACs) is Vbyte [32]. It is used to represent numbers of distinct magnitudes,
+where most are small. Vbyte partitions the bits into 7-bit chunks and reserves
+the last bit of each byte to signal whether the number continues or not.
+
+Tries and the XBW. A trie is an edge-labeled tree where each path from the
+root to a leaf represents a string. Strings that share a common preﬁx share a
+corresponding common path from the root.
+
+A trie can represent a dictionary in a natural way. Searching for a string in
+the dictionary corresponds to following the labeled edges according to the string
+
+Compressed String Dictionaries
+
+141
+
+characters. The number of the leaf would correspond to the id of the string (if
+the leaf exists), and it usually matches with the rank of that string in the set.
+
+The main problem in practice is that tries tend to use much space; even when
+the space is linear, the constants are not negligible. To overcome this limitation,
+ Ferragina et al. [15] proposed a compressed representation for trees that
+supports navigational operations, and subpath searching, using rank and select
+data structures for sequences. The representation, called XBW, corresponds to
+an extension of the BWT to trees.
+
+3 Compressed Dictionary Representations
+
+We describe now various approches for representing a dictionary within compressed 
+space while solving two operations on it. The ﬁrst operation, locate(p),
+gives a unique nonnegative identiﬁer for the string p, if it appears in the dictionary;
+ otherwise it returns −1. The second operation, extract(i), returns the
+string with identiﬁer i in the dictionary, if it exists; otherwise returns N U LL.
+
+3.1 Hashing and Compression
+
+We explore several combinations of hashing and compression. We Huﬀmanencode 
+each string and the codes are concatenated in byte-aligned form. We
+insert the (byte-)oﬀsets of the encoded strings in a hash table. The hash function 
+operates over the encoded strings (seen as a sequence of bytes, that is, we
+compare them bytewise). This lowers the time to compute the function and to
+compare search keys (as the string is shorter). For searching we ﬁrst Huﬀmanencode 
+the search string and pad its bits to an integral number of bytes.
+
+Our main hash function is a modiﬁed Bernstein’s hash1. The second function
+
+for double hashing is the “rotating hash” proposed by Knuth [22, Sec. 6.4]2.
+
+We concatenate the strings in the same order they are ﬁnally stored in the
+hash table. This improves locality of reference for linear probing, and gives other
+beneﬁts, as seen later (in particular we easily know the length in bytes of each
+encoded string). We consider three variants to represent the hash table, and
+combine each of them with linear probing (lp) or double hashing (dh).
+
+The ﬁrst variant, Hash, stores the hash table in classical form, as an array
+H[1, m] pointing to the byte oﬀset of the encoded strings. To answer locate(p) we
+proceed as usual, returning the oﬀset of H where the answer was found, or −1
+if not. To answer extract(i), we simply decompress the string pointed from H[i].
+Then with load factor α = n/m (n being the number of strings in the dictionary),
+the structure requires m integers in addition to the Huﬀman-compressed strings.
+The second variant, HashB, stores H[1, m] in compact form, that is, removing
+the empty cells, in an array M[1, n]. It also stores an RG-encoded bitmap B[1, m]
+
+1
+
+http://www.burtleburtle.net/bob/hash/doobs.html. We initialize h as a large
+prime and replace the 33 by 215 + 1, taking modulo the table size at each iteration.
+2 Precisely, the variant at http://burtleburtle.net/bob/hash/examhash.html. We
+
+also initialize h as a large prime.
+
+142
+
+N.R. Brisaboa et al.
+
+that marks with a 1 the nonempty cells of H. Then H[i] is empty if B[i] = 0,
+and if it is nonempty then its value is H[i] = M[rank1(B, i)]. Now locate(p)
+returns positions in M, so our identiﬁers become contiguous in the range [1, n],
+which is desirable. For extract(i) we simply decompress the string pointed from
+M[i]. The space of this representation is n integers plus (1 + x)m bits, where
+x is the parameter of bitmap representation RG. The n integers require n log N
+bits, where N is the total byte length of the encoded strings.
+
+The price is in time, as each new probe requires an additional rank on B.
+However, with linear probing, rank needs to be computed only once, as the
+successive cells are also successive in M. We only need to access the bits of B to
+determine where is the next empty cell.
+
+The third variant, HashBB, also stores M and B instead of H, but M is replaced 
+by a second bitmap. Note that since we have reordered the codes according
+to where they appear in H (or M), the values in these arrays are increasing. Thus
+instead of M we store a second bitmap Y [1, N], where a 1 marks the beginning
+of the codes. Then M[i] = select1(Y, i). Bitmap Y is encoded in compressed
+form (RRR). Now the n log N bits of M are reduced to log
+15 + x)N bits,
+which is smaller unless the encoded strings are long.
+
+(cid:2)
+N
+n
+
++ ( 4
+
+(cid:3)
+
+The price is, again, in time. Each access to M requires a select operation. Note
+that linear probing does not save us from successive select operations, despite
+the involved string being contiguous, because we have no way to know where a
+code ends and the next starts.
+
+3.2 Front-Coding and Compression
+
+We consider two variants of Front-Coding. Plain Front-Coding implements the
+original technique by using Vbyte to encode the length of the common preﬁx.
+The remaining suﬃx is terminated with a zero-byte. Only bytewise operations
+are needed to search. The block sizes are measured in number of strings, so
+extract(i) determines the appropriate block with a simple division, and then
+scans the block to ﬁnd the corresponding string.
+
+Hu-Tucker Front-Coding is similar, but all the strings and Vbyte codes are
+encoded together using a single Hu-Tucker code. The bucket starts with the HuTucker 
+code of the ﬁrst string, which is padded to the next byte boundary and
+preceded by the byte length of the encoded string, in Vbyte form. This prelude
+enables binary searching the ﬁrst strings without decompressing them. The rest
+of the bucket is Hu-Tucker-compressed and bit-aligned, and is sequentially decompressed 
+when scanning the bucket, both for locating and for extracting. We
+use a pointer-based Hu-Tucker tree implementation.
+
+3.3 FM-Index Based Representation
+
+We use two FM-indexes from PizzaChili. They represent the BWT using a
+wavelet tree [17], whose bitmaps are represented using RG (version SSA v3.1) or
+RRR (version SSA RRR). The former corresponds to the “succinct suﬃx array”
+[13], which achieves zero-order compression of T , and the second to the “implicit
+
+Compressed String Dictionaries
+
+143
+
+compression boosting” idea [24], which reaches higher-order compression. Both
+FM-index implementations support functions LF and BW S, as well as obtaining 
+T bwt[j] given j, in time O(log σ), where σ is the alphabet size of T . We use
+the indexes with no extra sampling because we need only limited functionality.
+We concatenate all the strings in lexicographic order, terminating each one
+with a special character, $, that is lexicographically smaller than all the symbols
+in T (in practice $ is the ASCII code zero, which is the natural string terminator).
+We also add $ at the beginning of the sequence. Thus we can speak of the ith
+string in lexicographical or positional order, indistinctly.
+
+Note that, when the suﬃxes of T are sorted lexicographically, the ﬁrst corresponds 
+to the ﬁnal $, and the next n correspond to the $s that precede each
+dictionary string. Thus T bwt[1] is the ﬁnal character of the nth dictionary string,
+and T bwt[i + 2] is the ﬁnal character of the ith string, for 1 ≤ i < n. Therefore
+extract(i) can be carried out by starting at the corresponding position of T bwt
+and using LF-steps until reaching a $. The T bwt[j] characters traversed spell out
+the desired dictionary string in reverse order.
+To answer locate(p) we just need to determine whether $p$ occurs in T . Thus
+we start with (sp, ep) = (1, n+1) and use |p|+1 backward steps until ﬁnding the
+lexicographical interval (sp(cid:3), ep(cid:3)) of the suﬃxes that start with $p$. If p exists in
+the dictionary and is the ith string, then sp(cid:3) = ep(cid:3) = i + 1 and we simply return
+i; otherwise sp(cid:3) > ep(cid:3) holds at some point in the process and we return −1.
+
+3.4 Re-pair Based Representation
+We concatenate all the dictionary strings in lexicographic order and apply RePair 
+compression to the concatenation. However, we avoid forming rules that
+contain the string terminator. This ensures that each string is encoded with an
+integral number of symbols in C and thus decompression is fast.
+
+Locating is done via binary search, where each dictionary string to compare
+must be decompressed ﬁrst. We decompress the string only up to the point
+where the lexicographical comparison can be decided. For extraction we simply
+decompress the desired string.
+For both operations we need direct access to the ﬁrst symbol of the ith string
+in C. Each compressed string can be seen as a variable-length sequence of symbols
+in C, where they are concatenated. Thus we use the DAC representation on those
+sequences. This gives fast direct access to the ith string, at the price of 1.25 bits
+per symbol: we use RG representation with 25% overhead.
+
+3.5 XBW Trie Representation
+If the trie has N nodes, the XBW consists of a sequence Sα[1, N + n] of labels
+(each leaf is identiﬁed with a label $ leading to it) plus a bitmap Slast[1, N + n]
+with n bits set. We represent Sα using wavelet trees and, as for the FM-Index,
+represent their bitmaps (and Slast) using RG or RRR.
+
+For locating, we use operation GetChildren [15] to ﬁnd the leaf. Then we map
+the leaf x to an identiﬁer in the range [1, n] with rank$(S, x). For extracting, we
+start from the leaf and use GetParent [15] to obtain all the string characters.
+
+144
+
+N.R. Brisaboa et al.
+
+4 Experimental Results
+
+We consider four dictionaries that are representative of relevant applications:
+
+Words comprises all the diﬀerent words with at least 3 ocurrences in the
+
+ClueWeb09 dataset It contains 25,609,784 words and occupies 256.36 MB.
+
+DNA all substrings of 12 nucleotides found in S. Paradoxus, known as the
+para dataset3. It contains 9,202,863 subsequences and occupies 114.09 MB.
+URLs corresponds to a 2002 crawl of the .uk domain from the WebGraph
+
+framework. It contains 18,520,486 URLs and occupies 1.34 GB.
+
+URIs contains all diﬀerent URIs used in the DBpedia-en RDF dataset (blank
+nodes and literals excluded). It contains 30,176,012 URIs and takes 1.52 GB.
+
+We use an Intel Core2 Duo processor at 3.16 GHz, with 8 GB of main memory
+and 6 MB of cache, running Linux kernel 2:6:24-28. We ran locate experiments for
+successful and unsuccessful searches. For the former we chose 10,000 dictionary
+strings at random. For the latter we chose other 1,000 strings at random and
+excluded them from the indexing. For extract we queried 10,000 random numbers
+between 1 and n. Each data point is the average user time over 10 repetitions.
+Figure 1 shows our results. Most methods are drawn as a line that corresponds
+to their main space/time tuning parameter. On the left we show locate time
+for successful searches; the plots for unsuccessful searches are very similar and
+omitted for lack of space. On the right we show extraction times. Time is shown
+in microseconds and space as a percentage of the space required by concatenating
+the plain strings. Since, despite the advantages of linear probing in this scenario,
+double hashing was always better, we only plot the latter.
+
+Front-Coding with Hu-Tucker compression shows to be an excellent choice
+in all cases, achieving good time performance and the least space usage (only
+beaten by XBW and, on URLs, by Re-Pair). The folklore Front-Coding, without
+compression, is almost everywhere dominated by the compressed variant.
+
+The least space is always achieved by XBW+RRR, yet the time it achieves is
+signiﬁcantly higher than the other approaches. The next best space, on URLs, is
+achieved by Re-Pair, which is much faster than XBW but still noticeably slower
+than compressed Front-Coding. On the shorter-string dictionaries (Words and
+DNA), Re-Pair does not compress well and compressed Front-Coding achieves
+the second-best space (with much better time than XBW variants).
+
+HashBB performs better in space than HashB when the strings are short,
+otherwise the bitmap becomes too long. It is never, however, clearly the best
+alternative. HashB and Hash excell in time with short strings when much space
+is used (nearly 100%), yet HashB is never much better than Hash.
+
+For extracting, the map is dominated by Front-Coding, in plain or compressed
+form (the plain folklore variant is more relevant in this case). Still Re-Pair
+achieves less space on URLs, and XBW always requires the minimum space
+but the highest times.
+
+3
+
+http://www.sanger.ac.uk/Teams/Team71/durbin/sgrp
+
+Compressed String Dictionaries
+
+145
+
+Words
+
+Words
+
+ 100
+
+XBW+RRR
+
+)
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+e
+m
+
+i
+t
+ 
+
+e
+
+t
+
+a
+c
+o
+
+l
+
+XBW+RG
+
+FMIndex RRR
+
+Hu-Tucker
+
+ 10
+
+FMIndex RG
+
+FrontCoding
+
+RePair
+
+ 100
+
+XBW+RRR
+
+XBW+RG
+
+FMIndex RRR
+
+ 10
+
+Hu-Tucker
+
+FMIndex RG
+
+)
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+e
+m
+
+i
+t
+ 
+t
+c
+a
+r
+t
+x
+e
+
+ 1
+
+FrontCoding
+
+RePair
+
+HashBB (dh)
+
+Hash (dh)
+
+HashB (dh)
+
+HashBB (dh)
+
+HashB (dh)
+
+Hash (dh)
+
+ 1
+
+ 0
+
+ 50
+
+ 100
+
+ 150
+
+ 200
+
+ 0.1
+
+ 0
+
+ 50
+
+ 100
+
+ 150
+
+ 200
+
+total space (% of original)
+
+DNA
+
+total space (% of original)
+
+DNA
+
+ 100
+
+XBW+RRR
+
+XBW+RG
+
+FMIndex RRR
+
+ 10
+
+FMIndex RG
+
+FrontCoding
+
+HashBB (dh)
+
+ 1
+
+Hu-Tucker
+
+RePair
+
+Hash (dh)
+
+HashB (dh)
+
+)
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+e
+m
+
+i
+t
+ 
+t
+c
+a
+r
+t
+x
+e
+
+Hash (dh)
+
+ 120
+
+ 140
+
+ 160
+
+ 20
+
+ 40
+
+ 0.1
+
+ 0
+
+ 1000
+
+ 60
+total space (% of original)
+
+ 80
+
+ 100
+
+URLs
+
+ 120
+
+ 140
+
+ 160
+
+FMIndex RG
+
+ 100
+
+Hu-Tucker
+
+FMIndex RG
+
+XBW+RRR
+
+XBW+RG
+
+FMIndex RRR
+
+ 100
+
+Hu-Tucker
+
+XBW+RRR
+
+XBW+RG
+
+)
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+e
+m
+
+i
+t
+ 
+
+e
+
+t
+
+a
+c
+o
+
+l
+
+ 10
+
+FMIndex RRR
+
+FMIndex RG
+
+RePair
+
+FrontCoding
+
+HashBB (dh)
+
+HashB (dh)
+
+ 20
+
+ 40
+
+ 60
+
+ 80
+
+ 100
+total space (% of original)
+
+URLs
+
+XBW+RRR
+
+Hu-Tucker
+
+XBW+RG
+
+FMIndex RRR
+
+FrontCoding
+
+RePair
+
+ 1
+
+ 0
+
+ 1000
+
+)
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+e
+m
+
+i
+t
+ 
+
+e
+
+t
+
+a
+c
+o
+
+l
+
+ 100
+
+ 10
+
+HashBB (dh)
+
+HashB (dh)
+
+Hash (dh)
+
+ 0
+
+ 20
+
+ 40
+
+ 60
+
+ 80
+
+ 100
+
+total space (% of original)
+
+URIs
+
+XBW+RRR
+
+Hu-Tucker
+
+XBW+RG
+
+FMIndex RRR
+
+FMIndex RG
+
+RePair
+
+FrontCoding
+
+HashBB (dh)
+
+HashB (dh)
+
+Hash (dh)
+
+)
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+e
+m
+
+i
+t
+ 
+
+e
+
+t
+
+a
+c
+o
+
+l
+
+ 100
+
+ 10
+
+)
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+e
+m
+
+i
+t
+ 
+t
+c
+a
+r
+t
+x
+e
+
+RePair
+
+ 10
+
+ 1
+
+ 0.1
+
+ 0
+
+FrontCoding
+
+Hash (dh)
+
+HashB (dh)
+
+HashBB (dh)
+
+ 20
+
+ 40
+
+ 60
+
+ 80
+
+ 100
+
+total space (% of original)
+
+URIs
+
+ 1000
+
+ 100
+
+ 10
+
+ 1
+
+)
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+t
+c
+a
+r
+t
+x
+e
+
+XBW+RRR
+
+XBW+RG
+
+FMIndex RRR
+
+Hu-Tucker
+
+FrontCoding
+
+FMIndex RG
+
+RePair
+
+HashB (dh)
+
+HashBB (dh)
+
+Hash (dh)
+
+ 0
+
+ 20
+
+ 40
+
+ 60
+
+ 80
+
+ 100
+
+total space (% of original)
+
+ 0.1
+
+ 0
+
+ 20
+
+ 40
+
+ 60
+
+ 80
+
+ 100
+
+total space (% of original)
+
+Fig. 1. Locate times (left) and extract times (right) for the diﬀerent methods as a
+function of their space consumption
+
+146
+
+N.R. Brisaboa et al.
+
+5 Final Remarks
+
+Preﬁx search, that is, ﬁnding the dictionary strings that start with a given pattern,
+ is easily supported by the methods we have explored, except hashing. Other
+variants that can likewise be supported are of interest for Internet routing tables,
+e.g., ﬁnd the dictionary string that is the longest preﬁx of the pattern.
+
+Despite the FM-index and the XBW being the slowest solutions, they support
+other searches of interest, such as ﬁnding the dictionary strings that contain a
+substring, or that have a given preﬁx and a given suﬃx [14,15]. They also support
+approximate searches [30].
+
+We have reordered the strings at our convenience, but sometimes the order 
+must be ﬁxed. Hashing is easily adapted to any order (except the variant
+HashBB), but others would need an explicit permutation that would signiﬁcantly
+increase the space. The FM-index and the XBW can use the LF-step mechanism
+to trade space for time and store just a sample permutation.
+
+References
+
+1. Apostolico, A., Drovandi, G.: Graph compression by BFS. Algorithms 2, 1031–1044
+
+(2009)
+
+2. Baeza-Yates, R., Ribeiro-Neto, B.: Modern Information Retrieval. Addison Wesley,
+
+Reading (1999)
+
+3. Boldi, P., Vigna, S.: The Webgraph framework i: Compression techniques. In: Proc.
+
+WWW, pp. 595–602 (2004)
+
+4. Brisaboa, N., Ladra, S., Navarro, G.: Directly addressable variable-length codes.
+In: Karlgren, J., Tarhio, J., Hyyr¨o, H. (eds.) SPIRE 2009. LNCS, vol. 5721, pp.
+122–130. Springer, Heidelberg (2009)
+
+5. Broder, A., Kumar, R., Maghoul, F., Raghavan, P., Rajagopalan, S., Stata, R.,
+Tomkins, A., Wiener, J.: Graph structure in the Web. Comput. Netw. 33, 309–320
+(2000)
+
+6. Burrows, M., Wheeler, D.: A block-sorting lossless data compression algorithm.
+
+Technical report, Digital Equipment Corporation (1994)
+
+7. Charikar, M., Lehman, E., Liu, D., Panigrahy, R., Prabhakaran, M., Sahai, A.,
+Shelat, A.: The smallest grammar problem. IEEE Trans. Inf. Theory 51(7), 2554–
+2576 (2005)
+
+8. Cormen, T.H., Leiserson, C.E., Rivest, R.L., Stein, C.: Introduction to Algorithms,
+
+2nd edn. MIT Press and McGraw-Hill (2001)
+
+9. Donato, D., Laura, L., Leonardi, S., Meyer, U., Millozzi, S., Sibeyn, J.: Algorithms
+
+and experiments for the Webgraph. J. Graph Algor. App. 10(2), 219–236 (2006)
+
+10. Fern´andez, J.D., Mart´ınez-Prieto, M.A., Gutierrez, C.: Compact representation of
+large RDF data sets for publishing and exchange. In: Patel-Schneider, P.F., Pan,
+Y., Hitzler, P., Mika, P., Zhang, L., Pan, J.Z., Horrocks, I., Glimm, B. (eds.) ISWC
+2010, Part I. LNCS, vol. 6496, pp. 193–208. Springer, Heidelberg (2010)
+
+11. Ferragina, P., Gonz´alez, R., Navarro, G., Venturini, R.: Compressed text indexes:
+
+From theory to practice. ACM JEA 13, article 12 (2009)
+
+12. Ferragina, P., Manzini, G.: Opportunistic data structures with applications. In:
+
+Proc. FOCS, pp. 390–398 (2000)
+
+Compressed String Dictionaries
+
+147
+
+13. Ferragina, P., Manzini, G., M¨akinen, V., Navarro, G.: Compressed representations
+
+of sequences and full-text indexes. ACM Trans. Alg. 3(2), article 20 (2007)
+
+14. Ferragina, P., Venturini, R.: The compressed permuterm index. ACM Trans. Alg.
+
+7(1), article 10 (2010)
+
+15. Ferragina, P., Luccio, F., Manzini, G., Muthukrishnan, S.: Structuring labeled trees
+
+for optimal succinctness, and beyond. In: Proc. FOCS, pp. 184–196 (2005)
+
+16. Gonz´alez, R., Grabowski, S., M¨akinen, V., Navarro, G.: Practical implementation
+
+of rank and select queries. Posters WEA, pp. 27–38 (2005)
+
+17. Grossi, R., Gupta, A., Vitter, J.: High-order entropy-compressed text indexes. In:
+
+Proc. SODA, pp. 841–850 (2003)
+
+18. Gusﬁeld, D.: Algorithms on Strings, Trees, and Sequences: Computer Science and
+
+Computational Biology. Cambridge Univ. Press, Cambridge (2007)
+
+19. Heaps, H.S.: Information Retrieval: Computational and Theoretical Aspects. Academic 
+Press, London (1978)
+
+20. Huﬀman, D.A.: A method for the construction of minimum-redundancy codes.
+
+Proc. of the Institute of Radio Engineers 40(9), 1098–1101 (1952)
+
+21. Kleinberg, J., Kumar, R., Raghavan, P., Rajagopalan, S., Tomkins, A.: The Web
+as a graph: Measurements, models, and methods. In: Asano, T., Imai, H., Lee,
+D.T., Nakano, S.-i., Tokuyama, T. (eds.) COCOON 1999. LNCS, vol. 1627, pp.
+1–17. Springer, Heidelberg (1999)
+
+22. Knuth, D.E.: The Art of Computer Programming, volume 3: Sorting and Searching.
+
+Addison Wesley, Reading (2007)
+
+23. Larsson, N.J., Moﬀat, J.A.: Oﬄine dictionary-based compression. Proc. of the
+
+IEEE 88, 1722–1732 (2000)
+
+24. M¨akinen, V., Navarro, G.: Implicit compression boosting with applications to selfindexing.
+ In: Ziviani, N., Baeza-Yates, R. (eds.) SPIRE 2007. LNCS, vol. 4726, pp.
+229–241. Springer, Heidelberg (2007)
+
+25. Manning, C.D., Sch¨utze, H.: Foundations of Statistical Natural Language Processing.
+ MIT Press, Cambridge (1999)
+
+26. Moﬀat, A., Katajainen, J.: In-place calculation of minimum-redundancy codes. In:
+Sack, J.-R., Akl, S.G., Dehne, F., Santoro, N. (eds.) WADS 1995. LNCS, vol. 955,
+pp. 393–402. Springer, Heidelberg (1995)
+
+27. Nagwani, N.: Clustering based URL normalization technique for Web mining. In:
+
+Proc. ACE, pp. 349–351 (2010)
+
+28. Navarro, G., M¨akinen, V.: Compressed full-text indexes. ACM Comp. Surv. 39(1),
+
+article 2 (2007)
+
+29. Raman, R., Raman, V., Rao, S.: Succinct indexable dictionaries with applications
+
+to encoding k-ary trees and multisets. In: Proc. SODA, pp. 233–242 (2002)
+
+30. Russo, L., Navarro, G., Oliveira, A., Morales, P.: Approximate string matching
+
+with compressed indexes. Algorithms 2(3), 1105–1136 (2009)
+
+31. Suel, T., Yuan, J.: Compressing the graph structure of the Web. In: Proc. DCC,
+
+pp. 213–222 (2001)
+
+32. Williams, H., Zobel, J.: Compressing integers for fast ﬁle access. The Computer
+
+Journal 42, 193–201 (1999)
+
+33. Witten, I.H., Moﬀat, A., Bell, T.C.: Managing Gigabytes: Compressing and Indexing 
+Documents and Images. Morgan Kaufmann, San Francisco (1999)
+
+34. Yin, M., Goh, D., Lim, E.-P., Sun, A.: Discovery of concept entities from Web sites
+
+using web unit mining. Intl. J. of Web Inf. Sys. 1(3), 123–135 (2005)
+
+

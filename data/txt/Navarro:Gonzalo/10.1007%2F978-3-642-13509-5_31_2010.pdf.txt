@@ -1,0 +1,995 @@
+Parallel and Distributed Compressed Indexes(cid:2)
+
+Lu´ıs M.S. Russo1, Gonzalo Navarro2, and Arlindo L. Oliveira3
+
+1 CITI, Departamento de Inform´atica, Faculdade de Ciˆencias e Tecnologia, FCT,
+
+Universidade Nova de Lisboa, 2829-516 Caparica, Portugal
+
+2 Dept. of Computer Science, University of Chile
+
+lsr@di.fct.unl.pt
+
+3 INESC-ID, R. Alves Redol 9, 1000 Lisboa, Portugal
+
+gnavarro@dcc.uchile.cl
+
+aml@algos.inesc-id.pt
+
+Abstract. We study parallel and distributed compressed indexes. Compressed 
+indexes are a new and functional way to index text strings. They
+exploit the compressibility of the text, so that their size is a function of
+the compressed text size. Moreover, they support a considerable amount
+of functions, more than many classical indexes. We make use of this
+extended functionality to obtain, in a shared-memory parallel machine,
+near-optimal speedups for solving several stringology problems. We also
+show how to distribute compressed indexes across several machines.
+
+1 Introduction and Related Work
+
+Suﬃx trees are extremely important for a large number of string processing problems,
+ in particular in bioinformatics, where large DNA and protein sequences are
+analyzed. This partnership has produced several important results, but it has
+also exposed the main shortcoming of suﬃx trees. Their large space requirements,
+plus their need to operate in main memory to be useful in practice, renders them
+inapplicable in the cases where they would be most useful, that is, on large texts.
+The space problem is so important that it has originated a plethora of research,
+ ranging from space-engineered suﬃx tree implementations [1] to novel
+data structures to simulate them, most notably suﬃx arrays [2]. Some of those
+space-reduced variants give away some functionality. For example suﬃx arrays
+miss the important suﬃx link navigational operation. Yet, all these classical approaches 
+require O(n log n) bits, while the indexed string requires only n log σ
+bits1, being n the size of the string and σ the size of the alphabet. For example the
+human genome can be represented in 700 Megabytes, while even a space-eﬃcient
+suﬃx tree on it requires at least 40 Gigabytes [3], and the reduced-functionality
+suﬃx array requires more than 10 Gigabytes. This problem is particularly evident 
+in DNA because log σ = 2 is much smaller than log n.
+
+(cid:2) Funded in part by Millennium Institute for Cell Dynamics and Biotechnology
+(ICDB), Grant ICM P05-001-F, Mideplan, and Fondecyt grant 1-080019, Chile (second 
+author).
+
+1 In this paper log stands for log2.
+
+A. Amir and L. Parida (Eds.): CPM 2010, LNCS 6129, pp. 348–360, 2010.
+c(cid:2) Springer-Verlag Berlin Heidelberg 2010
+
+Parallel and Distributed Compressed Indexes
+
+349
+
+These representations are also much larger than the size of the compressed
+string. Recent approaches [4] combining data compression and succinct data
+structures have achieved spectacular results on what we will call generically
+compressed suﬃx arrays (CSAs). These require space close to that of the compressed 
+string and support eﬃcient indexed searches. For example the most
+compact member of the so-called FM-Index family [5], which we will simply call
+FMI, is a CSA that requires nHk + o(n log σ) bits of space and counts the number 
+of occurrences of a pattern of length m in time O(m(1 + log σ
+log log n)). Here nHk
+denotes the k-th order empirical entropy of the string [6], a lower bound on the
+space achieved by any compressor using k-th order modeling. Within that space
+the FMI represents the text as well, which can thus be dropped.
+
+It turns out that it is possible to add a few extra structures to CSAs and
+support all the operations provided by suﬃx trees. Sadakane was the ﬁrst to
+present such a compressed suﬃx tree (CST) [3], adding 6n bits to the size of
+the CSA. This Θ(n) extra-bits space barrier was recently broken by the socalled 
+fully-compressed suﬃx tree (FCST) [7] and by another entropy-bounded
+CST [8]. The former is particularly interesting as it achieves nHk + o(n log σ)
+bits of space, asymptotically the same as the FMI, its underlying CSA.
+
+Distributing CSAs have been studied, yet focusing only on pattern matching.
+For example, M¨akinen et al. [9] achieved optimal speedup in the amortized sense,
+that is, when many queries arrive in batch.
+
+In this paper we study parallel and distributed algorithms for several stringology
+problems (with well-known applications to bioinformatics) based on compressed
+suﬃx arrays and trees. This is not just applying known parallel algorithms to compressed 
+representations, as the latter have usually richer functionality than classical 
+ones, and thus oﬀer unique opportunities for parallelization and distributed
+representations. In Section 4we present parallel shared-memory algorithms to solve
+problems like pattern matching, computing matching statistics, longest common
+substrings, and maximal repeats. We obtain near-optimal speedups, by using sophisticated 
+operations supported by these compressed indexes, such as generalized
+branching. Optimal speedups for some of those problems (and for others, like allpairs 
+suﬃx-preﬁx matching) have been obtained on classical suﬃx trees as well [10].
+Here we show that one can obtain similar results on those problems and others, over
+a compressed representation that handles much larger texts in main memory. In
+Section 5 we further mitigate the space problem by introducing distributed compressed 
+indexes. We show how CSAs and CSTs can be split across q machines, at
+some price in extra space and reasonable slowdown. The practical eﬀect is that a
+much larger main memory is available, and compression helps reducing the number
+of machines across which the index needs to be distributed.
+
+2 Basic Concepts
+
+Fig. 1 illustrates the concepts in this section. We denote by T a string; by Σ the
+alphabet of size σ; by T [i] the symbol at position (i mod n) (so the ﬁrst symbol
+of T is T [0]); by T.T (cid:3) the concatenation; by T = T [..i − 1].T [i..j].T [j + 1..]
+respectively a preﬁx, a subtring, and a suﬃx of T .
+
+350
+
+L.M.S. Russo, G. Navarro, and A.L. Oliveira
+
+The path-label of a node v, in a tree with edges labeled with strings over
+Σ, is the concatenation of the edge-labels from the root down to v. We refer
+indiﬀerently to nodes and to their path-labels, also denoted by v. A point in T
+corresponds to any substring of T ; this can be a node in T or a position within
+an edge label. The i-th letter of the path-label is denoted as Letter(v, i) = v[i].
+The string-depth of a node v, denoted SDep(v), is the length of its path-label,
+whereas the tree depth in number of edges is denoted TDep(v). SLAQ(v, d) is
+the highest ancestor of node v with SDep ≥ d, and TLAQ(v, d) is its ancestor
+of tree depth d. Parent(v) is the parent node of v, whereas Child(v, X) is
+the node that results of descending from v by the edge whose label starts with
+symbol X, if it exists. FChild(v) is the ﬁrst child of v, and NSib(v) the next
+child of the same parent. Ancestor(v, v(cid:3)) tells whether v is an ancestor of v(cid:3),
+and LCA(v, v(cid:3)) is the lowest common ancestor of v and v(cid:3).
+
+The suﬃx tree of T is the deterministic compact labeled tree for which the
+path-labels of the leaves are the suﬃxes of T $, where $ is a terminator symbol
+not belonging to Σ. We will assume n is the length of T $. The generalized
+suﬃx tree of T and T (cid:3) is the suﬃx tree of T $T (cid:3)# where # is a new terminator 
+symbol. For a detailed explanation see Gusﬁeld’s book [11]. The suﬃx-link
+of a node v (cid:3)= Root of a suﬃx tree, denoted SLink(v), is a pointer to node
+v[1..]. Note that SDep(v) of a leaf v identiﬁes the suﬃx of T $ starting at position 
+n − SDep(v) = Locate(v). For example T [Locate(ab$)..] = T [7 − 3..] =
+T [4..] = ab$. The suﬃx array A[0, n−1] stores the Locate values of the leaves
+in lexicographical order. The suﬃx tree nodes can be identiﬁed with suﬃx array
+intervals: each node corresponds to the range of leaves that descend from v.
+The node b corresponds to the interval [3, 6]. Hence the node v will be represented 
+by the interval [vl, vr]. Leaves are also represented by their left-to-right
+index (starting at 0). For example by vl − 1 we refer to the leaf immediately
+before vl, i.e. [vl − 1, vl − 1]. With this representation we can Count in constant
+time the number of leaves that descend from v. The number of leaves below b
+is 4 = 6 − 3 + 1. This is precisely the number of times that the string b occurs 
+in the indexed string T . We can also compute Ancestor in O(1) time:
+Ancestor(v, v(cid:3)) ⇔ vl ≤ v(cid:3)
+r ≤ vr. Operation Ranka(T, i) over a string
+T counts the number of times that the letter a occurs in T up to position i.
+Likewise, Selecta(T, i) gives the position of the i-th occurence of a in T .
+
+l ≤ v(cid:3)
+
+2.1 Parallel Computation Models
+
+The parallel algorithms in this paper are studied under the Parallel Random
+Access Model (PRAM), which considers a set of independent sequential RAM
+processors, which have a private (or local) memory and a global shared memory.
+We assume that the RAMs can execute arithmetic and bitwise operations in
+constant time. We use the CREW model, where several processors can read the
+same shared memory cell simultaneously, but not write it. We call p the number
+of processors, and study the time used by the slowest processor.
+
+For uniformity, distributed processing is studied by dividing the processors
+into q sites, which have a (fast) local memory and communicate using a (slow)
+
+Parallel and Distributed Compressed Indexes
+
+351
+
+a
+b
+
+b
+
+a
+b
+
+b
+
+b
+b
+
+a
+b
+$
+
+$
+
+0
+
+#
+
+1
+
+$
+
+2
+
+b
+
+b
+
+b
+#
+
+4
+
+3
+
+$
+
+5
+
+#
+
+6
+
+a
+b
+$
+
+#
+
+8
+
+7
+
+a
+b
+$
+
+#
+01
+
+9
+
+a
+b
+$
+11
+
+b
+#
+
+1
+2
+
+$
+
+0
+6
+
+$
+
+1
+4
+
+A:
+
+b
+
+b
+a
+b
+$
+
+2
+0
+
+b
+
+a
+b
+$
+
+5
+2
+
+b
+a
+b
+$
+
+6
+1
+
+a
+b
+$
+
+4
+3
+
+$
+
+3
+5
+
+Fig. 1. Suﬃx tree T of string abbbab (right), with the leaves numbered. The arrow shows
+the SLink between node ab and b. Below it we show the suﬃx array. The portion of
+the tree corresponding to node b and respective leaves interval is highlighted with a
+dashed rectangle. The sampled nodes have bold outlines. We also show the generalized
+suﬃx tree for abbbab and abbbb (left), using the $ and # terminators respectively.
+
+((0)(1)((2)((3)(4)))((5)(6)(7)((8)(9)(10)(11)(12))))
+
+( 0
+B : 1 0
+B0: 1 0
+B1: 1
+
+1 ( 2 ( 3 (4))) (5)(6)(7)( 8
+0 1 0 1 0 10111 1011011011 0
+
+1 0 1 0 1 111 1011 11011
+
+0 1
+
+1
+
+10111 1 11011 11 0
+
+9 10
+0
+0
+0
+
+0
+
+11
+0
+0
+
+12 ) )
+0 1 1
+1 1
+0 1 1
+
+Fig. 2. A parentheses representation of the generalized suﬃx tree in Fig. 1 (left),
+followed by the parentheses representation of the respective sampled tree SC. We also
+show B bitmap for the LSA operation of the sequential FCST and the Bi bitmaps for
+the LSAi operations of the distributed FCST.
+
+shared memory. The number of accesses to this slower memory are accounted
+for separately, and they can be identiﬁed with the amount of communication
+carried out on shared-nothing distributed models. We measure the local and
+total memory space required by the algorithms.
+
+3 Overview of Sequential Fully-Compressed Suﬃx Trees
+
+In this section we brieﬂy explain the local FCST [7]. It consists of a compressed
+suﬃx array, a sampled tree S, and mappings between these structures.
+
+Compressed suﬃx arrays (CSAs) are compact and functional representations 
+of suﬃx arrays [4]. Apart from the basic functionality of retrieving
+A[i] = Locate(i) (within a time complexity that we will call Φ), state-of-the-art
+CSAs support operation SLink(v) for leaves v. This is called ψ(v) in the litera-
+ture: A[ψ(v)] = A[v]+1, and thus SLink(v) = ψ(v), let its time complexity be Ψ.
+The iterated version of ψ, denoted ψi, can usually be computed faster than O(iΨ)
+with CSAs, since ψi(v) = A−1[A[v] + i]. We assume the CSA also computes A−1
+within O(Φ) time. CSAs might also support operation WeinerLink(v, X) [12],
+
+352
+
+L.M.S. Russo, G. Navarro, and A.L. Oliveira
+
+which for a node v gives the suﬃx tree node with path-label X.v[0..]. This is
+called the LF mapping in CSAs, and is a kind of inverse of ψ. Let its time complexity 
+be O(τ). We extend LF to strings, LF(X.Y, v) = LF(X, LF(Y, v)). For
+example, consider the interval [3, 6] that represents the leaves whose path-labels
+start by b. In this case we have that LF(a, [3, 6]) = [1, 2], i.e. by using the LF
+mapping with a we obtain the interval of leaves whose path-labels start by ab.
+CSAs also implement Letter(v, i) for leaves v. Letter(v, 0) = T [A[v]] is
+v[0], the ﬁrst letter of the path-label of leaf v. CSAs implement v[0] in O(1)
+time, and Letter(v, i) = Letter(SLinki(v), 0) in O(Φ) time. CSAs are usually
+self-indexes, meaning that they replace the text: they can extract any substring
+T [i..i+(cid:9)−1] in time O(Φ+(cid:9)Ψ) time, since T [i..i+(cid:9)−1] = Letter(A−1[i], 0..(cid:9)−1).
+We will use a CSA called the FMI [5], which requires nHk + o(n log σ) bits,
+for any k ≤ α logσ n and constant 0 < α < 1. It achieves Ψ = τ = O(1 + log σ
+log log n)
+and Φ = O(log n log log n).2 The instantiation in Table 1 refers to the FMI.
+
+The δ-sampled tree exploits the property that suﬃx trees are self-similar,
+SLink(LCA(v, v(cid:3))) = LCA(SLink(v), SLink(v(cid:3))). A δ-sampled tree S, from a
+suﬃx tree T of Θ(n) nodes, chooses O(n/δ) nodes such that, for each node v,
+node SLinki(v) is sampled for some i < δ. Such a sampling can be obtained
+by choosing nodes with SDep(v) = 0 (mod δ/2) such that there is another
+node v(cid:3) for which v = SLinkδ/2(v(cid:3)). Then the following equation holds, where
+LCSA(v, v(cid:3)) is the lowest common sampled ancestor of v and v(cid:3):
+
+SDep(LCA(v, v(cid:3)
+
+)) = max
+0≤i<δ
+
+{i + SDep(LCSA(SLinki(v), SLinki(v(cid:3)
+
+)))}
+
+(1)
+
+From this relation the kernel operations are computed as follows. The i in LCA
+is the one that maximizes the computation in Eq. (1).
+•SDep(v) = SDep(LCA(v, v)) = max0≤i<d{i + SDep(LCSA(ψi(vl), ψi(vr)))},
+•LCA(v, v(cid:3)) = LF(v[0..i − 1], LCSA(ψi(min{vl, v(cid:3)
+•SLink(v) = LCA(ψ(vl), ψ(vr)).
+
+l}), ψi(max{vr, v(cid:3)
+
+r}))),
+
+These operations plus Parent(v), which is easily computed on top of LCA,
+take time O((Ψ + t)δ). The exception is SDep, which takes O(Ψ δ).
+
+Note that we have to solve LCSA. This requires mapping nodes to their lowest
+sampled ancestors in S, an operation called LSA we explain next. In addition,
+each sampled node v must store its [vl, vr] interval, its ParentS and TDepT ,
+and also compute LCAS queries in constant time. All this takes O((n/δ) log n)
+bits. The rest is handled by the CSA.
+
+Computing lowest sampled ancestors. Given a CSA interval [vl, vr] representing 
+node v of T , the lowest sampled ancestor LSA(v) gives the lowest
+sampled tree node containing v. With LSA we can compute LCSA(v, v(cid:3)) =
+LCAS(LSA(v), LSA(v(cid:3))).
+2 ψ(i) can be computed as selectT [A[i]](T bwt, T [A[i]]) using the wavelet tree [13]. The
+
+cost for Φ assumes a sampling step of log n log log n, which adds o(n) extra bits.
+
+Parallel and Distributed Compressed Indexes
+
+353
+
+Table 1. Comparing local and distributed FCST representations. The operations are
+deﬁned in Section 2. Time complexities, but not space, are big-O expressions. The
+dominant terms in the distributed times count slow-memory accesses. We give the
+generalized performance and an instantiation using δ = log n log log n, assuming σ =
+O(polylog(n)), and using the FMI [5] as the CSA.
+
+Space in bits
+
+Local
+|CSA| + O((n/δ) log n)
+
+= nHk + o(n log σ)
+
+Distributed
+|CSA|+O((n/δ) log n+n log(1+q/δ))
+= nHk + o(n log σ) + O(n log q)
+
+SDep
+
+Ψ δ
+
+= log n log log n (log q + Ψ + τ )δ
+
+1
+1
+(Ψ + τ )δ = log n log log n (log q + Ψ + τ )δ
+
+= 1 log q
+= 1 1
+
+= log q log n log log n
+= log q
+= 1
+
+= log q log n log log n
+
+Φ + (Ψ + τ )δ
+
+Φ + (log q + Ψ + τ )δ
+
+Count
+Ancestor
+Parent/ FChild/
+NSib/ SLink/ LCA
+SLinki
+
+Letter(v, i)
+Child
+
+TDep
+
+TLAQ
+
+SLAQ
+
+= log n log log n
+= log n log log n Φ
+
+Φ
+Φ log δ+(Ψ +τ )δ+log(n/δ)
+= log n(log log n)2
+
+Φ log δ + (Ψ + τ )δ + log(n/δ)
+
+= log q log n log log n
+= log n log log n
+
+= log n(log log n)2
+
+(Ψ + τ )δ2
+
+(log q + Ψ + τ )δ2
+
+= (log n log log n)2
+
+= log q (log n log log n)2
+
+log n + (Ψ + τ )δ2
+
+log n + (log q + Ψ + τ )δ2
+
+= (log n log log n)2
+
+= log q (log n log log n)2
+
+log n + (Ψ + τ )δ
+
+log n + (log q + Ψ + τ )δ
+
+WeinerLink
+
+τ
+
+= log n log log n
+
+= 1 τ
+
+= log q log n log log n
+= 1
+
+The key component for these operations is a bitmap B that is obtained by
+writing a 1 whenever we ﬁnd a ’(’ or a ’)’ in the parentheses representation of the
+sampled tree S and 0 whenever we ﬁnd a leaf of T , see Fig. 2. Then the LSA is
+computed via Rank/Select on B. As B contains m = O(n/δ) ones and n zeros,
+it can be stored in m log(n/m)+ O(m+ n log log n/ log n) = O((n/δ) log δ)+ o(n)
+bits [14]. We now present a summary of the FCST representation.
+
+Theorem 1. Using a compressed suﬃx array (CSA) that supports ψ, ψi, T [A[v]]
+and LF in times O(Ψ), O(Φ), O(1), and O(τ), respectively, it is possible to represent 
+a suﬃx tree with the properties given in Table 1 (column “local”).
+
+4 Parallel Compressed Indexes
+
+In this section we study the situation where the index resides in main memory
+and we want to speed up its main search operations. We start by studying exact
+matching, matching statistics and longest common substrings over CSAs and
+FCSTs, and ﬁnish with maximal repeats (only over FCSTs).
+
+354
+
+L.M.S. Russo, G. Navarro, and A.L. Oliveira
+
+The CSA’s basic operations, such as ψ, LF , A[i] and A−1[i], seem to be intrinsically 
+sequential. However using generalized branching we can speed up several
+algorithms. The generalized branching Child(v1, v2), for suﬃx tree points v1 and
+v2, is the point with path label v1.v2 if it exists. This operation was ﬁrst considered 
+by Huynh et al. [15], who achieved O(Φ log n) time over a CSA. Russo et
+al. [16] achieved O((Ψ + τ)δ + Φ log δ + log(n/δ)) time on the FCST. The procedure 
+binary searches the interval of v1 for the subinterval where ψSDep(v1) ∈ v2.
+With the information stored at sampled nodes, only an interval of size δ is binary
+searched this way; the other O(log(n/δ)) steps require constant-time accesses.
+These binary searches can be accelerated using p processors. Instead of dividing 
+the interval into two pieces we divide it into p and assign each comparison to a
+diﬀerent processor. The time complexity becomes Π(p) = O((Ψ +τ)δ+Φ logp δ+
+logp(n/δ)). The CSA-based algorithm also improves to Π(p) = O(Φ logp n).
+Pattern matching. Assume we want to search for a pattern P of size m. We
+divide P into p parts and assign one to each processor. Each piece is searched
+for, like in the FMI, with the LF operation. This requires O(mτ /p) time. We
+then join the respective intervals with a binary tree of generalized Child operations.
+ Assume for simplicity that m/p is a power of 2. We show a ﬂow-graph
+of this procedure in Fig. 3. We ﬁrst concatenate the p/2 pairs of leaves, using 
+2 processors for the generalized branching operation, using time Π(2). We
+then concatenate the p/4 pairs of nodes of height 1, using 4 processors for the
+generalized branching, using time Π(4). We continue until merging the two
+halves of P using p processors. The overall time of the hierarchical concatenation 
+process is O((Ψ + τ)δ log p + (Φ log δ + log(n/δ)) log log p) on the FCST
+and O(Φ log n log log p) on the bare FMI. Using the same instantiation as in
+Table 1 this result becomes O(m/p + log n log log n(log p + log log n log log p))
+time on the FCST and O(m/p + log2 n log log n log log p) on the FMI, both in
+nHk + o(n log σ) bits of index space. The speedup is linear in p, except for the
+polylogarithmic additive term. On the other hand, there is no point in using
+more than m processors; the optimum is achieved using less than m.
+Matching statistics. The matching statistics m(i) indicate the size of the
+longest preﬁx of P [i..] that is a substring of T . Consider for example the string
+P = abbbbabb, using the running example suﬃx tree T , right of Fig. 1. The
+corresponding matching statistics are 4, 3, 5, 4, 3, 3, 2, 1. To compute these values
+we will again resort to the generalized Child operation. As before the idea is
+to ﬁrst compute a generalized branch tree, which is the tree in the ﬂow-graph
+of Fig. 3. This tree contains the intervals over CSA that correspond to strings
+P [2jk..2j(k +1)−1], where j will indicate the level in the tree and k the position
+in the level. The levels and the positions start at 0. Notice that constructing this
+tree can be done exactly as for pattern matching, except that we do not stop the
+tree at pieces of length m/p but continue up to length 1. Since the subtrees for
+pieces of size m/p must be handled sequentially by one processor, they require
+additional time O(mτ /p + (m/p)Π(2)). Note each node of this branching tree
+stores the suﬃx tree point (or suﬃx array interval plus length) that corresponds
+to its substring, if it exists, and Null otherwise.
+
+Parallel and Distributed Compressed Indexes
+
+355
+
+Null
+
+abbb
+
+Null
+
+ab
+
+bb
+
+ba
+
+bb
+
+a
+
+b
+
+b
+
+b
+
+b
+
+a
+
+b
+
+b
+
+Fig. 3. The ﬂow-graph for parallel exact matching and matching statistics is a tree of
+generalized Child operations for pattern P = abbbbabb and p = 4 processors. Matching
+statistics use all the operations in the tree, whereas exact matching performs only the
+operations above the line and the search below the line is computed with LF operations.
+
+After building the tree we traverse it m times, once for each P [i..]. For each
+such i we ﬁnd m(i) by traversing the tree path that covers P [i..i + m(i) − 1]
+with the maximal nodes. This describes a path that ascends and then descends,
+touching O(log m) nodes of the branching tree. We start at the ith leaf x of
+the branching tree, which corresponds to the letter P [i], with v = P [i] the
+current point of T , and move up to the parent z of x. If x is the right child
+of z, we do nothing more than x ← z. If x is the left child of z, we do a
+generalized Child(v, u) operation, where u is the point of T that is stored in y,
+the right child of z. If the resulting point is not Null we set v to this new point,
+v ← Child(v, u), and continue moving up, x ← z. Otherwise we start moving
+down on y, x ← y. While we are moving down we compute the generalized Child
+operation between v and the point u in the left child y of x. If the resulting point
+is still Null we move to the left child of x, x ← y. Otherwise we set v to this
+new point, v ← Child(v, u), and move to the right child z of x, x ← z. The
+value m(i) is obtained by initializing it at zero and adding 2j to it each time we
+update v at level j of the branching tree.
+
+For example, assume we want to compute m(2), i.e. we want to determine the
+longest preﬁx of bbbabb that is a substring of T . We start on the third leaf of the
+tree in Fig. 3 and set v = b. Then move up. Since we are moving from a left child
+we compute Child(b, b) and obtain v = bb. Again we move up but this time we
+are moving from a right child so we do nothing else. We move up again. Since
+the interval on the right sibling is Null the Child operation also returns Null.
+Therefore we start descending in the right sibling. We now consider the left
+child of that sibling, and compute Child(v, ba) = Child(bb, ba) = bbba. Since
+this node is not Null we set v to it and move to the node labeled bb. Considering
+its left child we compute Child(bbba, b) = bbbab. Since it is not Null we set v to
+it and move to rightmost leaf. Finally we check whether Child(bbbab, b) (cid:3)= Null
+since this is that case we know that we should consider the rightmost leaf as part
+of the common substring. This means that m(2) = 5 = 20 + 20 + 21 + 20 = 7− 2.
+Traversing the tree takes O(Π(2) log m) time per traversal, thus with p processors 
+the time is O((m/p)Π(2) log m). By considering that only p ≤ m processors 
+are useful, we have that the traversal time dominates the branching
+
+356
+
+L.M.S. Russo, G. Navarro, and A.L. Oliveira
+
+tree construction time. Using the instantiation in Table 1 this result becomes
+O((m/p) log m log n(log log n)2) on the FCST and O((m/p) log m log2 n log log n)
+on the FMI. The total space is O(m log m) + nHk + o(n log σ) bits. This time
+the linear speedup is multiplied by a polylogarithmic factor, since the sequential
+algorithm can be made O(m) time.
+
+Longest common substring. We can compute the longest common substring
+between P and T by taking the maximum matching statistic m(i) in additional
+negligible O(m/p + log p) time.
+
+Maximal repeats. For this problem we need a FCST, and cannot simulate it
+with a CSA as before. A maximal repeat in T is a substring S, of size (cid:9), that
+occurs in at least two positions i and i(cid:3), i.e. S = T [i..i + (cid:9)− 1] = T [i(cid:3)..i(cid:3) + (cid:9)− 1],
+and cannot be extended either way, i.e. T [i−1] (cid:3)= T [i(cid:3)−1] and T [i+(cid:9)] (cid:3)= T [i(cid:3)+(cid:9)].
+The solution for this problem consists in identifying the deepest internal nodes v
+of T that are left-diverse, i.e. the nodes for which there exist letters X (cid:3)= Y such
+that X.v and Y.v are substrings of T [11]. Assume v = [vl, vr]. Then FMIs allow
+one to access Letter(vl,−1) = T [vl − 1] in O(τ) time3. Hence node v is leftdiverse 
+iﬀ Count(LF(Letter(vl,−1), v)) (cid:3)= Count(v). This can be veriﬁed in
+O(τ) time, moreover this veriﬁcation can be performed independently for every
+internal node of T . At each step the algorithm chooses p nodes from T and
+performs this veriﬁcation. A simple way to choose all internal nodes (albeit with
+repetitions, which does not aﬀect the asymptotic time of this algorithm) is to
+compute LCA([i, i], [i + 1, i + 1]) for all 0 ≤ i < n − 1. Hence this procedure
+requires O((n/p)(Ψ + τ)δ) time, plus negligible O(n/p + log p) time to ﬁnd the
+longest candidates. Using the same instantiation as in Table 1 the result becomes
+O((n/p) log n log log n) time within optimal nHk + o(n log σ) overall bits. This is
+an optimal speedup, if we consider the polylogarithmic penalty of using a FCST.
+The speedups in this section are similar to the results obtained for “classical”
+uncompressed suﬃx trees by Cliﬀord [10], which do not speed up exact matching
+because they do not use a generalized Child operation. Cliﬀord speeds up the
+longest common substring problem and the maximal repeats, among others.
+
+5 Distributed Compressed Indexes
+
+In this section we study distributed CSAs and FCSTs, mainly to obtain support
+for large string databases. In this case we assume we have a collection C of q texts
+of total length n, distributed across q machines. Hence distributed FCSTs are
+always generalized suﬃx trees, and likewise for CSAs. In fact, the local text of
+each machine could also be a collection of smaller texts, and the whole database
+could be a single string arbitrarily partitioned into q segments: CSAs and CSTs
+treat both cases similarly. The only diﬀerence is whether the SLink of the last
+symbol of a text sends one to the next text or it stays within that text, but either
+variant can be handled with minimal changes. We choose the latter option.
+
+3 This is an access to the Burrows-Wheeler transform.
+
+Parallel and Distributed Compressed Indexes
+
+357
+
+Various data layouts have been considered for distributing classical suﬃx trees
+and arrays [17,9,10]. One can distribute the texts and leave each machine index
+its own text, or distribute a single global index into lexicographical intervals, or
+opt for other combinations. In this paper we consider reducing the time of a single
+query, in contrast to previous work [17] where the focus is on speeding up batches
+of queries by distributing them across machines. Our approach is essentially that
+of indexing each text piece in its own machine, yet we end up distributing some
+global information across machines, similarly to the idea storing local indexes
+with global identiﬁers [17].
+
+First we study the case where the local CSAs are used to simulate a global
+CSA, which can then be used directly in the FCST representation. This solution
+turns out to require extra space due to the need of storing some redundant
+information. Then we introduce a new technique to combine FCSTs that removes
+some of those redundant storage requirements.
+Distributed Compressed Suﬃx Arrays. Assume we have a collection C =
+{Tj}q−1
+, and the respective local CSAs. We denote their operations with a
+subscript j, i.e. as Aj, A−1
+, ψj and LFj. The generalized CSA that results
+from this collection is denoted AC. Assume we store the accumulated text sizes,
+AccT [i] =
+We deﬁne the sequence IdC of suﬃx indexes of C, where IdC[i] = j if the
+suﬃx in AC[i] belongs to text Tj. Consider T as T0 and T (cid:3) as T1 in our running
+example. The respective generalized suﬃx tree is shown in the left of Fig. 1. The
+Id sequence for this example is obtained by reading the leaves, and replacing $
+by 0 and # by 1. The resulting sequence is Id = 0100101010101.
+
+|Tj|, which need just O(q log n) bits.
+
+(cid:2)i−1
+j=0
+
+0
+
+j
+
+j
+
+If we process Id for Rank and Select queries we can obtain the operations 
+of AC from the operations of the Aj’s. To compute Locate we use
+the equation AC[v] = AId[v][RankId[v](v − 1)] + AccT [Id[v]]. For example for
+AC[4] we have that A1[Rank1(4 − 1)] + AccT [1] = A1[1] + 7 = 7. To com-
+[i − AccT [j]] + 1),
+pute A−1C we use a similar relation, A−1C [i] = Selectj(A−1
+where j is such that AccT [j] ≤ i < AccT [j + 1]. Likewise ψC is computed as
+ψC[v] = SelectId[v](ψId[v][RankId[v](v − 1)] + 1). Computing LFC(X, [vl, vr])
+is more complicated: we compute LF in all the CSAs, i.e. LFj(X, [Rankj(vl −
+1), Rankj(vr)− 1]) for every 0 ≤ j < q. If [xvj,l, xvj,r] are the resulting intervals
+{Selectj(xvj,r +
+then LFC(X, [vl, vr]) = [minq−1
+1)}]. Consider for example, how to compute LFC(a, [5, 12]). We compute
+LF0(a, [3, 6]) = [1, 2] and LF1(a, [2, 5]) = [1, 1] and use the results to obtain
+that LFC(a, [5, 12]) = [min{Select0(1+1), Select1(1+1)}, max{Select0(2+
+1), Select1(1 + 1)}] = [min{2, 4}, max{3, 4}] = [2, 4]. This requires O(log q) accesses 
+to slow memory to compute minima and maxima in parallel.
+
+{Selectj(xvj,l + 1)}, maxq−1
+
+j=0
+
+j=0
+
+A problem with this approach is the space necessary to store sequence Id
+and support Rank and Select. An eﬃcient approach is to unfold Id into q
+bitmaps, BIdj[i] = 1 iﬀ Id[i] = j, and process each one for constant-time binary
+Rank and Select queries while storing them in compressed form [14]. Then
+since BIdj contains about n/q 1s, it requires (n/q) log q + O(n/q) + o(n) bits of
+space. We store each BIdj in the local memory of processor j, which requires
+
+358
+
+L.M.S. Russo, G. Navarro, and A.L. Oliveira
+
+space |CSAj| + (n/q) log q + O(n/q) + o(n) local bits. The total space usage is
+|CSAC| + n log q + O(n) + o(qn) bits (if the partitions are not equal it is even
+less; n log q bits is the worst case). This essentially lets each machine map its
+own local CSA positions to the global suﬃx array, as done in previous work for
+classical suﬃx arrays (where the global identiﬁers can be directly stored) [17].
+
+In this setup, most of the accesses are to local memory. One model is that
+queries are sent to all processors and the one able of handling it takes the lead.
+For AC[v], each processor j looks if BIdj[v] = 1, in which case j = Id[v] and
+this is the processor solving the query locally, in O(Φ) accesses to fast memory
+(processor j also stores values AccT [j] and AccT [j + 1] locally). For A−1C [i], each
+processor j checks if AccT [j] ≤ i < AccT [j + 1] and the one answering positively
+takes the lead, answering again in O(Φ) local accesses. ψC proceeds similarly to
+AC, in O(Ψ) local accesses. LFC is more complex since all the processors must be
+involved, each spending O(τ) local accesses, and then computing global minima
+and maxima in O(log q) accesses to slow memory. Compare to the alternative of
+storing CSAC explicitly and splitting it lexicographically: all the local accesses
+in the time complexities become global.
+
+The o(qn) extra memory scales badly with q (as more processors are available,
+ each needs more local memory). A way to get rid of it is to use bitmap
+representations that require n log q + o(n log q) + O(n log log q) = O(n log q) bits
+and solve Rank and Select queries within o((log log n)2) time [18]. We will
+now present a new technique that directly represents global FCSTs using tuples
+of ranges instead of a single suﬃx array range.
+
+0
+
+Distributed Fully-Compressed Suﬃx Trees. Consider the generalized sufﬁx 
+tree TC of a collection of texts C = {Tj}q−1
+and the respective individual 
+suﬃx trees Ti. Assume, also, that we are storing the Ti trees with the
+FCST representation and want to obtain a representation for TC. A node of
+TC can be represented all the time as a q-tuple of intervals (cid:8)v0, . . . , vq−1(cid:9) =
+(cid:8)[v0,l, v0,r], . . . , [vq−1,l, vq−1,r](cid:9) over the corresponding CSAs. For example the
+node abbb can be represented as (cid:8)[2, 2], [1, 1](cid:9). In fact we have just explained,
+in the distributed LF operation, how to obtain from these intervals the [vl, vr]
+representation of node v of TC (via Select on IdC and distributed minima and
+maxima). Thus these intervals are enough to represent v.
+
+To avoid storing the Id sequence we map every interval [vi,l, vi,r] directly to
+the sampled tree of F CSTC, instead of mapping it to an interval v over CSAC
+and then reducing it to the sampled tree of F CSTC with LSAC(v). We use
+the same bitmap-based technique for LSAC, but store q local bitmaps instead
+of just a global one. The bitmaps Bj are obtained from the bitmap B of the
+F CSTC by removing the zeros that do not correspond to leaves of Tj, see Fig 2.
+This means that, in Bj, we are representing the O(n/δ) nodes of the global
+sampled tree and the n/q leaves of Tj. As each Bj has n/q 0s and O(n/δ) 1s,
+the compressed representation [14] supporting constant-time Rank and Select
+requires (n/q) log(1 + q/δ) + O(n/q) + o(n/δ + n/q) bits. This is slightly better
+than the extra space of CSAs, totalling O(n log(1 + q/δ)) + o(nq/δ) bits. As
+before, the o(. . .) term can be removed by using the representation by Gupta et
+
+Parallel and Distributed Compressed Indexes
+
+359
+
+al. [18] at the price of o((log log n)2) accesses to fast local memory. Now the same
+computation for LSA carried out on Bj gives a global interval.
+We then compute LSAC(v) = LCASC(LSA0(v0), . . . , LSAq−1(vq−1)), where
+LCASC is the LCA operation over the sampled tree of TC and LSAj(vj) is the
+global LSA value obtained by processor j. This operation is computed in parallel
+in O(log q) accesses to slow memory (which replaces the global minima/maxima
+of the CSA). The sampled tree S and its extra data (e.g., to compute LCA in
+constant time) is stored in the shared memory. Hence accesses to S are always
+slow, which does not change the stated complexities. This mechanism supports
+the usual representation of the global FCST.
+Consider, for example, that we want to compute the SDep of node abbb. Note
+that the SDep of [2, 2] in T0 is 7 and that the SDep of [1, 1] in T1 is 6. However
+the SDep of abbb in TC is 4. In this example we do not have to use ψ to obtain
+the result, altough in general it is necessary. By reducing the [2, 2] and [1, 1]
+intervals to the sampled tree of F CSTC we obtain the node abbb and the leaf
+abbbb#, see Fig. 1. The node we want is the LCA of these nodes, i.e. abbb.
+Theorem 2. Given a collection of q texts C = {Tj}q−1
+represented by compressed 
+suﬃx arrays (CSAj) that support ψ, ψi, T [A[v]] and LF in times O(Ψ),
+O(Φ), O(1), and O(τ), respectively, it is possible to represent a distributed suﬃx
+tree with the properties given in Table 1 (column “distributed”).
+
+0
+
+Moreover this technique has the added beneﬁt that we can simulate the generalized 
+suﬃx tree from any subcollection of the q texts, by using only the intervals
+of the texts Tj that we want to consider. However in this case we lose the TDep,
+TLAQ and SLAQ operations.
+
+6 Conclusions and Future Work
+
+Compressed indexes are a new and functional way to index text strings using
+little space, and their parallelization has not been studied yet. We have focused
+on parallel (shared RAM) and distributed suﬃx trees and arrays, which are the
+most pervasive compressed text indexes. We obtained almost linear speedups for
+the basic pattern search problem, and also for more complex ones such as computing 
+matching statistics, longest common substrings, and maximal matches.
+The sequential algorithms for these problems are linear-time and easy to carry
+over compressed indexes, but hard to parallelize. Thanks to the stronger functionality 
+of compressed indexes, namely the support of generalized branching,
+we achieve parallel versions for all of these. Some of our solutions can do with
+a compressed suﬃx array; others require a compressed suﬃx tree. We plan to
+apply this idea to other problems with applications in bioinformatics [11], such
+as all-pairs preﬁx-suﬃx queries.
+
+Distributing the index across q machines further alleviates the space problem,
+allowing it to run on a larger virtual memory. Our distributed suﬃx arrays
+require O(n log q) + o(n) extra bits, whereas our suﬃx trees require o(nq/δ)
+extra bits. Both simulate a global index with O(log q) slowdown (measured in
+communication cost), so they achieve O(q/ log q) speedup on each query.
+
+360
+
+L.M.S. Russo, G. Navarro, and A.L. Oliveira
+
+A challenge for future work is to reduce this extra space, as O(n log q) can
+be larger than the compressed suﬃx array itself. We also plan to consider other
+models models such as BSP and batched queries [17]. An exciting direction is to
+convert the distributed index into an eﬃcient external-memory representation
+for compressed text indexes, which suﬀer from poor locality of reference.
+
+References
+
+1. Giegerich, R., Kurtz, S., Stoye, J.: Eﬃcient implementation of lazy suﬃx trees.
+
+Softw., Pract. Exper. 33(11), 1035–1049 (2003)
+
+2. Manber, U., Myers, E.: Suﬃx arrays: A new method for on-line string searches.
+
+SIAM J. Comput. 22(5), 935–948 (1993)
+
+3. Sadakane, K.: Compressed suﬃx trees with full functionality. Theory Comput.
+
+Syst. 41(4), 589–607 (2007)
+
+4. Navarro, G., M¨akinen, V.: Compressed full-text indexes. ACM Comp. Surv. 39(1),
+
+article 2 (2007)
+
+5. Ferragina, P., Manzini, G., M¨akinen, V., Navarro, G.: Compressed representations
+
+of sequences and full-text indexes. ACM Trans. Algor. 3(2), article 20 (2007)
+
+6. Manzini, G.: An analysis of the Burrows-Wheeler transform. J. ACM 48(3),
+
+407–430 (2001)
+
+7. Russo, L., Navarro, G., Oliveira, A.: Fully-Compressed Suﬃx Trees. In: Laber,
+E.S., Bornstein, C., Nogueira, L.T., Faria, L. (eds.) LATIN 2008. LNCS, vol. 4957,
+pp. 362–373. Springer, Heidelberg (2008)
+
+8. Fischer, J., M¨akinen, V., Navarro, G.: Faster entropy-bounded compressed suﬃx
+
+trees. Theor. Comp. Sci. 410(51), 5354–5364 (2009)
+
+9. M¨akinen, V., Navarro, G., Sadakane, K.: Advantages of backward searching —
+eﬃcient secondary memory and distributed implementation of compressed sufﬁx 
+arrays. In: Fleischer, R., Trippen, G. (eds.) ISAAC 2004. LNCS, vol. 3341,
+pp. 681–692. Springer, Heidelberg (2004)
+
+10. Cliﬀord, R.: Distributed suﬃx trees. J. Discrete Algorithms 3(2-4), 176–197 (2005)
+11. Gusﬁeld, D.: Algorithms on Strings, Trees and Sequences. Cambridge University
+
+Press, Cambridge (1997)
+
+12. Weiner, P.: Linear pattern matching algorithms. In: IEEE Symp. on Switching and
+
+Automata Theory, pp. 1–11 (1973)
+
+13. Lee, S., Park, K.: Dynamic rank-select structures with applications to run-length
+encoded texts. In: Ma, B., Zhang, K. (eds.) CPM 2007. LNCS, vol. 4580, pp. 95–106.
+Springer, Heidelberg (2007)
+
+14. Raman, R., Raman, V., Rao, S.S.: Succinct indexable dictionaries with applications
+
+to encoding k-ary trees and multisets. In: Proc 13th SODA, pp. 233–242 (2002)
+
+15. Huynh, T.N.D., Hon, W.K., Lam, T.W., Sung, W.K.: Approximate string matching
+
+using compressed suﬃx arrays. Theor. Comput. Sci. 352(1-3), 240–249 (2006)
+
+16. Russo, L., Navarro, G., Oliveira, A.: Dynamic Fully-Compressed Suﬃx Trees. In:
+Ferragina, P., Landau, G.M. (eds.) CPM 2008. LNCS, vol. 5029, pp. 191–203.
+Springer, Heidelberg (2008)
+
+17. Mar´ın, M., Navarro, G.: Distributed query processing using suﬃx arrays. In: Nascimento,
+ M.A., de Moura, E.S., Oliveira, A.L. (eds.) SPIRE 2003. LNCS, vol. 2857,
+pp. 311–325. Springer, Heidelberg (2003)
+
+18. Gupta, A., Hon, W.K., Shah, R., Vitter, J.: Compressed data structures: dictionaries 
+and data-aware measures. In: `Alvarez, C., Serna, M. (eds.) WEA 2006. LNCS,
+vol. 4007, pp. 158–169. Springer, Heidelberg (2006)
+
+

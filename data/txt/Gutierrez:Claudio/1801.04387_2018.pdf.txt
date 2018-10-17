@@ -1,0 +1,1260 @@
+8
+1
+0
+2
+
+ 
+
+b
+e
+F
+2
+2
+
+ 
+
+ 
+ 
+]
+
+O
+L
+.
+s
+c
+[
+ 
+ 
+
+2
+v
+7
+8
+3
+4
+0
+
+.
+
+1
+0
+8
+1
+:
+v
+i
+X
+r
+a
+
+The Problem of Correlation and
+
+Substitution in SPARQL
+
+—Extended Version—
+
+Daniel Hern´andez1, Claudio Gutierrez1, and Renzo Angles2
+
+1 Universidad de Chile, Santiago, Chile
+2 Universidad de Talca, Curic´o, Chile
+
+Abstract. Implementations of a standard language are expected to give
+same outputs to identical queries. In this paper we study why diﬀerent
+implementations of SPARQL (Fuseki, Virtuoso, Blazegraph and rdf4j)
+behave diﬀerently when evaluating queries with correlated variables. We
+show that at the core of this problem lies the historically troubling notion
+of logical substitution. We present a formal framework to study this issue
+based on Datalog that besides clarifying the problem, gives a solid base
+to deﬁne and implement nesting.
+
+Keywords: Nested queries, SPARQL, Datalog, Incomplete data
+
+1
+
+Introduction
+
+A subquery is a query expression that occurs in the body of another query expression,
+ called the outer query. A correlated subquery is one whose evaluation is
+dependent in some way on data being processed in the outer query. Informally
+the data got from the outer query should be replaced or substituted in the corresponding 
+places in the inner query. Thus the notion of substitution comes to
+the heart of the problem at hand.
+
+It is well known the complexities that this notion involves. As is well known,
+it has been always a troubling concept and source of error even to renowned
+logicians.3 The query language SPARQL is not an exception: the notion of replacement 
+(substitution) in the recommendation has an insuﬃcient deﬁnition
+and even contradictory pieces 4.
+
+3 The story is recounted by Church in [5], pp. 289-90 and Cardone and Hindley [4],
+p.7. Russell and Whitehead, although used the notion, missed its formal statement
+in his Principia (1913). Hilbert and Ackermann gave an “inadequate” statement
+in his 1928’s Logic. Carnap in Logicshe Syntax der Sprache and Quine in System
+of Logistic deﬁnitions still contain problems. Hilbert and Ackermann in 1934 gave
+ﬁnally a correct statement.
+
+4 See [11] where we report that the substitution notion presented on Sec. 18.6 of the
+current speciﬁcation [10] contradicts the statements “Due to the bottom-up nature
+of SPARQL query evaluation, the subqueries are evaluated logically ﬁrst, and the
+results are projected up to the outer query” and “Note that only variables projected
+out of the subquery will be visible, or in scope, to the outer query”, from Sec. 12.
+
+2
+
+We show in this paper that this notion is the source of problems that can
+be found in the evaluation of EXIST subqueries in SPARQL. The problem is
+highlighted when operators which incorporate possibly incomplete information
+are present. The following SPARQL query illustrates these problems. The query
+roughly asks for the id of persons and optionally their corporate email, subject
+to some conditions given by the expression in the FILTER EXISTS:
+
+SELECT ?id ?email
+WHERE { {{ ?id a :person } OPTIONAL { ?id :corpMail ?email }}
+
+FILTER EXISTS {
+
+{{ ?id a :person } OPTIONAL { ?id :privMail ?email }}
+FILTER (?email = *.com) } }
+
+Surely the reader is facing the following problem: how to interpret this query?
+Well, you are not alone in your vacillation: The most popular implementations of
+SPARQL do not agree on it. For example, for the following database of persons
+
+id
+
+corpMail
+privMail
+
+1
+
+*.com
+*.net
+
+2
+
+*.net
+*.com
+
+3
+
+4
+
+5
+
+6
+
+*.com
+
+*.net
+
+*.com
+
+*.net
+
+Fuseki, Blazegraph, Virtuoso and rdf4j give almost all diﬀerent results. Fuseki
+and Blazegraph give (1,*.com), (3,*.com) and (5,-); Virtuoso gives (1,*.com) and
+(3,*.com); ﬁnally rdf4j gives (3,*.com) and (5,-).5
+
+What is going on? Not simple to unravel. The main problem is how to assign
+the variables in order to evaluate the inner and outer expressions. Let us see why
+not all systems agree in showing up person 1. If we evaluate ﬁrst the inner query
+then the variable ?email is bound to *.net for person 1, thus the ﬁlter ?email =
+*.com fails, and so the whole expression inside the ﬁrst ﬁlter fails, hence person 1
+is not shown in the output. Now, if the inner pattern is evaluated after bounding
+the variable ?email to *.com, then the OPTIONAL part does not match and
+thus the last ﬁlter pass, hence person 1 is outputted.
+
+The intuition provided by the case of person 1 is that some systems evaluate
+the inner pattern before binding the ?email in the outer query, and others do
+it after the binding. Now this intuitive philosophy does not work to understand
+why Blazegraph and Fuseki outputs, (1,*.com) and (5,-). In defense of these
+systems, let us recall that the speciﬁcation is not clear or precise enough about
+this evaluation.
+
+We —the Semantic Web advocates— are in a problem: No query language
+with such uncertainties will gain wide adoption. Of course the example is highly
+unnatural but, as we will show, it codes the essence of the problems of substitution 
+of correlated variables in SPARQL. Substituting is not trivial even when all
+values are constants, but when considering incomplete information, e.g. in the
+form of nulls or unbounds in SPARQL, the complexities rapidly scale up. In this
+setting, having a clean logical picture of what is going on is crucial.
+
+5 The engines studied in this paper are Fuseki 2.5.0, Blazegraph 2.1.1, Virtuoso 7.2.4.2,
+
+and rdf4j 2.2.1.
+
+3
+
+Our aim is that the above problems can be modeled by using Datalog. Hence,
+we introduce Nested Datalog, an extension of classical Datalog to cope with
+nested expressions. Nested Datalog is used to describe two diﬀerent substitution
+philosophies: syntactic substitution, which implies that the value to be substituted 
+in a correlated variable comes from one source; and logical substitution,
+which implies that a variable is expecting values from two sources (from the
+valuation of the expression in the database and from the outer query).
+
+The problem becomes more complex in the logical evaluation when one (or
+both) of the values is null. It turns out that it is not indiﬀerent where we “com-
+patibilize” both values (at the bottom of the program, at the top, in the middle).
+To model this it is needed one step further in the formalization in order to capture 
+the nuances of incomplete information in the form of null values. To do this,
+we use Modal Datalog, a version of Datalog with modal features.
+
+Once having the right setting, the subtleties of the notion of substitution in
+nested expressions having incomplete information (null values) becomes visible.
+Then, in Section 5, we show how SPARQL translates to this setting, and how
+the notion of substitution is expressed in it. Then we show the discrepancies of
+the diﬀerent implementations and what they mean under the light of this formal
+framework. We conclude with our view of how to handle this problem.
+
+In summary, the contributions of this paper are the following:
+
+1. Formalization of the problem (i.e. substitution in nested expressions), its
+study from a logical point of view, and analysis of the discrepancies of evaluation 
+under diﬀerent implementations of SPARQL.
+
+2. To provide a logical framework to understand and formalize the notion of
+substitution in nested expressions in the presence of incomplete information
+for SPARQL.
+
+3. Presentation of the logical (and consistent) alternatives deﬁned and supported 
+by our logical framework.
+
+Related work. Diﬀerent problems related to the notion of substitution are listed
+in the SPARQL speciﬁcation errata. In a previous work [11] we have reported
+some issues and presented three alternative solutions based on rewriting on the
+nested query before the substitution. After that, a W3C community group6 was
+created to address these issues. The community started deﬁning queries and
+their expected outputs, for two alternative semantics. The ﬁrst, proposed by
+Patel-Schneider and Martin [16], and the second proposed by Seaborne in the
+mailing list of the community group. None of these proposals study the problem
+in a formal framework as we do in this paper.
+
+The idea of nested queries in Datalog is not new (see [9] for example). We
+introduce nesting in a diﬀerent way in order to be more suitable for studying correlation.
+ Similarly, null values have been already studied in deductive databases
+(e.g., [7,8,12]), but with a focus (on computing certain answers) that is not the
+goal of this paper.
+
+6 https://www.w3.org/community/sparql-exists/
+
+4
+
+2 Standard Datalog
+
+We will brieﬂy review notions of non recursive Datalog with equalities and safe
+negation. For further details see [15].
+
+Datalog Syntax. A term is either a variable or a constant. An atom is either a
+predicate formula p(t1, ..., tn) where p is a predicate name and each ti is a term,
+or an equality formula ﬁlter(t1 = t2) where t1 and t2 are terms. A literal is either
+an atom (a positive literal L) or the negation of an atom (a negative literal ¬L).
+For readability we also write ﬁlter(t1 6= t2) instead of ¬ ﬁlter(t1 = t2). A rule
+R is an expression of the form L ← L1, . . . , Ln where L is a predicate formula
+called the head of R, and L1, . . . , Ln is a set of literals called the body of R. A
+fact F is a predicate formula with only constants. A program P is a ﬁnite set of
+rules and facts. A query Q is a pair (L, P ) where L is a predicate formula called
+the goal of Q, and P is a program. We assume that all predicate formulas in a
+query Q with the same predicate name have the same number of arguments and
+that the terms in the head of each rule in Q and the goal of Q are all variables.
+
+Semantics of Datalog. Given a substitution θ = {X1/a, . . . , Xn/am} from variables 
+to constants, and a literal L, θ(L) denotes the literal resulting of substituting 
+in L each occurrence of Xi by ai, for 1 ≤ i ≤ m. Given a set of facts S, a
+substitution θ, and a positive literal L, we say that S models L with respect to
+θ, denoted S, θ |= L, if either θ(L) is an equality formula of the form ﬁlter(a = a)
+where a is a constant, or L is predicate formula and θ(L) ∈ S. Similarly, given a
+set of facts S, a substitution θ and a negative literal ¬L, S, θ |= ¬L, if S, θ 6|= L.
+Given a rule R = L0 ← L1, . . . , Ln, a fact θ(L0) is inferred in a set of facts S if
+S, θ |= Lj, for 1 ≤ j ≤ n.
+
+A variable X occurs positively in a rule R if X occurs in a positive predicate
+formula in the body of R. A rule R is said to be safe if all its variables occur
+positively in R. A program is safe if all its rules are safe. The safety restriction 
+provides a syntactic restriction of programs which enforces the ﬁniteness of
+derived predicates.
+
+In this paper we do not consider equality formulas X = a as in most works
+(e.g., [15]), but equality formulas of the form ﬁlter(X = a). They diﬀer in the
+form of evaluation. If a rule R has the literal X = a in the body, then X is
+said to be deﬁned positively because the equality assigns the value a to X. On
+the contrary, here equality formulas require that all variables be assigned before
+being evaluated. Formally, here equality formulas are built-in.
+
+The dependency graph of a Datalog program P is a digraph (N, E) where the
+set of nodes N is the set of predicates that occur in the literals of P , and there
+is an arc (p1, p2) in E for each rule in P whose body contains predicate p1 and
+whose head contains predicate p2. A Datalog program is said to be recursive if
+its dependency graph is cyclic, otherwise it is said to be non-recursive. On this
+report we consider only non-recursive programs.
+
+Let P be a program, E be a subset of the Herbrand base of P , and fact(P, E)
+denote the set of facts occurring in E or P , intuitively the facts inferred in zero
+
+5
+
+steps. Then, the meaning of P is the result of adding to fact(P, E) as many new
+facts as can be inferred from the rules of P in fact(P, E). The inference process is
+applied repeatedly until a ﬁxpoint, denoted fact∗(P, E), is reached. The answer
+of a query Q = (L, P ) in an extensional database E, denoted ansE(Q), is the
+subset of fact∗(P, E) with facts having the same predicate as L.
+
+The ﬁxpoint depends on the order used to evaluate rules. Here we assume the
+order of Stratiﬁed Datalog, where for every arc (p1, p2) in the dependency graph
+of a program P , a rule R2 with head p2 is not used in the inference process until
+every rule R1 with head p1 cannot be applied to infer another fact. Without this
+order a negative predicate formula ¬L can be wrongly evaluated as true if the
+evaluation is done before a fact matching L is inferred.
+
+3 Nested Datalog
+
+We will extend Datalog in order to be able to compose queries, by introducing
+nested queries as a new type of atom that occurs as a ﬁlter device (i.e., a built-in).
+
+Deﬁnition 1 (Syntax of Nested Datalog deﬁned recursively). 1. A Datalog 
+query is a Nested Datalog query. 2. A Nested Datalog query is a Datalog
+query where Nested Datalog queries are allowed as atoms.
+
+The inference process of Nested Datalog diﬀers from the standard one by the
+addition of the semantics for evaluating Nested queries. If query Q is an atom in
+a rule, its evaluation with respect to the substitution θ is true if and only if θ(Q)
+has at least one answer, where θ(Q) denotes the query resulting of “applying”
+to Q the substitution θ. This is the key notion we will study in what follows.
+
+We will need the notion of assignment of a value to a variable. Consider a
+program P with a single rule R deﬁned as p(X) ← q(X), ﬁlter(X = Y ). The
+assignment of the value a to the variable Y can be done by adding a literal l(Y )
+to R, where l is a fresh predicate, and the fact l(a) to P . In the resulting program
+Y can only take the value a. In what follows we will use the notation let(Y = a)
+as a syntactical sugar to denote the result of assigning a to Y in R.
+
+Substitution θ(Q) for a nested query Q turns out to be rather subtle. There
+
+are two main approaches that we will call syntactical and logical.
+
+Syntactical substitution. It works like standard replacement of a variable in an
+open sentence in logic or a free variable in a programming language. It occurs
+when a rule cannot be evaluated without having the value of a “free” variable
+occurring in it. Formally, a variable X occurs free in a rule R when it does not
+occur positively in R and it occurs in an equality formula or in a nested query
+Q where recursively X occurs free in a rule of Q.
+
+Deﬁnition 2 (syntactic substitution). Given a substitution θ, a program P
+and a variable X occurring in θ, the syntactical substitution of X in P with
+respect to θ is done by adding the literal let(X = θ(X)) to the body of each rule
+of P where X is free.
+
+6
+
+Logical substitution. This is the problem of “substituting” θ(X) in a program P
+that has no “free” X (i.e. all their rules R are “logically closed”). Conceptually,
+in this case the semantics is one such that after ﬁnding a solution of R, it checks
+its “compatibility” with θ.
+
+The essential problem of logical substitution is “when” (at what point in the
+evaluation) we will test this compatibility. For example, consider the program
+P with the rules p(X) ← q(X) and q(Y ) ← r(Y ). The variable Y in the second
+rule is logically connected with the variable X in the ﬁrst rule. Thus, we can
+alternatively do the substitution in two places:
+
+Top-down
+
+Bottom up
+
+p(X) ← q(X), let(X = θ(X))
+q(Y ) ← r(Y )
+
+p(X) ← q(X)
+q(Y ) ← r(Y ), let(Y = θ(X))
+
+This example illustrates two extremes, (1) Top down: evaluate P ﬁrst, then,
+proceed to check the compatibility of the solution with θ. (2) Bottom up: Check
+compatibility of θ (with the database) before starting the evaluation of P . However,
+ there are also several valid substitutions in the middle. In fact, we can start
+with a top-down substitution and then move the literals let(X = θ(X)) down in
+the dependency graph of the program. The method used to move substitutions
+is equivalent to the standard method used to move selections σX=a in Relational
+Algebra because of optimization concerns. In the appendix we provide a detailed
+description of the process of moving substitutions. The following result follows
+from it.
+
+Lemma 1. Given a substitution θ and a Nested Datalog program P , moving
+down literals of the form let(Y = θ(X)) in the dependency graph of P does not
+change the semantics of P .
+
+Hitherto, we have deﬁned logical substitution for a rule but not for a whole
+
+query. We now will deﬁne it using the top-down approach.7
+
+Deﬁnition 3 (Top-down logical substitution). Given a substitution θ, a
+query Q = (p(X1, . . . , Xn), P ) and a variable X occurring in the goal of Q and
+θ, the top-down logical substitution of X in Q is the query resulting of replacing
+the goal of Q by q(X1, . . . , Xn), where q is a fresh predicate, and adding the rule
+q(X1, . . . , Xn) ← p(X1, . . . , Xn), let(X = θ(X)) to P .
+
+Logical and syntactical substitutions are not arbitrary. They are motivated
+
+by the EXISTS operator of SPARQL as is shown in the following query.
+
+SELECT ?X
+WHERE { ?X :hasMail ?Y
+
+FILTER EXISTS { SELECT ?X
+
+WHERE { ?X :hasMail ?Z FILTER (?Y <> ?Z) } } }
+
+7 Other approaches can be obtained by moving the substitution point from upper
+
+levels to lower levels in the dependency graph of the query.
+
+7
+
+Intuitively this query ﬁnds people ?X with multiple emails. The variable ?X cannot 
+be substituted by a constant in the nested query, because that substitution
+breaks the syntax of the SELECT clause (where only variables are allowed).
+Thus, ?X has to be substituted logically. On the other hand, ?Y is a free variable
+in the nested query, so ?Y has to be substituted syntactically. We claim that
+these substitutions are better understood if we rewrite this SPARQL query as
+the Nested Datalog query (p(X, Y ), P1) where P1 is the following program:
+
+P1 : p(X, Y ) ← mail(X, Y ), (q(X), P2),
+P2 :
+q(X) ← mail(X, Z), ﬁlter(Z 6= Y ).
+
+Hence, the result of applying a substitution θ in P2 produces a program with
+the rule q(X) ← mail(X, Z), ﬁlter(Z 6= Y ), let(X = θ(X)), let(Y = θ(Y )).
+
+There is a third form of substitution, namely improper. To gain some intuition,
+ consider the following SPARQL query:
+
+SELECT * WHERE { ?X :r ?Y FILTER EXISTS { SELECT ?Z WHERE { ?X :s ?Z } } }
+
+The inner pattern of this query can be modeled as a query (p(Z), P ) where
+P contains the rule p(Z) ← s(X, Z). The variable X cannot be substituted
+logically, because it does not occur in the goal nor in the head of the unique
+rule of P . Furthermore, X cannot be substituted syntactically, because it is
+not free. However, some systems assume that X is correlated. The behavior of
+these systems coincides with applying improper substitution. Here, substitution
+is done by replacing the unique rule of P by the rules p(Z) ← u(X, Z) and
+u(X, Z) ← s(X, Z), let(X = θ(X)), where u is a fresh predicate.
+
+Essentially, an improper substitution is a logical substitution that starts in
+some point of the nested query instead of the goal of the query, so that there
+is a gap in the logical chain. After that point, substitution is similar to logical
+substitution in the sense that it moves the value assigned to X from the head of
+a rule to the body, and thus to other rules below in the dependency graph.
+
+In the example, the substitution is improper, because the logical chain start
+on the second rule so there is a gap between the goal of the nested query and
+the point where the logical chain starts.
+
+Improper substitution breaks the design of Datalog where the scope of variables 
+is the rule where they occur. It disallows renaming variables because its
+scope could be extended beyond the nested query, so breaking the design of
+logic and compositional languages where non free variables are renamed without
+changing the semantics of the expression, and free variables cannot be renamed.
+In our opinion, this compromises the compositionality of queries.
+
+Now we have a parametrical deﬁnition of θ(Q) for a query Q (i.e., without the
+values of a particular substitution θ), independently of the kind of substitution
+used (syntactical, logical or improper) substitutions are used. A consequence, is
+the following result.
+
+Lemma 2. Given a Nested Datalog query Q = (p(X1, . . . , Xn), P ) and a simple
+extensional database E for Q, there exists a ﬁrst order formula φ such that each
+ansE(Q) = {p(t1, . . . , tn) | E, φ |= p(t1, . . . , tn)}.
+
+8
+
+Proof. It is well known that without nesting each Datalog query Q corresponds
+to a such formula φ. In fact, each literal L is translated into a ﬁrst order literal L∗.
+Each rule L0 ← L1, . . . , Ln is translated as a ﬁrst order formula ∀Z1 . . . ∀Zn(L1 ∧
+· · · ∧ Ln → L0) where Z1, . . . , Zn are the non free variables of the rule. And the
+whole program is translated as the conjunction of the formulas corresponding to
+each rule.
+
+The proof is done by translating each the atom that we added to Datalog
+into ﬁrst order formulas, i.e., Nested queries. Suﬃces giving a recursive translation 
+for them. We deﬁne it as follows. The formula of a nested query Q =
+(p(X1, . . . , Xn), P ) is the ﬁrst order formula ∃Y1 . . . ∃Yn(p′(Y1, . . . , Yn) ∧ Xj1 =
+Yj1 ∧ · · · ∧ Xjm = Yjm ∧ φP ), where {j1, . . . , jm} ⊆ {1, . . . , n} and φP is the
+formula of P after renaming each predicate q in P with a fresh predicate q′ (this
+ensures that the evaluation is isolated from the outside of the nested query),
+and Xj1 , . . . , Xjm are the variables that occur positively in the rule where Q is
+nested. The equalities Xj1 = Yj1 ∧ · · · ∧ Xjm = Yjm model the logical substitution.
+ Also, free variables X in rules of P , are not added in ∀X quantiﬁers of rules
+of P , so they are syntactically substituted. Improper substitution of a variable
+X in a rule E can be simulated by removing the ∀X in the formula of R.
+⊓⊔
+
+A corollary of this lemma is that nesting does not add expressive power to
+Datalog. Hence, if we chose using one form of substitution but not the other (e.g.,
+using logical substitution but not syntactical), we will have the same expressive
+power than if we had chosen the contrary, or no substitution.
+
+4 Modal Datalog
+
+Modal Datalog is a version of Datalog where each rule is labeled with a modal
+logical operator. In what follows we develop it.
+
+Most real world information includes incomplete data. The main device to
+codify incompleteness has been the null values. A null, denoted ⊥, represents
+either that the value is missing or non applicable. A relation containing null values 
+is said incomplete, while one without them is said complete. The semantics
+of an incomplete relation is the set of all possible complete relations resulting
+from replacing consequently each null by a constant or a symbol ⊤, denoting
+a non-applicable value. We follow the semantics of ⊥ and ⊤ by Lerat and Lipski 
+[14]. However, in this paper we only consider ⊥ nulls, because the evaluation
+process of Modal Datalog never generates non applicable values if they are not
+present in the database.
+
+The answer of a query in a complete database D is characterized by the
+set {µ | D, µ |= φ} where φ is a ﬁrst order formula whose free variables are
+instantiated by µ. On the other hand, an incomplete database is interpreted
+as a set of complete databases X , the possible worlds. In this context, we can
+give modal characterizations to an answer µ: µ is sure, denoted X , µ |= 2φ, if
+D, µ |= φ for all D ∈ X . Similarly, µ is a maybe answer, denoted X , µ |= 3φ, if
+there exists a database D ∈ X such that D, µ |= φ.
+
+9
+
+Modal Datalog essentially introduces a mode for each rule R in a Datalog
+program. If the mode of R is 2, then R is said to be sure and infers facts
+that are valid for all instances of the null values occurring in R in the current
+database. Otherwise, if the mode of R is 3, then R is said to be a maybe rule
+and infers facts that are valid for at least one instance of the null values.
+
+Deﬁnition 4 (Modal Datalog Syntax). A Modal Datalog Program is a set
+of rules of the form ◦(p(X1, . . . , Xn) ← B) where ◦ is either 2 or 3, where the
+symbol ⊥ can occur in the body of the rule in the same places than terms.
+
+A modal Datalog query is one built with Modal Datalog programs.
+
+Next we present how modal predicates are derived from sets of facts and
+substitutions. We write S, θ |= ◦L if L is derived from S and θ with the label
+◦ sure or maybe. We say that a Modal Datalog predicate formula L1 is less
+informative than another L2, denoted L1 ≤ L2, if every instance of L2 is an
+instance of L1. Let L be a literal, S be a set of facts, and θ be a substitution.
+Then:
+
+– S, θ |= 2L if one of the following conditions holds:
+• L is a positive predicate formula and θ(L) ∈ S.
+• L is a negative predicate formula ¬q(t1, . . . , tm) and there does not exist
+
+a fact q(a1, . . . , am) in S such that θ |= 3(tj = aj), for 1 ≤ j ≤ m.
+
+• L is let(X = t) and θ(X) is t.
+• L is ﬁlter(t1 = t2) or ﬁlter(t1 6= t2) and θ |= 2(L)
+• L is (L′, P ′) and (L′, θ(P ′)) has at least one answer.
+• L is ¬(L′, P ′) and (L′, θ(P ′)) has no answers.
+– S, θ |= 3L if one of the following conditions holds:
+
+• L is a positive predicate and there exists a fact F ∈ S such that F ≤ θ(L).
+• L is a negative predicate formula ¬q(t1, . . . , tm) and there does not exist
+
+a fact q(a1, . . . , am) in S such that θ |= 2(tj = aj), for 1 ≤ j ≤ m.
+
+• L is let(X = t) and θ(X) is t.
+• L is ﬁlter(t1 = t2) or ﬁlter(t1 6= t2) and θ |= 3(t1 6= t2).
+• L is (L′, P ′) and (L′, θ(P ′)) has at least one answer.
+• L is ¬(L′, P ′) and (L′, θ(P ′)) has no answers.
+
+Deﬁnition 5 (Semantics of Modal Datalog). Given a Modal Datalog query
+(L, P ), a database E, and a set of already inferred facts S, a fact F is inferred
+from a rule ◦(H ← B) in P (◦ is either 2 or 3) if and only if there exists a
+substitution θ such that S, θ |= ◦L for all literals L in B, θ is the less informative
+substitution θ′ such that S, θ′ |= ◦L′ for all positive predicate formulas L′ in B,
+and θ(H) = F .
+
+Example 1. Let E = {r(a), s(⊥), t(⊥)} be a set of facts and Q = (p(X), P ) be
+the query where the program P has the rules R1 : 2(p(X) ← q(X), r(X)) and
+R2 : 3(q(X) ← s(X), t(X)). Then, let us evaluate ansE(Q). The literal r(X) in
+R1 is only true with the substitution {X/a}, because r(a) is the only available
+fact. To infer p(a) we need ﬁrst to infer q(a) from rule R2. Despite rule R2
+ﬁnds possible answers, inferring q(a) is not possible because R2 infers the less
+informative fact, i.e., q(⊥). Hence, ansE(Q) is empty.
+
+10
+
+Now we are ready to deﬁne the promised notion of substitution in Modal
+Datalog. As before, we will make a distinction between syntactical substitution
+and logical substitution.
+
+In the case of syntactical substitution, the approach is the same. We add a
+literal let(X = θ(X)) to the rule where X occurs free. As this literal is syntactic
+sugar for introducing a predicate formula u(X), then let(X = θ(X)) is indeed a
+positive predicate formula, so X occurs positively in it (see Def. 5). Then, X is
+not free anymore, and takes the value of θ(X), that can be a null or a constant.
+The logical substitution is more subtle. As we saw, in logical substitutions
+the value of a variable X comes from more than one source. For example, if one
+simply adds the literal let(X = θ(X)) to the body of the rule ◦(p(X) ← q(X))
+(◦ is either 2 or 3), then the value of X will be provided by two sources, namely
+θ(X) and the literal q(X). The problem is what to do if in one source X is null
+and in the other a constant. We solve this problem by splitting the rule in two,
+so one preserves the mode ◦ of the original rule and in the other we use the mode
+3 to merge the values coming from both sources.
+
+The logical substitution of X in a rule R = ◦(p(X1, . . . , Xn) ← B) is the replacement 
+of R by the rules 3(p(X1, . . . , Xn) ← u(X1, . . . , Xn), let(X = θ(X)))
+and ◦(u(X1, . . . , Xn) ← B), where u is a fresh predicate. The mode 3 in the
+ﬁrst rule checks the compatibility and follows the SPARQL design, where a null
+value is considered compatible with a constant.
+
+We showed that in Nested Datalog logical substitutions can be moved down
+in the dependency graph of a program without changing its results (Lemma 1).
+The following Lemma states that this feature does not hold in Modal Datalog.
+
+Lemma 3. Given a substitution θ and a Modal Datalog program P , moving
+down literals of the form let(Y = θ(X)) in the dependency graph of P could
+change the semantics of P .
+
+Proof. It suﬃces to show an example that witnesses this. Consider the query Q =
+(p(X, Y ), P ) where P is the unique rule 2(p(X, Y ) ← r(X), s(Y ), ﬁlter(X = Y ).
+
+Program A
+
+Program B
+
+3(p(X, Y ) ← u(X, Y ), let(X = θ(X)))
+2(u(X, Y ) ← r(X), s(X), ﬁlter(X = Y ))
+
+2(p(X, Y ) ← u(X), s(Y ), ﬁlter(X = Y ))
+
+3(u(X) ← r(X), let(X = θ(X)))
+
+In a database containing the facts r(⊥) and s(a), and θ = {X/a}, program A
+⊓⊔
+will have no solutions and program B will have the solution p(a, ⊥).
+
+The example in the previous proof shows:
+
+Corollary 1. In Modal Datalog bottom-up and top-down evaluations do not behave 
+in the same manner.
+
+5 Substitution in FILTER EXISTS expressions
+
+By using the machinery of Modal Datalog, we will model the evaluation of FILTER 
+EXISTS expressions in SPARQL. Our objective is to provide a framework
+for safe semantics for correlated subqueries.
+
+5.1 SPARQL codiﬁed as Modal Datalog
+
+11
+
+First we show that SPARQL can be coded in Modal Datalog using a translation
+inspired by [1], that is, via relational algebra. The syntax and semantics of the
+SPARQL fragment studied here are deﬁned using Relational Algebra with set
+semantics (as is done in [6] and [2]).
+
+We write r(R) to denote a relation r with schema (attributes) R, that is,
+a set of mappings µ from R to constants or null values. We extend standard
+relational algebra to handle null values by using modal evaluation when needed:
+
+πX1,...,Xn (r) = {µ[X1, . . . , Xn] | µ ∈ r},
+
+ρX/Y (r) = {µ[X/Y ] | µ ∈ r},
+
+r ∪ s = (r × ⊥S\R) ∪ (s × ⊥R\S),
+
+σ2φ(r) = {µ ∈ r | µ |= 2φ},
+r −2 s = {µ ∈ r | ∄µ′ ∈ s∀X ∈ R ∩ S : 3(r[X] = s[X])},
+r 13 s = {µ1
+
+⌢µ2 | µ1 ∈ r, µ2 ∈ s, and ∀X ∈ R ∩ S : 3(r[X] = s[X])},
+
+where r(R), s(S) are two relations; µ[T ] is the truncation of the tuple µ to the
+⌢µ2 is
+set of attributes T ; µ[X/Y ] is the renaming of the attribute X by Y ; µ1
+the concatenation of tuples, where X takes the most informative value for each
+common attribute X, or the available value if X is not common; and ⊥T is the
+relation t(T ) with a single tuple ﬁlled with null values.
+
+Here we study the fragment of SPARQL composed by the operators σ2φ,
+πX1,...,Xn , ρX/Y , ∪, 13, −2. Note that we have selected one mode for each
+modal operator. The diﬀerence −2 corresponds to the operator MINUS in [17],
+referred as DIFF in [3].8 The fragment where the operands of ∪ have the same
+attributes precludes the emergence of nulls when evaluating databases without
+nulls, thus coincides with Relational Algebra. Otherwise, the extended algebra
+is required. In this context, the operator OPTIONAL, denoted here as ⟕, is
+deﬁned in [17] as R ⟕ S = (R 13 S) ∪ (R −2 S).9
+
+Deﬁnition 6 (From algebra to Modal Datalog). Given two relations r(R)
+and s(S), the Modal Datalog rules for each algebraic operator are deﬁned as
+
+8 The standard MINUS is slightly diﬀerent in the case when the subtracting mapping
+
+has no attributes, but both can be mutually simulated (see [13,3]).
+
+9 This deﬁnition of ⟕ is slightly diﬀerent with such stated by the standard. However,
+it is well known that the standard SPARQL operators are deﬁnable in the algebra
+presented here (e.g., see [13,3]).
+
+12
+
+follows:
+
+σ2φ(r) : 2(p(R) ← r(R), ﬁlter(φ))
+πT (r) : 3(p(T ) ← r(R))
+
+ρX/Y (r) : 3(p((R \ {X}) ∪ {Y }) ← r(R), ﬁlter(X = Y ), let(Y = ⊥))
+
+r ∪ s : 3(p(R ∪ S) ← r(R), let(X1 = ⊥), . . . , let(Xn = ⊥)) and
+
+3(p(R ∪ S) ← s(S), let(Y1 = ⊥), . . . , let(Ym = ⊥)),
+where {X1, . . . , Xn} = S \ R and {Y1, . . . , Yn} = R \ S
+
+r 13 s : 3(p(R ∪ S) ← r(R), s(S))
+r −2 s : 2(p(R) ← r(R), ¬q(R ∩ S)) and 2(q(R ∩ S) ← s(S))
+
+The translation of each algebraic operator into a set of Modal Datalog rules
+
+by Def. 6 allows translating algebraic expressions into Modal Datalog queries.
+
+Example 2. Given the relations r(X, Y ), s(X, Y ) and t(X, Z), the expression
+(r 13 (s −2 t)) is translated as the query (p(X, Y ), P ) where the program P has
+the rules 3(p(X, Y ) ← r(X, Y ), q(X, Y )), 2(q(X, Y ) ← s(X, Y ), ¬u(X)), and
+2(u(X) ← t(X, Z)).
+
+Lemma 4. Let Q be an algebra expression and Q∗ be the Modal Datalog query
+obtained from Q according to Def. 6. For every database E, it holds that Q and
+Q∗ are equivalent, i.e. their evaluation results in the same answers.10
+
+5.2 Modal Datalog semantics of FILTER EXISTS
+
+Hitherto, we have a semantics for a SPARQL fragment and a translation to
+Modal Datalog, except for expressions of the forms σQ(P ) and σ¬Q(P ), where
+P and Q are called respectively the outer and the inner patterns.11
+
+The philosophy of these operators is the following. Given a relation r and
+an algebraic expression Q, we have that σQ(r) and σ¬Q(r) return the set of
+tuples µ where µ(Q) has a solution or no solutions, respectively. According to
+the SPARQL speciﬁcation, µ(Q) is the result of replacing in Q each variable X
+in the domain of µ by µ(X). As we indicated in the introduction, this deﬁnition
+is ambiguous and contradictory with other parts of the speciﬁcation, and (as
+expected) systems have diﬀerent interpretations for it.
+
+We will unveil this problem by showing how the deﬁnition of µ(Q) is viewed
+in Modal Datalog where the notion of substitution shows up in a clean logical
+manner.
+
+10 Note that answers of Q have the form (a, b) while answers of Q∗ have the form
+p(a, b). In this lemma we assume that these answers are the same as they have the
+same components.
+
+11 In the standard syntax these operators correspond to (P FILTER EXISTS Q) and
+
+(P FILTER NOT EXISTS Q), respectively.
+
+13
+
+Deﬁnition 7 (Filter Exists). Given a relation r and a SPARQL query Q,
+the expressions σQ(r) and σ¬Q(r) are translated to the Modal Datalog rules
+2(p(Tr) ← r(Tr), (L, P )) and 2(p(Tr) ← r(Tr), ¬(L, P )) respectively.
+
+Now we are ready to enumerate three sources of discrepancy in the interpretation 
+of a rule R = ◦(H ← B, (L, P )):12
+
+1. Free variables. A free variable X in P is in some cases assumed uncorrelated.
+The lack of correlation of a variable is simulated by replacing R by the rule
+◦(H ← B, (L, P ′), let(X ′ = ⊥)), where X ′ is a fresh variable and P ′ is the
+result of replacing each occurrence of X in P by X ′.
+
+2. Improper substitution. Some engines implement improper substitution.
+3. Substitution level. A variable X in the goal of the nested query can be substituted 
+logically in diﬀerent places, ranging from top-down to bottom-up
+logical substitution. These substitutions are not equivalent (see Lemma 3).
+
+Next we present example queries to show the ways the systems address the
+above sources of discrepancy. We will use the dataset presented in the introduction.
+ We assume that persons(X) is a pattern giving all persons X in the
+database, and m1(X, Y ) and m2(X, Y ) are patterns returning respectively the
+corporate and personal emails Y of a person X.
+
+The ﬁrst two discrepancies. Consider the queries σm2(X,Z)(T ), σπZ (m2(X,Z))(T )
+and σσY =X (m2(Y,Z))(T ), where T is m1(X, *.com). These queries can be simulated 
+with the same Modal Datalog query having goal p(X) and a single
+rule 2(p(X) ← m1(X, b), Q), where Q is either Q1 = (q(X, Z), 2(q(X, Z) ←
+m2(X, Z))), Q2 = (q(Z), 2(q(Z) ← m2(X, Z))), or Q3 = (q(Y, Z), 2(q(Y, Z) ←
+m2(Y, Z), ﬁlter(Y = X))). Now, we have the following cases:
+
+– Case Q = Q1: It has a unique alternative which is substituting X logically,
+
+so returning only person 1. All systems agree with this answer.
+
+– Case Q = Q2: It has two interpretations, namely allowing or not allowing
+improper substitution. In the ﬁrst, answers include only person 1. In the
+second answers are persons 1 and 3. Blazegraph and Fuseki agree with the
+ﬁrst interpretation, while rdf4j and Virtuoso with the second.
+
+– Case Q = Q3: It has two interpretations, depending whether X is assumed
+correlated or not. In the ﬁrst interpretation, person 1 is the unique answer.
+In the second interpretation, there are no answers because X is ⊥ when
+evaluating ﬁlter(Y = X). Blazegraph, rdf4j and Virtuoso agree with the
+ﬁrst interpretation, while Fuseki with the second.
+
+The last discrepancy. To check the application of logical substitution, consider
+the query σQ(persons(X) ⟕ (m2(X, Y ))) where Q is σY =*.com(persons(X) ⟕
+m2(X, Y )), corresponding to the one presented in the introduction. Fig. 1 depicts
+the dependency graph of Q. Some edges are labeled to refer alternative places
+where a substitution θ can be applied. For instance, the top-down approach
+
+12 Due to space limitations, here we consider only the positive case σQ(r). It is not
+
+diﬃcult to extend the results for the negative case σ¬Q(r).
+
+14
+
+Level 1
+
+Level 2
+
+(p(X, Y ), P )
+
+1
+
+2 q(X,Y ),ﬁlter(Y = *.com)
+
+p(X,Y )
+
+2
+
+3
+
+2 r(X,Y )
+q(X,Y )
+
+2 s(X),w(Y )
+
+q(X,Y )
+
+Level 3
+
+3 u(X),v(X,Y )
+
+r(X,Y )
+
+4
+
+5
+
+2 u(X),¬t(X)
+
+s(X)
+
+2 v(X,q,Y )
+
+t(X)
+
+6
+
+7
+
+8
+
+2 persons(X)
+
+u(X)
+
+2 m2(X,Y )
+v(X,Y )
+
+2 persons(X)
+
+u(X)
+
+2 m2(X,Y )
+v(X,Y )
+
+2 let(Y =⊥)
+
+w(Y )
+
+Fig. 1. Dependency graph of the Nested Datalog query for the inner pattern Q.
+
+consists in inserting the rule 3(p(X, Y ) ← p′(X, Y ), let(X = θ(X), let(Y =
+θ(Y ))) in the edge 1, and replacing p in the rule below by p′, where p′ is a fresh
+predicate. Hence, only person 5 succeeds. No system agrees with this evaluation.
+If substitutions are done in Level 2, then persons 3 and 5 succeed. Only rdf4j
+
+agrees with this interpretation.
+
+Blazegraph and Fuseki agree with substitution in Level 3, i.e., just after variables 
+instantiation. Strictly, this approach is not logical as it has some improper
+substitutions. Indeed, the logical chain of variable Y below the edge 7 does not
+start in the goal of the nested query. Here persons 1, 3 and 5 succeed.
+
+Virtuoso, Blazegraph and Fuseki follow a similar approach but they also
+append the literals let(X = θ(X)) and let(Y = θ(Y )) to the rule below edge 1.
+Hence, person 5 is discarded by the ﬁlter on this rule.
+
+6 Conclusions
+
+This work shows that the notion of substitution continues to haunt researchers
+and developers. We showed that it is at the core of the subtle problems that the
+speciﬁcation and implementations of SPARQL face regarding subqueries of the
+form FILTER EXISTS.
+
+We think the lasting contribution of this paper is the ﬁnding of several types
+of substitution in the presence of nested expression and incomplete information,
+that are playing some roles and seems that had passed unnoticed until now.
+
+Although we consciously did not advance any proposal to ﬁx the problems
+of substitution in nested expressions in SPARQL, the paper leaves a chart with
+the possible avenues to solve them. We think that the Working Groups of the
+W3C have the last word on this issue.
+
+15
+
+References
+
+1. R. Angles and C. Gutierrez. The Expressive Power of SPARQL. In Proc. of the
+International Semantic Web Conference (ISWC), volume 5318 of LNCS, pages
+114–129. Springer, 2008.
+
+2. R. Angles and C. Gutierrez. The Multiset Semantics of SPARQL Patterns. In Proc.
+of the International Semantic Web Conference (ISWC), volume 9981 of LNCS,
+pages 20–36. Springer, 2016.
+
+3. R. Angles and C. Gutierrez. Negation in SPARQL. In Proc. of Alberto Mendelzon
+International Workshop on Foundations of Data Management (AMW), volume
+1644 of CEUR Workshop Proceedings, 2016.
+
+4. F. Cardone and J. R. Hindley. History of lambda-calculus and combinatory logic.
+
+Handbook of the History of Logic, 5:723–817, 2006.
+
+5. A. Church. Introduction to mathematical logic, volume 13. Princeton University
+
+Press, 1996.
+
+6. R. Cyganiak. A Relational Algebra for SPARQL. Digital Media Systems Laboratory 
+HP Laboratories Bristol. HPL-2005-170, page 35, 2005.
+
+7. F. Dong and L. V. S. Lakshmanan. Deductive databases with incomplete information.
+ In Proc. of the Joint International Conference and Symposium on Logic
+Programming (JICSLP), pages 303–317. MIT Press, 1992.
+
+8. F. Dong and L. V. S. Lakshmanan. Intuitionistic Interpretation of Deductive
+Databases with Incomplete Information. Theor. Comput. Sci., 133(2):267–306,
+1994.
+
+9. L. Giordano and A. Martelli. Structuring logic programs: A modal approach. J.
+
+Log. Program., 21(2):59–94, 1994.
+
+10. S. Harris and A. Seaborne. SPARQL 1.1 Query Language - W3C Recommendation,
+
+March 21 2013.
+
+11. D. Hernandez, C. Gutierrez, and R. Angles. Correlation and substitution in
+
+SPARQL. CoRR, abs/1606.01441, 2016.
+
+12. Q. Kong and G. Chen. On Deductive Database with Incomplete Information. ACM
+
+Trans. Inf. Syst., 13(3):355–369, 1995.
+
+13. R. Kontchakov and E. V. Kostylev. On expressibility of non-monotone operators
+in SPARQL. In Proc. of the International Conference on Principles of Knowledge
+Representation and Reasoning (KR), pages 369–379. AAAI Press, 2016.
+
+14. N. Lerat and W. Lipski Jr. Nonapplicable Nulls. Theor. Comput. Sci., 46(3):67–82,
+
+1986.
+
+15. M. Levene and G. Loizou. A guided tour of relational databases and beyond.
+
+Springer, 1999.
+
+16. P. F. Patel-Schneider and D. Martin. Existstential aspects of SPARQL. In Proc.
+of the International Semantic Web Conference (ISWC), Posters & Demonstrations
+Track, 2016.
+
+17. J. Perez, M. Arenas, and C. Gutierrez. Semantics and Complexity of SPARQL.
+
+ACM Trans. Database Syst., 34(3):16:1–16:45, 2009.
+
+16
+
+A Moving logical substitutions to lower levels
+
+In this appendix we will describe how a substitution literal let(X = θ(Y )) can be
+moved to lower levels of the dependency graph without changing the semantics of
+a Nested Datalog query. Because Nested Datalog programs P are non recursive,
+the structure of the dependency graph of P is a tree, so substitution literals can
+be moved down repeatedly until the leaf predicates are reached.
+
+We need another structure. Given a program P , then we call the tree of P
+to the rooted tree whose nodes are labeled with the rules of P and where a node
+labeled rule R1 is the child of a node labeled by a rule R2 if the head of R1 is in
+the body of R2.
+
+Now, we will describe how to move down an literal let(Y = θ(X)) in a rule
+R of a program P where this literal occurs. Without loss of generality, consider
+that R is the following rule:
+
+H ← L1, . . . , Ln, let(Y = θ(X)), L′
+
+1, . . . , L′
+
+m,
+
+where L1, . . . , Ln are positive predicates formulas with intensional predicates
+where Y occurs and L′
+
+m are the rest of the literals in the body of R.
+
+1, . . . , L′
+
+For 1 ≤ i ≤ n, let p(X1, . . . , Xn) be Li and Ji be the set of positions j of
+Li such that Xj = Y (i.e., are the same variable). Then, rename p in Li with a
+fresh predicate name pi and do the following for each rule R′ in P of the form
+p(Z1, . . . , Zn) ← B:
+
+1. Let T be a copy of the thread whose root is R′ in the tree of P , and T ′ the
+result of renaming consequently all intentional predicates occurring in T by
+a fresh predicate, except p that is renamed as pi.
+
+2. Append the literal let(Zj = θ(X)) to the body of the root of T ′, for each
+
+position j in Ji.
+
+3. Copy the rules of T ′ into P .
+
+Example 3. Consider the following program:
+
+p(X, Y ) ← q(X, Y ), q(Y, X), let(X = θ(X))
+q(X, Y ) ← r(X, Y )
+
+r(X, Y ) ← s(X, Y )
+
+where s is an EDB-predicate. Then, moving the literal let(X = θ(X)) one level
+below results in the following program:
+
+p(X, Y ) ← q(X, Y ), q(Y, X)
+q1(X, Y ) ← r1(X, Y ), let(X = θ(X))
+r1(X, Y ) ← s(X, Y )
+q2(X, Y ) ← r2(X, Y ), let(Y = θ(X))
+r2(X, Y ) ← s(X, Y )
+
+17
+
+Deﬁnition 8 (Bottom-up logical substitution). Let θ be a substitution and
+Q = (L, P ) be a Nested Datalog query. Then the bottom-up substitution θ(Q) is
+the query resulting after applying the top-down substitution of θ in Q and then
+moving down the added literals until they reached the leafs of the tree of P .
+
+Is not diﬃcult to see that the process of moving a literal down once level
+
+results in an equivalent program. Hence, we got the following result.
+
+Lemma 5. Let Q be a Nested Datalog query. Let ans(cid:3) and ans(cid:2) be the respective
+evaluation procedures using top-down and bottom up substitution. Then, for every
+extensional database E for Q holds ans(cid:3)
+
+E(Q) = ans(cid:2)
+
+E(Q).
+
+B Comments on ESWC 2018 review
+
+This document is an extended version of a paper submitted to ESWC 2018.
+In this appendix, we will present some answers to questions formulated by the
+reviewers. Some of them could be useful to understand the notions deﬁned here.
+We are currently working to improve the readability of the paper. When we
+achieve the desired clarity, we will remove this appendix.
+
+It is important to recall that the ﬁrst motivation of our work is that the
+evaluation of correlated (sub)queries diﬀers among the current SPARQL engines
+(we presented examples of this fact). Second, the origin of such diﬀerences comes
+from an ambiguous semantics deﬁned by the SPARQL 1.1 speciﬁcation. Third,
+there is no standard foundation or reference to explain the notion of correlated
+queries (even for well-known studied languages like SQL, relational algebra, and
+Datalog). Therefore, our goal was to provide a logical framework to study possible 
+interpretations and semantics for correlated queries, and to understand the
+implementations of actual engines.
+
+The importance of a logical foundation for query languages was noticed by
+Reiter. He presented a variety of arguments in favor of doing so. One of these
+arguments was that an evaluation argument could be proved to be sound and
+complete with respect to the logical semantics of the data model and the query. In
+this work we follow the motivations of Reiter when providing a logical framework
+to understand the notion of correlation in nested queries.
+
+Answers to questions.
+
+Reviewer 3 is right: we missed the paper of Kaminski et al. (ACM 2017), and
+it should be incorporated into the related work. We reviewed the WWW’2016
+version, but it does not mention the issues of substitution. On the other side,
+the ACM’2017 version diﬀers from our work as it proposes a concrete correlation
+method. In our case, we aim to provide a logical framework to try to understand
+alternative semantics. For example, according to their proposal, the result of the
+example query in the introduction of our paper is (5, −). This result is diﬀerent
+to all solutions provided by the studied engines.
+
+Reviewer 1: Concerning the modes of the operators join and minus. Let us
+explain the case of the join (the case of the minus is similar). Given two relations
+
+18
+
+r and s, the SPARQL operation (r 1 s) corresponds to the set of concatenations
+of compatible tuples µ in r and ν in s. That is, µ and ν holds that µ(X) = ν(X),
+µ(X) is unbound or ν(X) is unbound, for each variable X (Here we represent
+unbound values with the symbol ⊥.) This is equivalent to say that there exists
+an instance of the tuples µ and nu such that µ(X) = ν(X) (that we wrote in
+modal notation). A tuple (a, b) is usually called an instance (or possible world
+as we mentioned previously in the paper) of (a, ⊥). The same applies to literals
+(reviewer 4 asked this). Reviewer 3 is also confused with the “magic” behavior
+of ⊥ in the modal evaluation of equalities. The 2(ﬁlter(a = ⊥)) is false because
+there is a instance (e.g., ﬁlter(a = b)) where the literal is not true. On the other
+hand, 3(ﬁlter(a = ⊥)) is true because there is a instance (e.g., ﬁlter(a = a))
+where the literal is true.
+
+In several parts of the document we use the term “built-in”. It seems that
+this notion is not clear to some reviewers. The built-in si a formal notion in
+Datalog, e.g. see the survey of Ceri, Gottlob, and Tanca, “What You Always
+Wanted to Known About Datalog (And Never Dared to Ask).” A built-in is
+a literal that occurs in the body of a rule and is evaluated after instantiating
+all variables occurring positively in that rule. In this work nested queries and
+equality formulas are built-ins.
+
+Reviewer 2: Concerning the analysis of the two semantics discussed in the
+related work. The answer is yes. The proposed by Patel-Schneider and Martin
+evaluates the inner pattern ﬁrst, so it corresponds to the top-down logical substitution.
+ On the other hand, the proposal of Seaborne applies substitutions in
+the leaves of the syntactical tree of an expression, so it corresponds to bottom-up
+logical substitution.
+
+Reviewer 3: Concerning the expression “equality formulas require that all
+variables be assigned before being evaluated.” The reviewer is right in that the
+explanation is poor. To explain better the notion that we are introducing, consider 
+the rule p(X, Y ) ← q(X), X = Y . According to Levene and Loizou (“A
+guided tour of relational databases and beyond”), if the database contains a
+fact q(a) then the rule infers the fact p(a, a). Intuitively, the equality X = Y
+“pass” the value from X to Y . We do not use such notion because it brings problems 
+when Y is bound in the outer query. With our built-in equality, the rule
+p(X, Y ) ← q(X), ﬁlter(X = Y ) is unsafe because Y does not occur positively. In
+other words, Y is not assigned.
+
+Reviewer 3: Concerning to Stratiﬁed Datalog. When Datalog is extended
+with negation, two approaches could be used, Stratiﬁed or Inﬂationary (see the
+survey of Ceri, Gottlob and Tanca of 1989). Datalog programs with negation
+satisfy several minimal Herbrand models. This entails diﬃculties in deﬁning
+the semantics of Datalog programs. Stratiﬁed Datalog permit us choosing a
+distinguished minimal Herbrand model by approximating the CWA. To the best
+of our knowledge, all translation from SQL and SPARQL to Datalog consider
+stratiﬁed programs.
+
+Reviewer 3: About the notion of “logically connected.” It was intended as an
+informal intuition just to say that two variables are not logically independent
+
+19
+
+(that is, the values they get are related somewhat). For instance, consider the
+rules p(X) ← q(X, Y ) and q(Z, U ) ← r(Z, V ), s(U ). Then the variables X and
+Z are logically connected. To be more precise, the connection is not between the
+variables, but between the position where variables occur in each rule. We can
+rename the variables consequently without breaking the logical connection.
+
+The notions of “logical chain”, “logical substitution” and “improper substi-
+tution” are related to the notion of “logically connected”. A logical chain is a
+sequence of connections between variables. We can apply a logical substitution
+X/a in a variable Y occurring in a rule of a nested query if there is a logical
+chain from an occurrence of X in the goal of the nested query to the variable
+Y in such rule. Similarly, the substitution is improper when there is no such
+connection between the variable substituted Y and an occurrence of X in the
+goal of the nested query. One of our contributions is showing that some engines
+do an improper substitution.
+
+What is the problem with improper substitution? In Sec. 3 we argue that
+improper substitution compromises the compositionality of nesting. As we explain 
+in this appendix, one of the reasons for a logical foundation is to provide a
+logical interpretation for queries. In the proof of Lemma 2, we extend the usual
+translation from Datalog programs to ﬁrst order formulas by providing a translation 
+for the new type of atom: nested queries. In an ideal setting, each nested
+query can be translated into a ﬁrst order query, independently of the outer query
+where it is nested. Intuitively, compositionality is achieved when the meaning of
+the nested query does not depend on the query where it is nested. For instance,
+let Q be a query nested in a rule R of an outer query, X be a variable that
+occurs in a rule R′ in Q, and X be not logically connected with the goal of Q.
+Then, allowing improper substitution, we have two possible translations for Q as
+a ﬁrst order formula. If X occurs positively in R, then we remove the universal
+quantiﬁer ∀X to the rule R′. Otherwise, we do not remove it.
+
+From reviewer 3: concerning the meaning of let(X = a). We write {p(X, Y ) ←
+q(X), let(Y = a)} to denote the program {p(X, Y ) ← q(X), l(Y ); l(a)}. Thus,
+the program has a rule and a fact.
+
+From reviewers 3 and 4: The notice that in the table of page 6, when let(X =
+θ(X)) is moved down, then it changes to let(Y = θ(X)). Reviewers suggest that
+it could be a typo. However, this is correct. The variables on the left side of the
+equality correspond to the variable that is connected with X, that may change
+depending on the rule. Also θ(X) does not change because it is a constant in the
+current substitution.
+
+Reviewer 4 complains that the semantics of S, θ |= P was not explained for a
+program P . We do not deﬁne S, θ |= P , because it is not necessary to deﬁne the
+semantics of a program. It suﬃces to deﬁne what facts are inferred by a rule.
+The procedure for doing that is standard in the Datalog literature. First, a true
+value is deﬁned for literals in the body of a rule with respect to a substitution.
+We write S, θ |= L to denote that a literal L is evaluated as true with respect to
+a substitution θ and a set of facts S. Second, a fact θ(H) is inferred in a rule if H
+is the head and for each literal L in the body of the rule, L is true with respect
+
+20
+
+to θ. This process ends when no more facts can be inferred from all the rules
+of the program. Thus, the semantics of the program is deﬁned by this inference
+process.
+
+For ﬁrst order formulas φ and ψ, the notation φ |= ψ has the standard
+
+meaning. That is, ψ is a logical consequence of ψ.
+
+Reviewer 4: concerning to how variables in a negated subquery can be positively 
+deﬁned. Variables are deﬁned positively in the scope of a rule. As subqueries 
+are built-ins, a subquery Q does not matter for counting the variables
+occurring positively in the rule where Q occurs. Also, the variables that are deﬁned 
+positively in each rule of the subquery Q do not depend on if Q is negated
+or not.
+
+Reviewer 4: concerning to what “evaluate P ” means. It means computing all
+
+the facts that can be inferred from P in the current database.
+
+Reviewer 4: concerning to what “compatible” means. Compatibility is an
+standard SPARQL notion. Two mappings mu and nu are said to be compatible
+if for each variable X in the domain of mu holds µ(X) = ν(X) or X is unbound
+in ν.
+
+Reviewer 4: concerning what “moving down literals of the form let(Y =
+θ(X))” mean. It essentially means if Y is logically connected with another variable 
+Z that occurs in a rule below in dependency graph of the program, then
+an equivalent literal let(Z = θ(X)) is appended to such rule, and then removed
+from the original rule. This process is detailed in Appendix A.
+
+Reviewer 4: concerning what “if the logical substitution in a query uses the
+deﬁnition of substitution for a rule.” The answer is yes. We ﬁrst deﬁned how to
+substitute a variable X by a value a in a rule. Then we deﬁned how to substitute
+X by a in a program. It is not simply substituting X by a in a rule where X
+occurs because in Datalog the scope of variables are the rules where they occur.
+Thus, we need to identify the variables that are logically connected and then
+apply a substitution of them, using the previous deﬁnition of substitution in a
+rule. We denote the substitution of θ in a program P as θ(P ).
+
+Reviewer 4: concerning to “extensional database.” This is a standard concept
+of Datalog that can be revised in the Datalog survey of Ceri et al. mentioned
+before. Essentially, an extensional database is the set of facts where the query is
+evaluated, and the intentional database is such that includes the inferred facts.
+Reviewer 4: about how the corollary follows from Lemma 2. First order
+queries and standard Datalog have the same expressive power (see the survey
+referred above). Lemma 2 says that Nested Datalog also has the same expressive 
+power than ﬁrst order queries. Then, we conclude that nesting does not
+add expressive power to Datalog. This applies to all the presented methods of
+substitution because all of them were checked in the proof of Lemma 2.
+
+Reviewer 4: concerning the word EXISTStential in the bibliography. This
+word is correct. It was part of the title of the cited paper. The authors create
+this new world to make emphasize of the keyword EXISTS.
+
+

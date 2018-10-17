@@ -1,0 +1,783 @@
+Gradual Information Flow Typing
+
+Tim Disney and Cormac Flanagan
+
+University of California Santa Cruz
+
+Abstract. We present a method to support the gradual evolution of
+secure scripts by formalizing an extension of the simply-typed lambda
+calculus that provides information ﬂow constructs. These constructs allow 
+initially insecure programs to evolve via targeted refactoring and to
+provide dynamic information ﬂow guarantees via casts, as well as static
+information ﬂow guarantees via labeled types.
+
+1
+
+Introduction
+
+Several decades of software engineering experience has demonstrated that writing 
+“correct” software is close to impossible, due to the inherent complexity of
+software systems and the fallible nature of human programmers. Consequently,
+relying on security to be an emergent property of software is unwise. We argue 
+instead that security properties, such as data conﬁdentiality and integrity,
+should be monitored and enforced by small trusted parts of the code base, with
+help from the run-time system where appropriate.
+
+In practice, programmers are initially concerned more with functionality than
+with security. It is only once a system has proven useful, and has attracted users
+and potential attackers, that security concerns become dominant. While it might
+be preferable to address security concerns right from the start of a project, competitive 
+pressures often dictate quickly developing an initial (perhaps insecure)
+system that helps clarify the requirements and gain a market foothold, and
+then to evolve the system with additional features, including security guarantees.
+ Hence, we would like to support a development methodology whereby the
+programmer ﬁrst develops an initial, insecure system, and then incrementally
+refactors the system to add data conﬁdentiality and integrity guarantees via
+information ﬂow tracking.
+
+Much prior work has addressed information ﬂow security. Most of this work
+has focused on static type systems such as JFlow [15], Jif [14], and others [29,
+16], which involve signiﬁcant up-front costs. More recent investigations explore
+dynamic information ﬂow [4, 5, 10], which requires less up-front investment but
+which cannot document security properties as types.
+
+In this paper, we explore some initial steps towards realizing the vision of
+gradual evolution from untyped scripts into security typed applications. Since
+prior work has addressed evolving dynamic scripts into typed code [1, 27, 12, 11],
+the starting point for our development is a typed language. We explore how to
+gradually extend programs in this language with security guarantees and with
+security types.
+
+To support gradual evolution of security properties, our approach provides
+both static and dynamic information ﬂow guarantees. We use dynamic information 
+ﬂow tracking for all code, including conventionally typed code that has not
+been refactored to express information ﬂow properties in the type system. Our
+language includes a labeling operation for marking data as private, and a cast
+operation for checking the labels on data. Both operations naturally extend to
+higher-order data by treating contravariant function arguments appropriately.
+The cast operation may fail if applied to incorrectly-labeled data; in this case
+either the term inside the cast or the context of the cast is blamed, which we
+call positive and negative blame respectively.
+
+For any program, including those without security types, our approach guarantees 
+termination insensitive non-interference (TINI), which means that private 
+inputs cannot ﬂow into or inﬂuence public outputs. Attempts to violate
+TINI results in cast failures. We assume a label lattice for expressing data conﬁdentiality 
+and integrity properties. For simplicity, we often use a two-element
+lattice with a public or low conﬁdentiality label (L) and a private or high conﬁdentiality 
+label (H), but the approach generalizes to any lattice.
+
+In addition to tracking information ﬂow dynamically, we enrich the type
+system to express invariants regarding security labels on the underlying data.
+Our preservation theorem states that if a term t has type Intk, where k is a
+security label, then t can only evaluate to a value nm, where n is an integer and
+the label m satisﬁes m (cid:118) k. Thus, the type system documents a conservative
+upper bound on the label of the resulting value.
+
+In our language, each value and type has an associated security label. To
+support legacy code, an unlabeled value implicitly has label ⊥ (the bottom
+element in the lattice) indicating that the value is not conﬁdential. Conversely, an
+unlabeled type implicitly has label (cid:62), allowing it to describe values with arbitrary
+labels, since any label m satisﬁes m (cid:118) (cid:62). In this manner, conventionally typed
+code can interoperate with new precisely typed code, with casts at interfaces
+between the two typing disciplines.
+
+If the entire application has precise security types, then there is no need for
+downcasts and for dynamic tracking of information ﬂow labels. This approach
+has been explored in depth in prior systems such as JFlow [15]. In contrast,
+the novelty of this paper is that dynamic label tracking enables downcasts, and
+avoids the need to statically document precise security types throughout the
+entire application all at once. Instead, the application can gradually evolve from
+(1) conventionally typed with no security guarantees, to (2) having casts and
+dynamic information ﬂow guarantees, to (3) being precisely typed with no casts
+and with static information ﬂow guarantees. Additionally, this evolution process
+can stop or pause at any point in the middle, depending on engineering, economic,
+ and security requirements, as each intermediate step is a valid well-typed
+program (albeit with diﬀerent run-time guarantees).
+
+1.1 Motivating Example
+
+To illustrate the beneﬁts of gradual information ﬂow, consider the following code
+fragment which deals with sensitive salary information:
+
+let age : Int = 42
+let salary : Int = 58000
+let intT oString : Int → Str = . . .
+let print : Str → Unit = λs: Str. . . .
+print(intT oString(salary))
+
+This code does not track the ﬂow of sensitive information. After some embarrassing 
+salary leaks, the program manager might want to “harden” the script to
+limit the ﬂow of sensitive information
+In the following revised code, the labeling operation (58000 : Int (cid:86) IntH)
+marks data as private, and the cast (s: Str ⇒p StrL) checks that data is public:
+
+let age : Int = 42
+let salary : Int = 58000: Int (cid:86) IntH
+let intT oString : Int → Str = . . .
+let print : Str → Unit = λs: Str. let s = (s: Str ⇒p StrL) in . . .
+print(intT oString(salary))
+
+The runtime system tracks the ﬂow of information through all code. Since the
+intT oString library function it is applied to a conﬁdential argument, it produces
+a conﬁdential result, and so the cast inside print will fail at runtime. Thus,
+independent of bugs in the rest of the code, print ensures that conﬁdential data
+is never printed.
+
+As a next step, we wish to document and verify information ﬂow invariants
+using the type system. We begin by extending the code with explicit labels on
+types. Note that IntH is the most general integer type, since these potentially
+private integers can store both public and private data.
+
+let age : IntL = 42
+let salary : IntH = 58000: IntL (cid:86) IntH
+let intT oString : Int → Str = . . .
+let print : StrH → UnitH = λs: StrH . let s = (s: StrH ⇒p StrL) in . . .
+print(intT oString(salary))
+
+// unrefactored module
+
+The above code incorporates information ﬂow types but does not yet provide
+static guarantees since print accepts H values (at least statically). To provide 
+static guarantees, we ﬁrst reﬁne print’s argument type to specify that it
+only accepts public data. This refactoring requires introducing a variant of the
+intT oString function, called intT oStringL, for handling public data, using a
+cast to specify that intT oString has the desired behavior of mapping public
+
+Figure 1: λgif Syntax
+
+ı ::= Int | Bool | Str
+a, b ::= ı | A → B
+A, B ::= ak
+t, s ::= v | x | t s | op t | t : A (cid:86) B | t : A ⇒p B
+r ::= c | λx: A. t
+v, w ::= rk
+k, l, m
+Γ ::= ∅ | Γ, x : A
+
+Base Types
+Raw Types
+Labeled Types
+Terms
+Raw Values
+Labeled Values
+Labels
+Typing Environment
+
+integer inputs to public string results.
+let age : IntL = 42
+let salary : IntH = 58000: IntL (cid:86) IntH
+let intT oString : Int → Str = . . .
+let intT oStringL : IntL → StrL = intT oString : (IntH → StrH) ⇒q (IntL → StrL)
+let print : StrL → UnitL = λs: StrL. . . .
+print(intT oStringL(salary))
+
+// unrefactored module
+
+Using these more precise types, bugs such as print(intT oStringL(salary)) now
+are revealed at compile time. The programmer then corrects the code to the
+intended print(intT oStringL(age)), which passes both static and dynamic security 
+checks. Note that this security typed code interoperates with the legacy
+intT oString module via the security interface speciﬁcation (aka cast) inside
+intT oStringL.
+
+2 The Gradual Information Flow Language
+
+The syntax of λgif
+
+We formalize our ideas for gradual security for an idealized language called λgif ,
+which extends the simply typed λ-calculus with gradual information flow.
+is presented in ﬁgure 1. Raw types a include integers
+(Int), booleans (Bool), strings (Str), and function types (A → B). Types A are
+labeled raw types (ak). Security labels (k) denote the conﬁdentiality or integrity
+of a particular value or term. The set of labels form a lattice, with a ordering
+operation (cid:118), join operation (cid:116), least element ⊥, and top element (cid:62).
+
+Terms t include variables (x), function applications (t s), primitive operations
+(op t), and values (v). Raw values r can be either constants (c), such as 42
+or true, or functions (λx : A. t). Values v are labeled raw values (rk). The
+classiﬁcation operation (t : A (cid:86) B) adds a label to a value. For example, 3L :
+IntL (cid:86) IntH evaluates to 3H.
+Casts (t: A ⇒p B) attempt to coerce a term t of type A into a new type B.
+If the labels on the value are not compatible with type B, the cast will fail, in
+which case the blame label p assigns blame to the appropriate code fragment.
+For example, attempting to downcast a private integer 42H to public via the cast
+42H : IntH ⇒p IntL will fail. An upcast of a public integer 42L : IntL ⇒p IntH
+to a private integer however will succeed, and return the value 42L unchanged.
+That is, casts do not change values, they only change static types (or else fail).
+
+2.1 Operational Semantics
+
+We formalize the dynamic semantics of λgif using the big-step evaluation relation
+t ⇓ v, which evaluates a term t to value v: see ﬁgure 2. The [e-app] rule for
+function application (t s) evaluates t to a function (λx: A. t1)k with a security
+label k, evaluates the argument s to a value v, and then evaluates the substituted
+function body t1[x := v] to a labeled value rm. The result of the application
+depends on the function that is invoked, so the rule adds the label k of the callee
+to the resulting value, yielding rm(cid:116)k.
+
+The [e-prim] rule for primitive operations (op t) refers to the δop function,
+
+which deﬁnes the semantics of primitive operations on raw values.
+
+There are three rules to support the cast operation, which checks if a runtime
+label is compatibile with a speciﬁed static label. If the check fails then the rules
+use a blame label p to identify the code that is at fault. We say that positive blame
+(p) means the term within the cast is at fault and negative blame (p) means the
+context containing the cast is at fault. The negation of negative blame is the
+original blame label: p def= p.
+The [e-cast-base] rule is for casts of base types ı (i.e. non-functions). The
+cast (t : ık ⇒p ıl) evaluates t to a value rm and checks that the label m on the
+value is less than the label l on the target type; if not then the [b-cast-bad] rule
+will blame p. The other [b-. . . ] rules simply propagate blame.
+The [e-cast-fn] rule for t: (A → B)k ⇒p (A(cid:48) → B(cid:48))l is similar to [e-cast-base],
+
+except that the value rm produced by t is wrapped in a new function:
+
+(λx(cid:48): A(cid:48). (rm (x(cid:48) : A(cid:48) ⇒p A)): B ⇒p B(cid:48))⊥
+
+which satisﬁes the target type (A(cid:48) → B(cid:48)). The wrapper function is used to cast
+the argument and result to the appropriate types. The argument x(cid:48) is cast from
+the new type A(cid:48) to the original type A, which the original function r can accept.
+The blame in this cast is inverted p to indicate that if this cast fails blame is
+assigned to the cast context (which invoked the function with an incompatible
+argument). The result of calling the function is cast to B(cid:48).
+For an example of the cast rule, consider a function f of type IntL → BoolL.
+If we strengthen its range via the cast f : (IntL → BoolL) ⇒p (IntL → BoolH),
+calling the resulting wrapper function f(cid:48) : IntL → IntH will always succeed
+since the result res of f is guaranteed to be public and f(cid:48) casts res to a private
+boolean, which will always succeed. If, however, we strengthen the domain with
+the cast f : (IntL → BoolL) ⇒p (IntH → BoolL), the argument x(cid:48) must be
+downcast (x(cid:48) : IntH ⇒p IntL) and will fail when x(cid:48) is private.
+
+The ﬁnal two rules support classiﬁcation, marking data as having higher
+conﬁdentiality (or alternatively lower integrity). The [e-classify-base] rule is
+used for classifying base types. The classiﬁcation t: ık (cid:86) ıl adds the target label
+l to the data by evaluating t to a value rm and joining l to label m.
+The [e-classify-fn] rule for t : (A → B)k (cid:86) (A(cid:48) → B(cid:48))l returns a wrapper
+
+function
+
+(λx(cid:48): A(cid:48). (rm (x(cid:48) : A(cid:48) (cid:86) A)): B (cid:86) B(cid:48))m(cid:116)l
+
+Figure 2: λgif Operational Semantics
+
+t ⇓ v
+
+v ⇓ v
+
+r = δop(r1,··· , rn)
+k = (cid:116)ki
+ti ⇓ rki
+
+i
+
+op t ⇓ rk
+
+[e-value]
+
+[e-prim]
+
+s ⇓ v
+
+t ⇓ (λx: A. t1)k
+
+t1[x := v] ⇓ rm
+t s ⇓ rm(cid:116)k
+
+t ⇓ rm
+m (cid:118) l
+
+(t : ık ⇒p ıl) ⇓ rm
+
+[e-app]
+
+[e-cast-base]
+
+t ⇓ rm m (cid:118) l
+
+v = (λx(cid:48): A(cid:48). (rm (x(cid:48) : A(cid:48) ⇒p A)) : B ⇒p B(cid:48))⊥
+
+(t : (A → B)k ⇒p (A(cid:48) → B(cid:48))l) ⇓ v
+
+(t : ık (cid:86) ıl) ⇓ rm(cid:116)l
+
+t ⇓ rm
+
+t ⇓ rm
+
+v = (λx(cid:48): A(cid:48). (rm (x(cid:48) : A(cid:48) (cid:86) A)) : B (cid:86) B(cid:48))m(cid:116)l
+
+(t : (A → B)k (cid:86) (A(cid:48) → B(cid:48))l) ⇓ v
+
+[e-cast-fn]
+
+[e-classify-base]
+
+[e-classify-fn]
+
+t ⇓ blame p
+
+t ⇓ rm
+m (cid:54)(cid:118) l
+
+(t : ak ⇒p bl) ⇓ blame p
+
+t ⇓ blame p
+t s ⇓ blame p
+t ⇓ blame p
+
+(t : ak ⇒p bl) ⇓ blame p
+
+[b-cast-bad]
+
+[b-app-l]
+
+[b-cast]
+
+ti ⇓ vi
+
+∀i ∈ 1..j − 1
+
+t ⇓ v
+
+tj ⇓ blame p
+op t ⇓ blame p
+s ⇓ blame p
+t s ⇓ blame p
+t ⇓ blame p
+
+(t : A (cid:86) B) ⇓ blame p
+
+[b-prim]
+
+[b-app-r]
+
+[b-classify]
+
+that adds the labels in A to the argument and the labels in B(cid:48) to the result.
+In addition, the security label of the function type is maintained by giving the
+wrapper function the label from the original function (m) joined with the label
+from the function being cast to (l).
+
+3 Termination Insensitive Non-Interference
+
+The central guarantee provided by our semantics is non-interference, which informally 
+states that two runs of the same program that diﬀer only in private
+data will not produce diﬀerent public results. We formalize the notion of two
+terms diﬀering only in private data via the equivalence relation (∼H) deﬁned in
+ﬁgure 3. Essentially, two values are equivalent if either (1) both are at least as
+secure as H (where H is an arbitrary lattice element) or (2) their subterms are
+equivalent.
+
+Theorem 1 (Termination Insensitive Non-Interference).
+If t1 ∼H t2 and t1 ⇓ v1 and t2 ⇓ v2 then v1 ∼H v2.
+
+Figure 3: Equivalence
+
+v ∼H v
+
+H (cid:118) m1 H (cid:118) m2
+
+1 ∼H rm2
+rm1
+
+2
+
+r ∼H r
+
+t1 ∼H t2
+
+(λx: A. t1) ∼H (λx: A. t2)
+
+[eq-val1]
+
+r1 ∼H r2
+1 ∼H rm
+rm
+
+2
+
+[eq-val2]
+
+[eq-fun]
+
+c ∼H c
+
+[eq-const]
+
+t ∼H t
+
+x ∼H x
+t1 ∼H t2
+
+(t1 : A ⇒p B) ∼H (t2 : A ⇒p B)
+
+[eq-var]
+
+[eq-cast]
+
+t1 ∼H t2 s1 ∼H s2
+(t1 s1) ∼H (t2 s2)
+ti ∼H t(cid:48)
+i ∈ 1..n
+(op t) ∼H (op t(cid:48))
+
+i
+
+[eq-app]
+
+[eq-prim]
+
+t1 ∼H t2
+
+(t1 : A (cid:86) B) ∼H (t2 : A (cid:86) B)
+
+[eq-classify]
+
+Proof. By induction on the derivation of t1 ⇓ v1 and case analysis on the last
+rule used in the derivation.
+
+Note that since non-interference is termination insensitive two diﬀerent program 
+runs could diﬀer in their termination behavior (e.g. one could run to normal
+completion while the other terminates due to an attempted leaking of private
+data). The termination behavior permits an attacker to learn at most one bit of
+information about a value per execution1. Termination sensitive non-interference
+is a stronger guarantee but requires verifying that every loop with a conﬁdential
+loop test eventually terminates, which is rather diﬃcult (see for example [7]).
+
+Note that blame is an additional termination channel. We could have two
+equivalent terms where one term evaluates to a value and the other fails by
+assigning blame. This does not aﬀect termination insensitive non-interference
+since assigning blame is just another method of termination.
+
+4 Gradual Information Flow Types
+
+The runtime semantics detects bad downcasts in order to guarantee termination
+insensitive non-interference. However, we also want to catch security violations
+at compile time, where possible. To achieve this goal, we next develop a gradual
+type system where the labels on static types provide an upper bound on the
+labels of corresponding dynamic values.
+
+1 Though Askarov et al. [3] point out that an attacker could use intermediary output
+
+channels to leak more than a single bit, but only through a brute-force attack
+
+The type system is given by the typing relation Γ (cid:96) t : A, which judges
+a term t to have type A under the typing environment Γ : see ﬁgure 4. The
+[t-prim] rule enforces that for each primitive operation op t, the raw types ai
+are compatible with the type signature type(op) : a1 × . . .× an → b. It also joins
+the labels from each argument type (l = (cid:116)li) into the result type bl so that the
+resulting type will be at least as secure as the most secure argument.
+The [t-app] rule for function application (t s) judges t to have the function
+type (A → bk)l and the argument s to have a type A(cid:48) that is a subtype of
+A. Subtyping allows a function expecting a private input to also accept public
+arguments, since it will use both safely. In addition, the resulting type bk is
+joined with the function’s label l since the result depends on the function being
+used.
+The [t-cast] rule for t : A ⇒p B enforces that A and B are identical apart
+from security labels. The operation (cid:98).(cid:99) deﬁned in ﬁgure 4 strips labels from a
+λgif type to consider just the base types. Note that a well-typed cast may fail
+at runtime if the runtime security labels are not compatible.
+The [t-classify] rule for t : A (cid:86) B checks that B has higher security labels
+than A. This rule uses the positive subtyping relation (<:+) instead of the standard 
+subtyping relation (<:) since it is not acceptable to lower the security label
+of a function’s domain with a classiﬁcation. If this rule used standard subtyping,
+then the classiﬁcation t : IntH → IntH (cid:86) IntL → IntH would be valid, which
+we do not want.
+The full subtyping relation is given in ﬁgure 4. Two types are subtypes if
+they have the same base type and their labels are compatible (l (cid:118) k). If the
+types are function types, then the labels must be compatible and the domains
+must be contravariant (A(cid:48) <: A) and the ranges covariant (B <: B(cid:48)).
+
+The typing system ensures that the labels in each static type is a conservative
+
+upper bound on the labels of corresponding runtime values.
+
+We note that if a term t is well typed and we evaluate t then the resulting
+
+value v will still be well typed with the same type.2
+
+Theorem 2 (Preservation).
+If ∅ (cid:96) t : A and t ⇓ v then ∅ (cid:96) v : A
+
+The type system defers cast checks to the runtime system, since the safety of
+downcasts cannot be determined by the typing rules. For example, v : IntH ⇒p
+IntL will succeed if v has a public runtime label but it will fail if the label is
+private. However, we can still use types to partially reason about which cast
+failures may occur. In particular, if two types are subtypes in a cast, then it
+is not possible for either positive or negative blame to occur. Furthermore, we
+can decompose the subtyping relation into positive and negative subtyping (see
+ﬁgure 4), in a manner similar to [1, 2, 27]. If the types in a cast are positive (resp.
+negative) subtypes then the cast cannot produce positive (resp. negative) blame.
+
+2 Since we are using a big-step semantics to simplify the proof of non-interference we
+omit the standard progress theorem, which is diﬃcult to show in a big-step semantics.
+
+Figure 4: λgif Typing Rules
+
+Γ (cid:96) t : A
+
+Γ (cid:96) cl : type(c)l
+Γ, x : A (cid:96) t : B
+
+Γ (cid:96) (λx: A. t)l : (A → B)l
+
+[t-const]
+
+[t-abst]
+
+Γ (cid:96) t : (A → bk)l
+Γ (cid:96) s : A(cid:48) A(cid:48) <: A
+
+Γ (cid:96) t s : bk(cid:116)l
+
+[t-app]
+
+x : A ∈ Γ
+Γ (cid:96) x : A
+
+[t-var]
+
+Γ (cid:96) t : A A <:+ B
+Γ (cid:96) (t : A (cid:86) B) : B
+
+[t-classify]
+
+Γ (cid:96) t : A (cid:98)A(cid:99) = (cid:98)B(cid:99)
+Γ (cid:96) (t : A ⇒p B) : B
+
+[t-cast]
+
+Γ (cid:96) ti : ali
+
+i ∈ 1..n
+
+type(op) : a1 × . . . × an → b
+
+i
+
+l = (cid:116)li
+
+Γ (cid:96) op t : bl
+
+[t-prim]
+
+[sub-base]
+
+A <: B
+l (cid:118) k
+ıl <: ık
+l (cid:118) k
+ıl <:+ ık [sub-p-base]
+k (cid:118) l
+ıl <:− ık [sub-n-base]
+(cid:98)A(cid:99) : λgif types → λstlc types
+(cid:98)(A → B)k(cid:99) = (cid:98)A(cid:99) → (cid:98)B(cid:99)
+
+(cid:98)ak(cid:99) = a
+
+l (cid:118) k A(cid:48) <: A B <: B(cid:48)
+(A → B)l <: (A(cid:48) → B(cid:48))k
+l (cid:118) k A(cid:48) <:− A B <:+ B(cid:48)
+(A → B)l <:+ (A(cid:48) → B(cid:48))k
+k (cid:118) l A(cid:48) <:+ A B <:− B(cid:48)
+(A → B)l <:− (A(cid:48) → B(cid:48))k
+
+[sub-app]
+
+[sub-p-app]
+
+[sub-n-app]
+
+Theorem 3 (Blame Theorem).
+1. If ∅ (cid:96) t : A and ∀(t(cid:48) : B ⇒p C) ∈ t, B <: C then t (cid:54)⇓ blame p and t (cid:54)⇓ blame p.
+2. If ∅ (cid:96) t : A and ∀(t(cid:48) : B ⇒p C) ∈ t, B <:+ C then t (cid:54)⇓ blame p.
+3. If ∅ (cid:96) t : A and ∀(t(cid:48) : B ⇒p C) ∈ t, B <:− C then t (cid:54)⇓ blame p.
+Proof. By contradiction assuming that blame has occurred.
+
+5 Related Work
+Information ﬂow has a long history of investigating both static and dynamic approaches 
+to track information going back to the work of Denning [8, 9]. Sabelfeld
+and Myers have an extensive survey of the ﬁeld [18]. Our paper provides a synthesis 
+of prior static and dynamic techniques.
+
+There are a number of approaches that use type systems for information
+ﬂow. Volpano et al. [26] formulate the work of Denning as a type system and
+prove its soundness. Heintze and Riecke [13] extend a simple calculus that uses
+
+a type system to track direct and indirect object creators and readers. Pottier
+and Simonet [17] present information ﬂow type inference for a simpliﬁed ML.
+
+Some approaches use purely dynamic techniques. Austin and Flanagan [4,
+5] dynamically track information ﬂow. Shroﬀ et al. [19] dynamically track information 
+ﬂow by tracking indirect dependencies of program points. Devriese and
+Piessens [10] take an alternative approach called secure multi-execution that
+runs the program multiple times, once for each security level.
+
+Several approaches use a hybrid of static analysis with dynamic checks during
+runtime to enforce information-ﬂow guarantees. This idea is similar to our work
+but our contribution is to allow the programmer to choose when to use dynamic
+checks and when to use static typing. Chandra and Franz [6] use both static
+and dynamic techniques for the Java Virtual Machine and allow policies to be
+changed at runtime. Myers [15] deﬁnes an extension to Java called JFlow (which
+has become Jif [14]) using the hybrid method.
+
+Research on integrating static and dynamic type systems also has a large
+body of work which we take as our starting point for extending types with security 
+labels. Thatte [22] uses structural subtyping and the notion of quasi-static
+typing to integrate static and dynamic types. Tobin-Hochstadt and Felleisen [23]
+automatically infer contracts on untyped modules and formulate Typed Racket [24,
+25]. Gronski et al. [12] use hybrid type checking, which integrates static type
+checking with dynamic contract checking in the Sage language. Siek and Taha [20]
+present gradual typing which uses runtime casts when types are not known at
+compile time. Wrigstad et al. [28] use the notion of like types in the Thorn language.
+ Ahmed et al. [21, 1, 27] combine static and dynamic types with casts and
+blame; much of our formulation follows their methods and notation but with the
+addition of security labels and information ﬂow.
+
+6 Conclusion
+
+We have presented an idealized language for gradual security. The language
+enables programmers to mark data as conﬁdential, and the language runtime
+tracks conﬁdential data through all program operations, allowing subsequent cast
+checks to ensure that sensitive data is not released inappropriately. In this manner,
+ termination insensitive non-interference is guaranteed in a dynamic manner.
+In addition, types can be gradually reﬁned with security labels to document
+interface expectations and to statically reason about the data. These labels need
+not be added all at once; instead, dynamic casts mediate between conventionally
+typed code (with no security labels) and precisely typed code (with labels).
+
+We show how the notions of positive and negative subtyping help reason
+about which casts may fail at run-time, and who may be blamed for such failures.
+This work represents an initial exploration in terms of an idealized language,
+illustrating some key ideas and correctness properties. Much work remains to
+scale up these techniques to realistic languages and to validate the practical
+utility of gradual security. In particular, we have not yet addressed assignments,
+which introduce some diﬃculties for dynamic information ﬂow due to implicit
+ﬂows, and which remains an important topic for future work.
+
+References
+
+1. A. Ahmed, R. Findler, J. Matthews, and P. Wadler. Blame for all. In Proceedings
+
+for the 1st workshop on Script to Program Evolution, pages 1–13. ACM, 2009.
+
+2. A. Ahmed, R. Findler, J. G. Siek, and P. Wadler. Blame for all, 2011. Draft copy,
+
+to appear in POPL 2011.
+
+3. A. Askarov, S. Hunt, A. Sabelfeld, and D. Sands. Termination-insensitive noninterference 
+leaks more than just a bit. In ESORICS ’08: Proceedings of the 13th
+European Symposium on Research in Computer Security, pages 333–348, Berlin,
+Heidelberg, 2008. Springer-Verlag.
+
+4. T. H. Austin and C. Flanagan. Eﬃcient purely-dynamic information ﬂow analysis.
+In PLAS ’09: Proceedings of the ACM SIGPLAN Fourth Workshop on Programming 
+Languages and Analysis for Security, pages 113–124, New York, NY, USA,
+2009. ACM.
+
+5. T. H. Austin and C. Flanagan. Permissive dynamic information ﬂow analysis. In
+Proceedings of the 5th ACM SIGPLAN Workshop on Programming Languages and
+Analysis for Security, pages 1–12. ACM, 2010.
+
+6. D. Chandra and M. Franz. Fine-grained information ﬂow analysis and enforcement
+in a java virtual machine. In ACSAC, pages 463–475. IEEE Computer Society,
+2007.
+
+7. B. Cook, S. Gulwani, T. Lev-Ami, A. Rybalchenko, and M. Sagiv. Proving conIn 
+Computer Aided Veriﬁcation, pages 328–340. Springer,
+
+ditional termination.
+2008.
+
+8. D. E. Denning. A lattice model of secure information ﬂow. Communications of the
+
+ACM, 19(5):236–243, 1976.
+
+9. D. E. Denning and P. J. Denning. Certiﬁcation of programs for secure information
+
+ﬂow. Communications of the ACM, 20(7):504–513, 1977.
+
+10. D. Devriese and F. Piessens. Noninterference through secure multi-execution. Security 
+and Privacy, IEEE Symposium on, 0:109–124, 2010.
+
+11. R. B. Findler and M. Felleisen. Contracts for higher-order functions. In Proceedings
+
+of the International Conference on Functional Programming, pages 48–59, 2002.
+
+12. J. Gronski, K. Knowles, A. Tomb, S. N. Freund, and C. Flanagan. Sage: Practical 
+hybrid checking for expressive types and speciﬁcations. In Proceedings of the
+Workshop on Scheme and Functional Programming, pages 93–104, 2006.
+
+13. N. Heintze and J. G. Riecke. The SLam calculus: Programming with secrecy and
+integrity. In Symposium on Principles of Programming Languages, pages 365–377,
+1998.
+
+14. Jif homepage. http://www.cs.cornell.edu/jif/, accessed October 2010.
+15. A. C. Myers. JFlow: Practical mostly-static information ﬂow control. In Symposium
+
+on Principles of Programming Languages, pages 228–241, 1999.
+
+16. A. C. Myers and B. Liskov. A decentralized model for information ﬂow control. In
+
+Symposium on Operating System Principles, pages 129–142, 1997.
+
+17. F. Pottier and V. Simonet. Information ﬂow inference for ML. Transactions on
+
+Programming Languages and Systems, 25(1):117–158, 2003.
+
+18. A. Sabelfeld and A. C. Myers. Language-based information-ﬂow security. Selected
+
+Areas in Communications, IEEE Journal on, 21(1):5–19, Jan 2003.
+
+19. P. Shroﬀ, S. F. Smith, and M. Thober. Dynamic dependency monitoring to secure
+
+information ﬂow. In CSF, pages 203–217. IEEE Computer Society, 2007.
+
+20. J. G. Siek and W. Taha. Gradual typing for functional languages. In Proceedings
+
+of the Workshop on Scheme and Functional Programming, 2006.
+
+21. J. G. Siek and P. Wadler. Threesomes, with and without blame. In POPL, pages
+
+365–376, 2010.
+
+22. S. Thatte. Quasi-static typing. In POPL 90 Proceedings of the 17th ACM SIGPLANSIGACT 
+symposium on Principles of programming languages, pages 367–
+381. ACM, 1990.
+
+23. S. Tobin-Hochstadt and M. Felleisen.
+
+Interlanguage migration: From scripts to
+programs. In Companion to the 21st ACM SIGPLAN symposium on Objectoriented
+programming systems languages and applications, pages 964–974. ACM, 2006.
+
+24. S. Tobin-Hochstadt and M. Felleisen. The design and implementation of typed
+
+scheme. ACM SIGPLAN Notices, 43(1):395–406, 2008.
+
+25. S. Tobin-Hochstadt and M. Felleisen. Logical types for untyped languages.
+
+In
+Proceedings of the 15th ACM SIGPLAN international conference on Functional
+programming, pages 117–128. ACM, 2010.
+
+26. D. Volpano, C. Irvine, and G. Smith. A sound type system for secure ﬂow analysis.
+
+Journal of Computer Security, 4(2-3):167–187, 1996.
+
+27. P. Wadler and R. B. Findler. Well-typed programs can’t be blamed. In Proceedings
+
+of the Workshop on Scheme and Functional Programming, 2007.
+
+28. T. Wrigstad, F. Nardelli, S. Lebresne, J. ¨Ostlund, and J. Vitek. Integrating typed
+and untyped code in a scripting language. In Proceedings of the 37th annual ACM
+SIGPLAN-SIGACT symposium on Principles of programming languages, pages
+377–388. ACM, 2010.
+
+29. S. A. Zdancewic. Programming languages for information security. PhD thesis,
+
+Cornell University, 2002.
+
+

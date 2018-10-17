@@ -1,0 +1,5652 @@
+Inf Retrieval J (2017) 20:253–291
+DOI 10.1007/s10791-017-9297-7
+
+I N F O R M A T I O N R E T R I E V A L E F F I C I E N C Y
+
+Document retrieval on repetitive string collections
+
+• Aleksi Hartikainen2
+
+• Kalle Karhu3
+
+•
+
+Travis Gagie1
+Juha Ka¨rkka¨inen4
+Jouni Sire´n6
+
+• Gonzalo Navarro5
+
+• Simon J. Puglisi4
+
+•
+
+Received: 28 May 2016 / Accepted: 28 February 2017 / Published online: 1 April 2017
+Ó The Author(s) 2017. This article is an open access publication
+
+Abstract Most of the fastest-growing string collections today are repetitive, that is, most of the
+constituent documents are similar to many others. As these collections keep growing, a key
+approach to handling them is to exploit their repetitiveness, which can reduce their space usage by
+orders of magnitude. We study the problem of indexing repetitive string collections in order to
+perform efﬁcient document retrieval operations on them. Document retrieval problems are
+routinely solved by search engines on large natural language collections, but the techniques are
+less developed on generic string collections. The case of repetitive string collections is even less
+understood, and there are very few existing solutions. We develop two novel ideas, interleaved
+LCPs and precomputed document lists, that yield highly compressed indexes solving the problem
+of document listing (ﬁnd all the documents where a string appears), top-k document retrieval (ﬁnd
+the k documents where a string appears most often), and document counting (count the number of
+documents where a string appears). We also show that a classical data structure supporting the
+latter query becomes highly compressible on repetitive data. Finally, we show how the tools we
+
+Preliminary partial versions of this paper appeared in Proc. CPM 2013, Proc. ESA 2014, and Proc. DCC
+2015. Part of this work was done while the ﬁrst author was at the University of Helsinki and the third author
+was at Aalto University, Finland.
+
+& Jouni Sire´n
+
+jouni.siren@iki.ﬁ
+
+Travis Gagie
+travis.gagie@gmail.com
+
+Aleksi Hartikainen
+ahartik@gmail.com
+
+Kalle Karhu
+kalle.karhu@iki.ﬁ
+
+Juha Ka¨rkka¨inen
+tpkarkka@cs.helsinki.ﬁ
+
+Gonzalo Navarro
+gnavarro@dcc.uchile.cl
+
+Simon J. Puglisi
+puglisi@cs.helsinki.ﬁ
+
+123
+
+254
+
+Inf Retrieval J (2017) 20:253–291
+
+developed can be combined to solve ranked conjunctive and disjunctive multi-term queries under
+the simple tf-idf model of relevance. We thoroughly evaluate the resulting techniques in
+various real-life repetitiveness scenarios, and recommend the best choices for each case.
+Keywords Repetitive string collections  Document retrieval on strings  Sufﬁx trees and
+arrays
+
+1 Introduction
+
+Document retrieval on natural language text collections is a routine activity in web and
+enterprise search engines. It is solved with variants of the inverted index (Bu¨ttcher et al.
+2010; Baeza-Yates and Ribeiro-Neto 2011), an immensely successful technology that can
+by now be considered mature. The inverted index has well-known limitations, however:
+the text must be easy to parse into terms or words, and queries must be sets of words or
+sequences of words (phrases). Those limitations are acceptable in most cases when natural
+language text collections are indexed, and they enable the use of an extremely simple
+index organization that is efﬁcient and scalable, and that has been the key to the success of
+Web-scale information retrieval.
+
+Those limitations, on the other hand, hamper the use of the inverted index in other kinds
+of string collections where partitioning the text into words and limiting queries to word
+sequences is inconvenient, difﬁcult, or meaningless: DNA and protein sequences, source
+code, music streams, and even some East Asian languages. Document retrieval queries are
+of interest in those string collections, but the state of the art about alternatives to the
+inverted index is much less developed (Hon et al. 2013; Navarro 2014).
+
+In this article we focus on repetitive string collections, where most of the strings are
+very similar to many others. These types of collections arise naturally in scenarios like
+versioned document collections (such as Wikipedia1 or the Wayback Machine2), versioned
+software repositories, periodical data publications in text form (where very similar data is
+published over and over), sequence databases with genomes of individuals of the same
+species (which differ at relatively few positions), and so on. Such collections are the
+fastest-growing ones today. For example, genome sequencing data is expected to grow at
+least as fast as astronomical, YouTube, or Twitter data by 2025, exceeding Moore’s Law
+rate by a wide margin (Stephens et al. 2015). This growth brings new scientiﬁc opportunities 
+but it also creates new computational problems.
+
+1
+
+CeBiB — Center of Biotechnology and Bioengineering, School of Computer Science and
+Telecommunications, Diego Portales University, Santiago, Chile
+
+2 Google Inc, Mountain View, CA, USA
+
+3
+
+Research and Technology, Planmeca Oy, Helsinki, Finland
+
+4 Department of Computer Science, Helsinki Institute of Information Technology, University of
+
+Helsinki, Helsinki, Finland
+
+5 Department of Computer Science, CeBiB — Center of Biotechnology and Bioengineering,
+
+University of Chile, Santiago, Chile
+
+6 Wellcome Trust Sanger Institute, Cambridge, UK
+
+1 www.wikipedia.org.
+2 From the Internet Archive, www.archive.org/web/web.php.
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+255
+
+A key tool for handling this kind of growth is to exploit repetitiveness to obtain size
+reductions of orders of magnitude. An appropriate Lempel-Ziv compressor3 can successfully 
+capture such repetitiveness, and version control systems have offered direct access to
+any version since their beginnings, by means of storing the edits of a version with respect
+to some other version that is stored in full (Rochkind 1975). However, document retrieval
+requires much more than retrieving individual documents. In this article we focus on three
+basic document retrieval problems on string collections:
+
+Document Listing: Given a string P, list the identiﬁers of all the df documents where
+
+Top-k Retrieval:
+Document
+Counting:
+
+P appears.
+Given a string P and k, list k documents where P appears most often.
+Given a string P, return the number df of documents where
+P appears.
+
+Apart from the obvious case of information retrieval on East Asian and other languages
+where separating words is difﬁcult, these queries are relevant in many other applications
+where string collections are maintained. For example, in pan-genomics (Marschall et al.
+2016) we index the genomes of all the strains of an organism. The index can be either a
+specialized data structure, such as a colored de Bruijn graph, or a text index over the
+concatenation of the individual genomes. The parts of the genome common to all strains
+are called core; the parts common to several strains are called peripheral; and the parts in
+only one strain are called unique. Given a set of DNA reads from an unidentiﬁed strain, we
+may want to identify it (if it is known) or ﬁnd the closest strain in our database (if it is not),
+by identifying reads from unique or peripheral genomes (i.e., those that occur rarely) and
+listing the corresponding strains. This boils down to document listing and counting
+problems. In turn, top-k retrieval is at the core of information retrieval systems, since the
+term frequency tf (i.e., the number of times a pattern appears in a document) is a basic
+criterion to establish the relevance of a document for a query (Bu¨ttcher et al. 2010; BaezaYates 
+and Ribeiro-Neto 2011). On multi-term queries, it is usually combined with the
+document frequency, df, to compute tf-idf, a simple and popular relevance model. Document 
+counting is also important for data mining applications on strings (or string mining
+(Dhaliwal et al. 2012)), where the value df=d of a given pattern, d being the total number
+of documents, is its support in the collection. Finally, we will show that the best choice of
+document listing and top-k retrieval algorithms in practice strongly depends on the df=occ,
+where occ is the number of times the pattern appears in the collection, and thus the ability
+to compute df quickly allows for the efﬁcient selection of an appropriate listing or topk 
+algorithm at query time. Navarro (2014) lists several other applications of these queries.
+In the case of natural language, there exist various proposals to reduce the inverted
+index size by exploiting the text repetitiveness (Anick and Flynn 1992; Broder et al. 2006;
+He et al. 2009, 2010; He and Suel 2012; Claude et al. 2016). For general string collections,
+the situation is much worse. Most of the indexing structures designed for repetitive string
+collections (Ma¨kinen et al. 2010; Claude et al. 2010; Claude and Navarro 2010, 2012;
+Kreft and Navarro 2013; Gagie et al. 2012a, 2014; Do et al. 2014; Belazzougui et al. 2015)
+support only pattern matching, that is, they count or list the occ occurrences of a pattern P
+in the whole collection. Of course one can retrieve the occ occurrences and then answer
+any of our three document retrieval queries, but the time will be X(occ). Instead, there are
+optimal-time indexes for string collections that solve document listing in time O jPj þ df
+Þ
+(Muthukrishnan 2002), top-k retrieval in time O jPj þ k
+Þ (Navarro and Nekrich 2012), and
+
+ð
+
+ð
+
+3 Such as p7zip, http://p7zip.sourceforge.net.
+
+123
+
+256
+
+Inf Retrieval J (2017) 20:253–291
+
+ð
+
+Þ (Sadakane 2007). The ﬁrst two solutions, however, use a
+document counting in time O jPj
+lot of space even for classical, non-repetitive collections. While more compact representations 
+have been studied (Hon et al. 2013; Navarro 2014), none of those is tailored to the
+repetitive scenario, except for a grammar-based index that solves document listing (Claude
+and Munro 2013).
+
+In this article we develop several novel solutions for the three document retrieval
+queries of interest, tailored to repetitive string collections. Our ﬁrst idea, called interleaved
+LCPs (ILCP) stores the longest common preﬁx (LCP) array of the documents, interleaved
+in the order of the global LCP array. The ILCP turns out to have a number of interesting
+properties that make it compressible on repetitive collections, and useful for document
+listing and counting. Our second idea, precomputed document lists (PDL), samples some
+nodes in the global sufﬁx tree of the collection and stores precomputed answers on those. It
+then applies grammar compression on the stored answers, which is effective when the
+collection is repetitive. PDL yields very efﬁcient solutions for document listing and top-k
+retrieval. Third, we show that a solution for document counting (Sadakane 2007) that uses
+just two bits per symbol (bps) in the worst case (which is unacceptably high in the
+repetitive scenario) turns out to be highly compressible when the collection is repetitive,
+and becomes the most attractive solution for document counting. Finally, we show how the
+different components of our solutions can be assembled to offer tf-idf ranked conjunctive
+and disjunctive multi-term queries on repetitive string collections.
+
+We implement and experimentally compare several variants of our solutions with the
+state of the art, including the solution for repetitive string collections (Claude and Munro
+2013) and some relevant solutions for general string collections (Ferrada and Navarro
+2013; Gog and Navarro 2015a). We consider various kinds of real-life repetitiveness
+scenarios, and show which solutions are the best depending on the kind and amount of
+repetitiveness, and the space reduction that can be achieved. For example, on very
+repetitive collections of up to 1 GB we perform document listing and top-k retrieval in
+10–100 microseconds per result and using 1–2 bits per symbol. For counting, we use as
+little as 0.1 bits per symbol and answer queries in less than a microsecond. Multi-term topk 
+queries can be solved with a throughput of 100–200 queries per second, which we show
+to be similar to that of a state-of-the-art inverted index. Of course, we do not aim to
+compete with inverted indexes in the scenarios where they can be applied (mainly, in
+natural language text collections), but to offer similar functionality in the case of generic
+string collections, where inverted indexes cannot be used.
+
+This article collects our earlier results appearing in CPM 2013 (Gagie et al. 2013), ESA
+2014 (Navarro et al. 2014a), and DCC 2015 (Gagie et al. 2015), where we focused on
+exploiting repetitiveness in different ways to handle different document retrieval problems.
+Here we present them in a uniﬁed form, considering the application of two new techniques
+(ILCP and PDL) and an existing one (Sadakane 2007) to the three problems (document
+listing, top-k retrieval, and document counting), and showing how they interact (e.g., the
+need to use fast document counting to choose the best document listing method). In this
+article we also consider a more complex document retrieval problem we had not addressed
+before: top-k retrieval of multi-word queries. We present an algorithm that uses our (single-
+term) top-k retrieval and document counting structures to solve ranked multi-term conjunctive 
+and disjunctive queries under the tf-idf relevance model.
+
+The article is organized as follows (see Table 1). In Sect. 2 we introduce the concepts
+needed to follow the presentation. In Sect. 3 we introduce the Interleaved LCP (ILCP)
+structure and show how it can be used for document listing and, with a different repreIn 
+Sect. 4 we introduce our second structure,
+sentation,
+
+for document counting.
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+Table 1 The techniques we study and the document retrieval problems we solve with them
+
+Problem
+
+Listing
+
+Top-k
+
+Counting
+
+ILCP
+
+Section 3.3
+
+Section 3.4
+
+PDL
+
+Section 4.1
+
+Section 4.2
+
+257
+
+Sadakane
+
+Section 5
+
+Precomputed Document Lists (PDL), and describe how it can be used for document listing
+and, with some reordering of the lists, for top-k retrieval. Section 5 then returns to the
+problem of document counting, not to propose a new data structure but to study a known
+one (Sadakane 2007), which is found to be compressible in a repetitiveness scenario (and,
+curiously, on totally random texts as well). Section 6 shows how our developments can be
+combined to build a document retrieval index that handles multi-term queries. Section 7
+empirically studies the performance of our solutions on the three document retrieval
+problems, also comparing them with the state of the art for generic string collections,
+repetitive or not, and giving recommendations on which structure to use in each case.
+Finally, Sect. 8 concludes and gives some future work directions.
+
+2 Preliminaries
+
+2.1 Sufﬁx trees and arrays
+
+A large number of solutions for pattern matching or document retrieval on string collections 
+rely on the sufﬁx tree (Weiner 1973) or the sufﬁx array (Manber and Myers 1993).
+Assume that we have a collection of d strings, each terminated with a special symbol ‘‘$’’
+(which we consider to be lexicographically smaller than any other symbol), and let T[1..n]
+be their concatenation. The sufﬁx tree of T is a compacted digital tree where all the sufﬁxes
+T[i..n] are inserted. Collecting the leaves of the sufﬁx tree yields the sufﬁx array, SA½1::n,
+which is an array of pointers to all the sufﬁxes sorted in increasing lexicographic order, that
+is, T½SA½i::n\T½SA½i þ 1::n for all 1 B i \ n. To ﬁnd all the occ occurrences of a string
+P[1..m] in the collection, we traverse the sufﬁx tree following the symbols of P and output
+the leaves of the node we arrive at, called the locus of P, in time O m þ occ
+Þ. On a sufﬁx
+array, we obtain the range SA½‘::r of the leaves (i.e., of the sufﬁxes preﬁxed by P) by
+binary search, and then list the contents of the range, in total time O m lg n þ occ
+We will make use of compressed sufﬁx arrays (Navarro and Ma¨kinen 2007), which we
+will call generically CSAs. Their size in bits is denoted jCSAj, their time to ﬁnd ‘ and r is
+denoted search mð Þ, and their time to access any cell SA½i is denoted lookup nð Þ. A
+particular version of the CSA that is tailored for repetitive collections is the Run-Length
+Compressed Sufﬁx Array (RLCSA) (Ma¨kinen et al. 2010).
+
+Þ.
+
+ð
+
+ð
+
+2.2 Rank and select on sequences
+
+Let S[1..n] be a sequence over an alphabet [1..r]. When r = 2 we use 0 and 1 as the two
+symbols, and the sequence is called a bitvector. Two operations of interest on S are
+rankcðS; iÞ, which counts the number of occurrences of symbol c in S[1..i], and
+selectcðS; jÞ, which gives the position of the jth occurrence of symbol c in S. For
+
+123
+
+258
+
+Inf Retrieval J (2017) 20:253–291
+
+bitvectors, one can compute both functions in O 1ð Þ time using o(n) bits on top of S (Clark
+m þ O mð Þ bits, so that rank
+1996). If S contains m 1s, we can also represent it using m lg n
+takes O lg n
+
+time and select takes O 1ð Þ (Okanohara and Sadakane 2007).4
+
+ 
+
+
+
+m
+
+The wavelet tree (Grossi et al. 2003) is a tool for extending bitvector representations to
+sequences. It is a binary tree where the alphabet [1..r] is recursively partitioned. The root
+represents S and stores a bitvector W[1..n] where W[i] = 0 iff symbol S[i] belongs to the
+left child. Left and right children represent a subsequence of S formed by the symbols of
+[1..r] they handle, so they recursively store a bitvector and so on until reaching the leaves,
+which represent a single symbol. By giving constant-time rank and select capabilities to
+the bitvectors associated with the nodes, the wavelet tree can compute any S[i] = c,
+rankcðS; iÞ, or selectcðS; jÞ) in time proportional to the depth of the leaf of c. If the
+bitvectors are represented in a certain compressed form (Raman et al. 2007), then the total
+space is at most n lg r þ oðnhÞ, where h is the wavelet tree height, independent of the way
+the alphabet is partitioned (Grossi et al. 2003).
+
+2.3 Document listing
+
+ð
+
+Let us now describe the optimal-time algorithm of Muthukrishnan (2002) for document
+listing. Muthukrishnan stores the sufﬁx tree of T; a so-called document array DA½1::n of T,
+in which each cell DA½i stores the identiﬁer of the document containing T½SA½i; an array
+C[1..n], in which each cell C[i] stores the largest value h \ i such that DA½h ¼ DA½i, or 0
+if there is no such value h; and a data structure supporting range-minimum queries (RMQs)
+over C, rmqCði; jÞ ¼ arg mini k  j C½k. These data structures take a total of O n lg n
+Þ bits.
+Given a pattern P[1..m], the sufﬁx tree is used to ﬁnd the interval SA½‘::r that contains the
+starting positions of the sufﬁxes preﬁxed by P. It follows that every value C[i] \ ‘ in
+C[‘..r] corresponds to a distinct document in DA½i. Thus a recursive algorithm ﬁnding all
+those positions i starts with k ¼ rmqCð‘; rÞ. If C½k ‘ it stops. Otherwise it reports
+document DA½k and continues recursively with the ranges C[‘..k - 1] and C[K?1..r] (the
+condition C½k ‘ always uses the original ‘ value). In total, the algorithm uses O m þ df
+Þ
+time, where df is the number of documents returned.
+Sadakane (2007) proposed a space-efﬁcient version of this algorithm, using just
+jCSAj þ O nð Þ bits. The sufﬁx tree is replaced with a CSA. The array DA is replaced with
+a bitvector B[1..n] such that B[i] = 1 iff i is the ﬁrst symbol of a document in T. Therefore
+DA½i ¼ rank1ðB; SA½iÞ can be computed in constant time (Clark 1996). The RMQ data
+structure is replaced with a variant (Fischer and Heun 2011) that uses just 2n ? o(n) bits
+and answers queries in constant time without accessing C. Finally, the comparisons
+C½k ‘ are replaced by marking the documents already reported in a bitvector V[1..d]
+(initially all 0s), so that V½DA½i ¼ 1 iff document DA½i has already been reported. If
+V½DA½i ¼ 1 the recursion stops, otherwise it sets V½DA½i, reports DA½i, and continues.
+This is correct as long as the RMQ structure returns the leftmost minimum in the range,
+and the range [‘..k - 1] is processed before the range C[K ? 1..r] (Navarro 2014). The
+total time is then O search mð Þ þ df  lookup nð Þ
+
+Þ.
+
+ð
+
+ð
+
+4 This is achieved by using a constant-time rank/select solution (Clark 1996) to represent their internal
+bitvector H.
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+259
+
+3 Interleaved LCP
+
+We introduce our ﬁrst structure, the Interleaved LCP (ILCP). The main idea is to interleave
+the longest-common-preﬁx (LCP) arrays of the documents, in the order given by the global
+LCP of the collection. This yields long runs of equal values on repetitive collections,
+making the ILCP structure run-length compressible. Then, we show that the classical
+document listing technique of Muthukrishnan (2002), designed to work on a completely
+different array, works almost verbatim over the ILCP array, and this yields a new document 
+listing technique of independent interest for string collections. Finally, we show that a
+particular representation of the ILCP array allows us to count the number of documents
+where a string appears without having to list them one by one.
+
+3.1 The ILCP array
+The longest-common-preﬁx array LCPS½1::jSj of a string S is deﬁned such that LCPS½1 ¼
+0 and, for 2 ijSj, LCPS½i is the length of the longest common preﬁx of the lexicographically 
+(i - 1)th and ith sufﬁxes of S, that is, of S½SAS½i   1::jSj and S½SAS½i::jSj,
+where SAS is the sufﬁx array of S. We deﬁne the interleaved LCP array of T, ILCP, to be
+the interleaving of the LCP arrays of the individual documents according to the document
+array.
+Deﬁnition 1 Let T½1::n ¼ S1  S2  Sd be the concatenation of documents Sj, DA the
+document array of T, and LCPSj the longest-common-preﬁx array of string Sj. Then the
+interleaved LCP array of T is deﬁned, for all 1 i n, as
+
+
+ILCP½i ¼ LCPSDA½i rankDA½iðDA; iÞ
+
+
+
+:
+
+That is, if the sufﬁx SA½i belongs to document Sj (i.e., DA½i ¼ j), and this is the rth
+sufﬁx of SA that belongs to Sj (i.e., r ¼ rankjðDA; iÞ), then ILCP½i ¼ LCPSj½r. Therefore
+the order of the individual LCP arrays is preserved in ILCP.
+Example Consider the documents S1 ¼ 00TATA$00, S2 ¼ 00LATA$00, and S3 ¼ 00AAAA$00.
+is SA ¼
+sufﬁx
+Their
+h15; 10; 5; 14; 9; 4; 13; 12; 11; 7; 2; 6; 8; 3; 1i
+document
+is
+array
+DA ¼ h3; 2; 1; 3; 2; 1; 3; 3; 3; 2; 1; 2; 2; 1; 1i. The LCP arrays of
+the documents are
+LCPS1 ¼ h0; 0; 1; 0; 2i, LCPS2 ¼ h0; 0; 1; 0; 0i, and LCPS3 ¼ h0; 0; 1; 2; 3i. Therefore,
+ILCP ¼ h0; 0; 0; 0; 0; 0; 1; 2; 3; 1; 1; 0; 0; 0; 2i interleaves the LCP arrays in the order given
+by DA (notice the fonts above).
+
+T ¼ 00TATA$LATA$AAAA$00,
+
+concatenation
+
+array
+
+its
+
+is
+
+and
+
+its
+
+The following property of ILCP makes it suitable for document retrieval.
+
+Lemma 1 Let T½1::n ¼ S1  S2  Sd be the concatenation of documents Sj, SA its sufﬁx
+array and DA its document array. Let SA½‘::r be the interval that contains the starting
+positions of sufﬁxes preﬁxed by a pattern P½1::m. Then the leftmost occurrences of the
+distinct document identiﬁers in DA½‘::r are in the same positions as the values strictly less
+than m in ILCP½‘::r.
+Proof Let SASj½‘j::rj be the interval of all the sufﬁxes of Sj starting with P[1..m]. Then
+LCPSj½‘j\m, as otherwise Sj½SA½‘j   1::SA½‘j   1 þ m   1 ¼ Sj½SA½‘j::SA½‘j þ m  
+1 ¼ P as well, contradicting the deﬁnition of ‘j. For the same reason, it holds that
+LCPSj½‘j þ k m for all 1 k  rj   ‘j.
+
+123
+
+260
+
+Inf Retrieval J (2017) 20:253–291
+
+as
+
+that
+
+of
+
+the
+
+sufﬁxes
+
+T[pj ? k..]
+
+Now let Sj start at position pj ? 1 in T, where pj ¼ jS1  Sj 1j. Because each Sj is
+terminated by ‘‘$’’, the lexicographic ordering between the sufﬁxes Sj[k..] in SASj is the
+in SA. Hence
+same
+corresponding
+hSA½i j DA½i ¼ j; 1 i ni ¼ hpj þ SASj½i j 1 ijSjji. Or, put another way, SA½i ¼
+pj þ SASj½rankjðDA; iÞ whenever DA½i ¼ j.
+Now let fj be the leftmost occurrence of j in DA½‘::r. This means that SA½fj is the
+lexicographically ﬁrst sufﬁx of Sj that starts with P. By the deﬁnition of ‘j, it holds that
+‘j ¼ rankjðDA; fjÞ.
+that
+ILCP½fj ¼ LCPSj½rankjðDA; fjÞ ¼ LCPSj½‘j\m, whereas all the other ILCP½k values, for
+‘ k  r, where DA½k ¼ j, must be  m.
+
+h
+Example In the example above, if we search for P½1::2 ¼ 00TA00, the resulting range is
+SA½13::15 ¼ h8; 3; 1i. The corresponding range DA½13::15 ¼ h2; 1; 1i indicates that the
+occurrence at SA½13 is in S2 and those in SA½14::15 are in S1. According to the lemma, it
+is sufﬁcient to report the documents DA½13 ¼ 2 and DA½14 ¼ 1, as those are the positions
+in ILCP½13::15 ¼ h0; 0; 2i with values less than |P| = 2.
+
+deﬁnition
+
+ILCP,
+
+Thus,
+
+by
+
+of
+
+it
+
+holds
+
+Therefore, for the purposes of document listing, we can replace the C array by ILCP in
+Muthukrishnan’s algorithm (Sect. 2.3): instead of recursing until we have listed all the
+positions k such that C[k] \ ‘, we recurse until we list all the positions k such that
+ILCP½k\m. Instead of using it directly, however, we will design a variant that exploits
+repetitiveness in the string collection.
+
+3.2 ILCP on repetitive collections
+
+The array ILCP has yet another property, which makes it attractive for repetitive collec-
+tions: it contains long runs of equal values. We give an analytic proof of this fact under a
+model where a base document S is generated at random under the very general A2
+probabilistic model of Szpankowski (1993),5 and the collection is formed by performing
+some edits on d copies of S.
+
+ð
+
+Lemma 2 Let S[1..r] be a string generated under Szpankowski’s A2 model. Let T be
+formed by concatenating d copies of S, each terminated with the special symbol ‘‘$’’, and
+then carrying out s edits (symbol insertions, deletions, or substitutions) at arbitrary
+positions in T (excluding the ‘$’s). Then, almost surely (a.s.6), the ILCP array of T is
+formed by q r þ O s lgðr þ sÞ
+Proof Before applying the edit operations, we have T ¼ S1  Sd and Sj ¼ S$ for all j. At
+this point, ILCP is formed by at most r ? 1 runs of equal values, since the d equal sufﬁxes
+Sj½SASj½i::r þ 1 must be contiguous in the sufﬁx array SA of T,
+in the area
+SA½ði   1Þd þ 1::id. Since the values l ¼ LCPSj½i are also equal, and ILCP values are the
+LCPSj values listed in the order of SA, it follows that ILCP½ði   1Þd þ 1::id ¼ l forms a
+
+Þ runs of equal values.
+
+5 This model states that the statistical dependence of a symbol from previous ones tends to zero as the
+distance towards them tends to inﬁnity. The A2 model includes, in particular, the Bernoulli model (where
+each symbol is generated independently of the context), stationary Markov chains (where the probability of
+each symbol depends on the previous one), and kth order models (where each symbol depends on the
+k previous ones, for a ﬁxed k).
+6 This is a very strong kind of convergence. A sequence Xn tends to a value b almost surely if, for every
+jXN =b   1j [  for some N [ n tends to zero as n tends to inﬁnity,
+ [ 0,
+limn!1 supN [ n PrðjXN =b   1j [ Þ ¼ 0.
+
+the probability that
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+261
+
+run, and thus there are r ? 1 = n/d runs in ILCP. Now, if we carry out s edit operations on
+T, any Sj will be of length at most r ? s ? 1. Consider an arbitrary edit operation at T[k]. It
+changes all the sufﬁxes T[k - h..n] for all 0 h\k. However, since a.s. the string depth of
+a leaf in the sufﬁx tree of S is O lgðr þ sÞ
+Þ (Szpankowski 1993), the sufﬁx will possibly be
+Þ. Thus, a.s., only O lgðr þ sÞ
+moved in SA only for h ¼ O lgðr þ sÞ
+Þ sufﬁxes are moved
+in SA, and possibly the corresponding runs in ILCP are broken. Hence q r þ
+O s lgðr þ sÞ
+ð
+h
+
+Þ a.s.
+
+ð
+
+ð
+
+ð
+
+Therefore, the number of runs depends linearly on the size of the base document and the
+number of edits, not on the total collection size. The proof generalizes the arguments of
+Ma¨kinen et al. (2010), which hold for uniformly distributed strings S. There is also
+experimental evidence (Ma¨kinen et al. 2010) that, in real-life text collections, a small
+change to a string usually causes only a small change to its LCP array. Next we design a
+document listing data structure whose size is bounded in terms of q.
+
+3.3 Document listing
+Let LILCP½1::q be the array containing the partial sums of the lengths of the q runs in
+ILCP, and let VILCP½1::q be the array containing the values in those runs. We can store
+LILCP as a bitvector L[1..n] with q 1s, so that LILCP½i ¼ selectðL; iÞ. Then L can be
+stored using the structure of Okanohara and Sadakane (2007) that requires q lgðn=qÞ þ
+O qð Þ bits.
+With this representation, it holds that ILCP½i ¼ VILCP½rank1ðL; iÞ. We can map from
+any position i to its run i0 ¼ rank1ðL; iÞ in time O lgðn=qÞ
+Þ, and from any run i0 to its
+starting position in ILCP, i ¼ selectðL; i0Þ, in constant time.
+Example Consider the array ILCP½1::15 ¼ h0; 0; 0; 0; 0; 0; 1; 2; 3; 1; 1; 0; 0; 0; 2i of our
+it with VILCP½1::7 ¼
+running example.
+h0; 1; 2; 3; 1; 0; 2i and L½1::15 ¼ 100000111101001.
+
+It has q = 7 runs,
+
+so we represent
+
+ð
+
+it
+
+ð
+
+This is sufﬁcient
+
+to emulate the document
+
+Assume that we have already found the range SA½‘::r in O search mð Þ
+
+listing algorithm of Sadakane (2007)
+(Sect. 2.3) on a repetitive collection. We will use RLCSA as the CSA. The sparse bitvector
+B[1..n] marking the document beginnings in T will be represented in the same way as L, so
+requires d lgðn=dÞ þ O dð Þ bits and lets us compute any value DA½i ¼
+that
+Þ. Finally, we build the compact RMQ data structure
+rank1ðB; SA½iÞ in time O lookup nð Þ
+(Fischer and Heun 2011) on VILCP, requiring 2q þ oðqÞ bits. We note that this RMQ
+structure does not need access to VILCP to answer queries.
+Þ time. We
+compute ‘0 ¼ rank1ðL; ‘Þ and r0 ¼ rank1ðL; rÞ, which are the endpoints of the interval
+VILCP½‘0::r0 containing the values in the runs in ILCP½‘::r. Now we run Sadakane’s
+algorithm on VILCP½‘0::r0. Each time we ﬁnd a minimum at VILCP½i0, we remap it to the
+run ILCP½i::j, where i ¼ maxð‘; selectðL; i0ÞÞ and j ¼ minðr; selectðL; i0 þ 1Þ   1Þ. For
+each i k  j, we compute DA½k using B and RLCSA as explained, mark it
+in
+V½DA½k   1, and report it. If, however, it already holds that V½DA½k ¼ 1, we stop the
+recursion. Figure 1 gives the pseudocode.
+We show next that this is correct as long as RMQ returns the leftmost minimum in the
+range and that we recurse ﬁrst to the left and then to the right of each minimum VILCP½i0
+found.
+Lemma 3 Using the procedure described, we correctly ﬁnd all the positions ‘ k  r
+such that ILCP½k\m.
+
+ð
+
+123
+
+262
+
+Inf Retrieval J (2017) 20:253–291
+
+Fig. 1 Pseudocode for document
+listing using the ILCP array.
+Function listDocuments(‘, r) lists
+the documents from interval
+SA½‘::r; listð‘0; r0Þ returns the
+distinct documents mentioned in
+the runs ‘0 to r0 that also belong to
+DA½‘::r. We assume that in the
+beginning it holds V[k] = 0 for
+all k; this can be arranged by
+resetting to 0 the same positions
+after the query or by using
+initializable arrays. All the
+unions on res are known to be
+disjoint
+
+function listDocuments(
+
+)
+
+( , r ) ← (rank1(
+return list( , r )
+
+), rank1(L, r))
+
+function list( , r )
+
+select(L, i ))
+
+if > r : return ∅
+i ← rmqVILCP( , r )
+i ← max(
+j ← min(r, select(L, i + 1) − 1)
+←
+∅
+res
+for k ←
+g ← rank1(B, SA[k])
+if V [g] = 1: return res
+V [g] ← 1
+res ← res ∪ {g}
+
+i . . . j:
+
+return res ∪ list( , i − 1) ∪ list(i + 1, r )
+
+Proof Let j ¼ DA½k be the leftmost occurrence of document j in DA½‘::r. By Lemma 1,
+among all the positions where DA½k0 ¼ j in DA½‘::r, k is the only one where ILCP½k\m.
+Since we ﬁnd a minimum ILCP value in the range, and then explore the left subrange
+before the right subrange, it is not possible to ﬁnd ﬁrst another occurrence DA½k0 ¼ j, since
+it has a larger ILCP value and is to the right of k. Therefore, when V½DA½k ¼ 0, that is,
+the ﬁrst time we ﬁnd a DA½k ¼ j, it must hold that ILCP½k\m, and the same is true for all
+the other ILCP values in the run. Hence it is correct to list all those documents and mark
+them in V. Conversely, whenever we ﬁnd a V½DA½k0 ¼ 1, the document has already been
+reported. Thus this is not its leftmost occurrence and then ILCP½k0 m holds, as well as
+for the whole run. Hence it is correct to avoid reporting the whole run and to stop the
+h
+recursion in the range, as the minimum value is already at least m.
+
+Note that we are not storing VILCP at all. We have obtained our ﬁrst result for document 
+listing, where we recall that q is small on repetitive collections (Lemma 2):
+Theorem 1 Let T ¼ S1  S2  Sd be the concatenation of d documents Sj, and CSA be a
+compressed sufﬁx array on T, searching for any pattern P[1..m] in time search mð Þ and
+accessing SA½i in time lookup nð Þ. Let q be the number of runs in the ILCP array of T. We
+ð
+can store T in jCSAj þ q lgðn=qÞ þ O qð Þ þ d lgðn=dÞ þ O dð Þ ¼ jCSAj þ O ðq þ dÞ lg n
+Þ
+bits such that document listing takes O search mð Þ þ df  ðlookup nð Þ þ lg nÞ
+Þ time.
+
+ð
+
+3.4 Document counting
+
+Array ILCP also allows us to efﬁciently count the number of distinct documents where P
+appears, without listing them all. This time we will explicitly represent VILCP, in the
+following convenient way: consider a skewed wavelet tree (Sect. 2.2), where the leftmost
+leaf is at depth 1, the next 2 leaves are at depth 3, the next 4 leaves are at depth 5, and in
+general the 2d-1th to (2d - 1)th leftmost leaves are at depth 2d - 1. Then the ith leftmost
+leaf is at depth 1 þ 2blg ic ¼ O lg i
+Þ. The number of wavelet tree nodes up to depth d is
+P
+2i ¼ 2ð2ðdþ1Þ=2   1Þ. The number of nodes up to the depth of the mth leftmost
+leaf is maximized when m is of the form m = 2d-1, reaching 2ð2d   1Þ ¼ 4m   2 ¼ O mð Þ.
+See Fig. 2.
+
+ðdþ1Þ=2
+i¼1
+
+ð
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+263
+
+0
+
+0 1 1 1 1 0 1
+
+0 0 1 0 0
+
+0 1 0 1
+
+3
+
+1
+
+2
+
+0
+
+1
+
+2
+
+3
+
+4 5
+
+6
+
+Fig. 2 On the left, the schematic view of our skewed wavelet tree; on the right, the case of our running
+example where it represents VILCP ¼ h0; 1; 2; 3; 1; 0; 2i
+
+Þ ¼ O lg nð
+
+Let k be the maximum value in the ILCP array. Then the height of the wavelet tree is
+Þ and the representation of VILCP takes at most q lg k þ oðq lg kÞ bits. If the docO 
+lg kð
+uments S are generated using the A2 probabilistic model of Szpankowski (1993), then
+k ¼ O lgjSj
+ð
+Þ, and VILCP uses q lg lg nð1 þ oð1ÞÞ bits. The same happens under
+the model used in Sect. 3.2.
+The number of documents where P appears, df, is the number of times a value smaller
+than m occurs in ILCP½‘::r. An algorithm to ﬁnd all those values in a wavelet tree of ILCP
+is as follows Gagie et al. (2012b). Start at the root with the range [‘..r] and its bitvector W.
+Go to the left child with the interval ½rank0ðW; ‘   1Þ þ 1::rank0ðW; rÞ and to the right
+½rank1ðW; ‘   1Þ þ 1::rank1ðW; rÞ, stopping the recursion on
+child with the interval
+empty intervals. This method arrives at all the wavelet tree leaves corresponding to the
+distinct values in ILCP½‘::r. Moreover, if it arrives at a leaf l with interval ‘l..rl, then there
+are rl - ‘l ? 1 occurrences of the symbol of that leaf in ILCP½‘::r.
+
+lth to the r0
+
+A complication is that VILCP is the array of run length heads, so when we start at
+l, we only know that VILCP½‘0::r0
+lth occurrences of value l in VILCP½‘0::r0. We store a
+
+Now, in the skewed wavelet tree of VILCP, we are interested in the occurrences of
+symbols 0 to m - 1. Thus we apply the above algorithm but we do not enter into subtrees
+handling an interval of values that is disjoint with [0..m - 1]. Therefore, we only arrive at
+the m leftmost leaves of the wavelet tree, and thus traverse only O mð Þ wavelet tree nodes,
+in time O mð Þ.
+VILCP½‘0::r0 and arrive at each leaf l with interval ½‘0
+contains from the ‘0
+reordering of the run lengths so that the runs corresponding to each value l are collected
+left to right in ILCP and stored aligned to the wavelet tree leaf l. Those are concatenated
+into another bitmap L0½1::n with q 1s, similar to L, which allows us, using selectðL0;Þ, to
+count the total length spanned by the ‘0
+lth runs in leaf l. By adding the areas spanned
+over the m leaves, we count the total number of documents where P occurs. Note that we
+need to correct the lengths of runs ‘0 and r0, as they may overlap the original interval
+ILCP½‘::r. Figure 3 gives the pseudocode.
+Theorem 2 Let T ¼ S1  S2  Sd be the concatenation of d documents Sj, and CSA a
+compressed sufﬁx array on T that searches for any pattern P[1..m] in time search mð Þ. Let
+q be the number of runs in the ILCP array of T and k be the maximum length of a repeated
+substring inside any Sj. Then we can store T in jCSAj þ qðlg k þ 2 lgðn=qÞ þ O 1ð ÞÞ ¼
+jCSAj þ O q lg n
+Þ bits such that the number of documents where a pattern P[1..m] occurs
+can be computed in time O m þ search mð Þ
+Þ.
+
+ð
+
+ð
+
+l::r0
+
+lth to r0
+
+123
+
+264
+
+Inf Retrieval J (2017) 20:253–291
+
+function countDocuments(
+
+)
+
+), rank1(L, r))
+
+( , r ) ← (rank1(
+l ← m
+c ← count(
+if VILCP[
+if VILCP[r ] < m: c ← c − (select(L, r + 1) − 1 − r)
+return c
+
+] < m: c ← c − ( − select(
+
+, r )
+
+))
+
+function count(
+
+, r )
+
+if l = 0: return 0
+if v is a leaf:
+l ← l − 1
+if > r : return 0
+return select(L , r + 1) − select(L
+
+( 1, r1) ← (rank1(
+return count(
+
+)
+
+− 1) + 1, rank1(v.W, r ))
+− 1 + 1, r − r1) + count(
+
+1, r1)
+
+Fig. 3 Document counting with the ILCP array. Function countDocuments(‘, r) counts the distinct
+documents from interval SA½‘::r; countðv; ‘0; r0Þ returns the number of documents mentioned in the runs ‘0
+to r0 under wavelet tree node v that also belong to DA½‘::r. We assume that the wavelet tree root node is
+root, and that any internal wavelet tree node v has ﬁelds v.W (bitvector), v.left (left child), and v.right (right
+child). Global variable l is used to traverse the ﬁrst m leaves. The access to VILCP is also done with the
+wavelet tree
+
+4 Precomputed document lists
+
+In this section we introduce the idea of precomputing the answers of document retrieval
+queries for a sample of sufﬁx tree nodes, and then exploit repetitiveness by grammarcompressing 
+the resulting sets of answers. Such grammar compression is effective when
+the underlying collection is repetitive. The queries are then extremely fast on the sampled
+nodes, whereas on the others we have a way to bound the amount of work performed. The
+resulting structure is called PDL (Precomputed Document Lists), for which we develop a
+variant for document listing and another for top-k retrieval queries.
+
+4.1 Document listing
+
+Let v be a sufﬁx tree node. We write SAv to denote the interval of the sufﬁx array covered
+by node v, and Dv to denote the set of distinct document identiﬁers occurring in the same
+interval of the document array. Given a block size b and a constant b C 1, we build a
+sampled sufﬁx tree that allows us to answer document listing queries efﬁciently. For any
+sufﬁx tree node v, it holds that:
+
+1.
+2.
+
+node v is sampled and thus set Dv is directly stored; or
+jSAvj\b, and thus documents can be listed in time O b  lookup nð Þ
+ð
+and the bitvectors B and V of Sect. 2.3; or
+b  jDvj, where nodes u1; . . .; uk are the children of v in the sampled sufﬁx tree.
+
+3. we can compute the set Dv as the union of stored sets Du1 ; . . .; Duk of total size at most
+
+Þ by using a CSA
+
+The purpose of rule 2 is to ensure that sufﬁx array intervals solved by brute force are not
+longer than b. The purpose of rule 3 is to ensure that, if we have to rebuild an answer by
+merging a list of answers precomputed at descendant sampled sufﬁx tree nodes, then the
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+265
+
+merging costs no more than b per result. That is, we can discard answers of nodes that are
+close to being the union of the answers of their descendant nodes, since we do not waste
+too much work in performing the unions of those descendants. Instead, if the answers of
+the descendants have many documents in common, then it is worth storing the answer at
+the node too; otherwise merging will require much work because the same document will
+be found many times (more than b on average).
+
+We start by selecting sufﬁx tree nodes v1; . . .; vL, so that no selected node is an ancestor
+of another, and the intervals SAvi of the selected nodes cover the entire sufﬁx array. Given
+node v and its parent w, we select v if jSAvj b and jSAwj [ b, and store Dv with the node.
+These nodes v become the leaves of the sampled sufﬁx tree, and we assume that they are
+numbered from left to right. We then assume that all the ancestors of those leaves belong to
+the sampled sufﬁx tree, and proceed upward in the sufﬁx tree removing some of them. Let
+v be an internal node, u1; . . .; uk its children, and w its parent. If the total size of sets
+Du1 ; . . .; Duk is at most b  jDvj, we remove node v from the tree, and add nodes u1; . . .; uk to
+the children of node w. Otherwise we keep node v in the sampled sufﬁx tree, and store Dv
+there.
+When the document collection is repetitive, the document array DA½1::n is also
+repetitive. This property has been used in the past to compress DA using grammars
+(Navarro et al. 2014b). We can apply a similar idea on the Dv sets stored at the sampled
+sufﬁx tree nodes, since Dv is a function of the range DA½‘::r that corresponds to node v.
+Let v1; . . .; vL be the leaf nodes and vLþ1; . . .; vLþI the internal nodes of the sampled
+sufﬁx tree. We use grammar-based compression to replace frequent subsets in sets
+Dv1 ; . . .; DvLþI with grammar rules expanding to those subsets. Given a set Z and a grammar
+rule X ? Y, where Y  f1; . . .; dg, we can replace Z with ðZ [ fXgÞ n Y, if Y  Z. As long
+as jYj 2 for all grammar rules X ? Y, each set Dvi can be decompressed in O jDvij
+Þ time.
+To choose the replacements, consider the bipartite graph with vertex sets fv1; . . .; vLþIg
+and f1; . . .; dg, with an edge from vi to j if j 2 Dvi . Let X ? Y be a grammar rule, and let V
+be the set of nodes vi such that rule X ? Y can be applied to set Dvi . As Y  Dvi for all
+v [ V, the induced subgraph with vertex sets V and Y is a complete bipartite graph or a
+biclique. Many Web graph compression algorithms are based on ﬁnding bicliques or other
+dense subgraphs (Herna´ndez and Navarro 2014), and we can use these algorithms to ﬁnd a
+good grammar compressing the precomputed document lists.
+When all rules have been applied, we store the reduced sets Dv1 ; . . .; DvLþI as an array A
+of document and rule identiﬁers. The array takes jAj lgðd þ nRÞ bits of space, where nR is
+the total number of rules. We mark the ﬁrst cell in the encoding of each set with a 1 in a
+bitvector BA[1..|A|],
+decompressing
+A½selectðBA; iÞ::selectðBA; i þ 1Þ   1. The bitvector takes |A|(1 ? o(1) bits of space and
+answers select queries in O 1ð Þ time. The grammar rules are stored similarly, in an array G
+taking jGj lg d bits, with a bitvector BG[1..|G|] of |G|(1 ? o(1)) bits separating the array into
+rules (note that right hand sides of rules are formed only by terminals).
+
+set Dvi
+
+retrieved
+
+that
+
+can
+
+by
+
+be
+
+so
+
+ð
+
+to
+
+convert
+
+interval
+
+In addition to the sets and the grammar, we must also store the sampled sufﬁx tree. A
+bitvector BL[1..n] marks the ﬁrst cell of interval SAvi for all leaf nodes vi, allowing
+½ln::rn ¼
+us
+½rank1ðBL; ‘Þ::rank1ðBL; r þ 1Þ   1. Using the format of Okanohara and Sadakane (2007)
+Þ
+ð
+for BL, the bitvector takes L lgðn=LÞ þ O Lð Þ bits, and answers rank queries in O lgðn=LÞ
+time and select queries in constant
+time. A second bitvector BF[1..L ? I], using
+(L ? I)(1 ? o(1)) bits and supporting rank queries in constant time, marks the nodes that
+are the ﬁrst children of their parents. An array F[1..I] of I lg I bits stores pointers from ﬁrst
+
+SA½‘::r
+
+nodes
+
+range
+
+into
+
+of
+
+a
+
+123
+
+266
+
+Inf Retrieval J (2017) 20:253–291
+
+ð
+
+ð
+
+ð
+
+Þ time, set(i) takes O jDvij
+
+children to their parent nodes, so that if node vi is a ﬁrst child, its parent node is vj, where
+j ¼ L þ F½rank1ðBF; iÞ. Finally, array N[1..I] of I lg L bits stores a pointer to the leaf node
+following those below each internal node.
+Figure 4 gives the pseudocode for document listing using the precomputed answers.
+Þ time, and
+Function list(‘, r) takes O ðr þ 1   ‘Þ lookup nð Þ
+parent(i) takes O 1ð Þ time. Function decompress(‘, r) produces set res in time O jresj  bh
+ð
+Þ,
+where h is the height of the sampled sufﬁx tree: ﬁnding each set may take O hð Þ time, and
+we may encounter the same document O bð Þ times. Hence the total time for listDocu-
+ments(‘, r) is O df  bh þ lg n
+Þ for unions of precomputed answers, and O b  lookup nð Þ
+Þ
+otherwise. If the text follows the A2 model of Szpankowski (1993), then h ¼ O lg nð
+Þ and
+the total time is on average O df  b lg n þ b  lookup nð Þ
+ð
+Þ.
+We do not write the result as a theorem because we cannot upper bound the space used
+by the structure in terms of b and b. In a bad case like T ¼ a‘ 1$b‘ 1$c‘ 1$. . ., the sufﬁx
+tree is formed by d long paths and the sampled sufﬁx tree contains at least dðn=d   bÞ ¼
+ð
+HðnÞ nodes (assuming bd = o(n)), so the total space is O n lg n
+Þ bits as in a classical
+sufﬁx tree. In a good case, such as a balanced sufﬁx tree (which also arises on texts
+following the A2 model), the sampled sufﬁx tree has O n=bð
+Þ nodes. Although each such
+node v may store a list Dv with b entries, many of those entries are similar when the
+collection is repetitive, and thus their compression is effective.
+
+ð
+
+function listDocuments(
+
+)
+
+, rank1(BL ))
+
+(res, ln) ← (∅
+if select(BL, ln)
+
+), ln + 1)
+
+:
+r ← min(select(BL, ln + 1) − 1, r)
+(res, ln) ← (list(
+if r = r: return res
+rn ← rank1(BL, r + 1) − 1
+if select(BL, rn + 1) ≤ r:
+← select(BL, rn + 1)
+res ← res ∪ list( , r)
+
+return res ∪ decompress(ln, rn)
+
+function decompress(
+
+)
+
+(res, i) ← (∅ )
+while i ≤ r:
+next ← i + 1
+while BF [i] = 1:
+
+(i , next ) ← parent(i)
+if next > r + 1: break
+(i, next) ← (i , next )
+
+res ← res ∪ set(i)
+i ← next
+return res
+
+function parent(i)
+
+par ← F [rank1(BF , i)]
+return (par + L, N[par])
+
+function set(i)
+
+∅
+
+←
+res←
+select(BA, i)
+r ← select(BA, i + 1) − 1
+for j ← to r:
+
+if A[j] ≤ d: res ← res ∪ {A[j]}
+else: res ← res ∪ rule(A[j] − d)
+
+return res
+
+function rule(i)
+
+← select(BG, i)
+r ← select(BG, i + 1) − 1
+return G[
+
+]
+
+function list(
+
+)
+res ←
+for i ← to r:
+
+∅
+
+return res
+
+res ← res ∪ {rank1(B, SA[i])}
+
+Fig. 4 Document listing using precomputed answers. Function listDocuments(‘, r) lists the documents
+from interval SA½‘::r; decompress(‘, r) decompresses the sets stored in nodes v‘; . . .; vr; parent(i) returns
+the parent node and the leaf node following it for a ﬁrst child vi; set(i) decompresses the set stored in vi;
+rule(i) expands the ith grammar rule; and list(‘, r) lists the documents from interval SA½‘::r by using CSA
+and bitvector B
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+267
+
+4.2 Top-k retrieval
+
+Since we have the freedom to represent the documents in sets Dv in any order, we can in
+particular sort the document identiﬁers in decreasing order of their ‘‘frequencies’’, that is,
+the number of times the string represented by v appears in the documents. Ties are broken
+by document identiﬁers in increasing order. Then a top-k query on a node v that stores its
+list Dv boils down to listing the ﬁrst k elements of Dv.
+
+This time we cannot use the set-based grammar compressor, but we need, instead, a
+compressor that preserves the order. We use Re-Pair (Larsson and Moffat 2000), which
+produces a grammar where each nonterminal produces two new symbols, terminal or
+nonterminal. As Re-Pair decompression is recursive, decompression can be slower than in
+document listing, although it is still fast in practice and takes linear time in the length of the
+decompressed sequence.
+
+In order to merge the results from multiple nodes in the sampled sufﬁx tree, we need to
+store the frequency of each document. These are stored in the same order as the identiﬁers.
+Since the frequencies are nonincreasing, with potentially long runs of small values, we can
+represent them space-efﬁciently by run-length encoding the sequences and using differpð
+
+ential encoding for the run heads. A node containing s sufﬁxes in its subtree has at most
+O
+
+ﬃﬃ
+p
+Þ distinct frequencies, and the frequencies can be encoded in O
+ð
+s
+s
+
+ﬃﬃ
+
+Þ bits.
+
+lg s
+
+There are two basic approaches to using the PDL structure for top-k document retrieval.
+First, we can store the document lists for all sufﬁx tree nodes above the leaf blocks,
+producing a structure that is essentially an inverted index for all frequent substrings. This
+approach is very fast, as we need only decompress the ﬁrst k document identiﬁers from the
+stored sequence, and it works well with repetitive collections thanks to the grammarcompression 
+of the lists. Note that this enables incremental top-k queries, where value k is
+not given beforehand, but we extract documents with successively lower scores and can
+stop at any time. Note also that, in this version, it is not necessary to store the frequencies.
+Alternatively, we can build the PDL structure as in Sect. 4.1, with some parameter b, to
+achieve better space usage. Answering queries will
+then be slower as we have to
+decompress multiple document sets, merge the sets, and determine the top k documents.
+We tried different heuristics for merging preﬁxes of the document sequences, stopping
+when a correct answer to the top-k query could be guaranteed. The heuristics did not
+generally work well, making brute-force merging the fastest alternative.
+
+5 Engineering a document counting structure
+
+In this section we revisit a generic document counting structure by Sadakane (2007), which
+uses 2n ? o(n) bits and answers counting queries in constant time. We show that the
+structure inherits the repetitiveness present in the text collection, which can then be
+exploited to reduce its space occupancy. Surprisingly, the structure also becomes repetitive
+with random and near-random data, such as unrelated DNA sequences, which is a result of
+interest for general string collections. We show how to take advantage of this redundancy
+in a number of different ways, leading to different time/space trade-offs.
+
+123
+
+268
+
+Inf Retrieval J (2017) 20:253–291
+
+5.1 The basic bitvector
+
+We describe the original document structure of Sadakane (2007), which computes df in
+constant time given the locus of the pattern P (i.e., the sufﬁx tree node arrived at when
+searching for P), while using just 2n ? o(n) bits of space.
+
+We start with the sufﬁx tree of the text, and add new internal nodes to it to make it a
+binary tree. For each internal node v of the binary sufﬁx tree, let Dv be again the set of
+distinct document identiﬁers in the corresponding range DA½‘::r, and let countðvÞ ¼ jDvj
+be the size of that set. If node v has children u and w, we deﬁne the number of redundant
+recursively:
+sufﬁxes
+countðvÞ ¼ countðuÞ þ countðwÞ   hðvÞ. By using the leaf nodes descending from v,
+[‘..r], as base cases, we can solve the recurrence:
+
+hðvÞ ¼ jDu \ Dwj. This
+
+compute
+
+allows
+
+df
+
+us
+
+to
+
+as
+
+X
+
+countðvÞ ¼ countð‘; rÞ ¼ ðr þ 1   ‘Þ  
+
+hðuÞ;
+
+u
+
+where the summation goes over the internal nodes of the subtree rooted at v.
+
+We form an array H[1..n - 1] by traversing the internal nodes in inorder and listing the
+h(v) values. As the nodes are listed in inorder, subtrees form contiguous ranges in the array.
+We can therefore rewrite the solution as
+
+countð‘; rÞ ¼ ðr þ 1   ‘Þ  
+
+H½i:
+
+X
+r 1
+
+i¼‘
+
+To speed up the computation, we encode the array in unary as bitvector H0. Each cell H[i]
+is encoded as a 1-bit, followed by H[i] 0s. We can now compute the sum by counting the
+number of 0s between the 1s of ranks ‘ and r:
+
+countð‘; rÞ ¼ 2ðr   ‘Þ   ðselect1ðH0; rÞ   select1ðH0; ‘ÞÞ þ 1:
+
+As there are n - 1 1s and n - d 0s, bitvector H0 takes at most 2n ? o(n) bits.
+
+5.2 Compressing the bitvector
+
+The original bitvector requires 2n ? o(n) bits, regardless of the underlying data. This can
+be a considerable overhead with highly compressible collections, taking signiﬁcantly more
+space than the CSA (on top of which the structure operates). Fortunately, as we now show,
+the bitvector H0 used in Sadakane’s method is highly compressible. There are ﬁve main
+ways of compressing the bitvector, with different combinations of them working better
+with different datasets.
+
+1. Let Vv be the set of nodes of the binary sufﬁx tree corresponding to node v of the
+original sufﬁx tree. As we only need to compute countðÞ for the nodes of the original
+P
+sufﬁx tree, the individual values of h(u), u [ Vv, do not matter, as long as the sum
+hðuÞ remains the same. We can therefore make bitvector H0 more compressible
+by setting H½i ¼
+hðuÞ, where i is the inorder rank of node v, and H[j] = 0 for
+the rest of the nodes. As there are no real drawbacks in this reordering, we will use it
+with all of our variants of Sadakane’s method.
+
+u2Vv
+
+u2Vv
+
+P
+
+2. Run-length encoding works well with versioned collections and collections of random
+documents. When a pattern occurs in many documents, but no more than once in each,
+the corresponding subtree will be encoded as a run of 1s in H0.
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+269
+
+4.
+
+the subtrees of
+
+3. When the documents in the collection have a versioned structure, we can reasonably
+expect grammar compression to be effective. To see this, consider a substring x that
+occurs in many documents, but at most once in each document. If each occurrence of
+substring x is preceded by symbol a,
+the binary sufﬁx tree
+corresponding to patterns x and ax have an identical structure, and the corresponding
+areas in D are identical. Hence the subtrees are encoded identically in bitvector H0.
+If the documents are internally repetitive but unrelated to each other, the sufﬁx tree has
+many subtrees with sufﬁxes from just one document. We can prune these subtrees into
+leaves in the binary sufﬁx tree, using a ﬁlter bitvector F[1..n - 1] to mark the
+remaining nodes. Let v be a node of the binary sufﬁx tree with inorder rank i. We will
+set F[i] = 1 iff countðvÞ [ 1. Given a range [‘..r - 1] of nodes in the binary sufﬁx
+tree, the corresponding subtree of the pruned tree is ½rank1ðF; ‘Þ::rank1ðF; r   1Þ.
+The ﬁltered structure consists of bitvector H0 for the pruned tree and a compressed
+encoding of F.
+
+5. We can also use ﬁlters based on the values in array H instead of the sizes of the
+document sets. If H[i] = 0 for most cells, we can use a sparse ﬁlter FS[1..n - 1],
+where FS[i] = 1 iff H[i] [ 0, and build bitvector H0 only for those nodes. We can also
+encode positions with H[i] = 1 separately with a 1-ﬁlter F1[1..n - 1], where
+F1[i] = 1 iff H[i] = 1. With a 1-ﬁlter, we do not write 0s in H0 for nodes with
+H[i] = 1, but instead subtract the number of 1s in F1[‘..r - 1] from the result of the
+query. It is also possible to use a sparse ﬁlter and a 1-ﬁlter simultaneously. In that case,
+we set FS[i] = 1 iff H[i] [ 1.
+
+5.3 Analysis
+We analyze the number of runs of 1s in bitvector H0 in the expected case. Assume that our
+document collection consists of d documents, each of length r, over an alphabet of size r.
+We call string S unique, if it occurs at most once in every document. The subtree of the
+binary sufﬁx tree corresponding to a unique string is encoded as a run of 1s in bitvector H0.
+If we can cover all leaves of the tree with u unique substrings, bitvector H0 has at most
+2u runs of 1s.
+Consider a random string of length k. Suppose the probability that the string occurs at
+least twice in a given document is at most r2=ð2r2kÞ, which is the case if, e.g., we choose
+each document randomly or we choose one document randomly and generate the others by
+copying it and randomly substituting some symbols. By the union bound, the probability
+the string is non-unique is at most dr2=ð2r2kÞ. Let N(i) be the number of non-unique strings
+p Þ þ i. As there are rki strings of length ki, the expected value of N(i)
+of length ki ¼ lgrðr
+=ð2riÞ. The expected size of the smallest cover of unique strings is therefore
+is at most r
+at most
+
+ﬃﬃﬃ
+p
+d
+
+ﬃﬃﬃ
+
+d
+
+ðrk0   Nð0ÞÞ þ
+
+X1
+
+i¼1
+
+ðrNði   1Þ   NðiÞÞ ¼ r
+
+p
+
+þ ðr   1Þ
+
+d
+
+ﬃﬃﬃ
+
+X1
+
+i¼0
+
+
+NðiÞ r
+2
+
+
+
+ﬃﬃﬃ
+p
+d
+
+;
+
+þ 1
+
+r
+
+where rN(i - 1) - N(i) is the number of strings that become unique at length ki. The
+number of runs of 1s in H0 is therefore sublinear in the size of the collection (dr). See Fig. 5
+for an experimental conﬁrmation of this analysis.
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+270
+
+s
+t
+i
+
+b
+−
+1
+
+ 
+f
+
+o
+ 
+s
+n
+u
+R
+
+7
+0
++
+e
+1
+
+6
+0
++
+e
+1
+
+5
+0
++
+e
+1
+
+0
+0
+0
+0
+1
+
+0
+0
+0
+1
+
+0
+0
+1
+
+6md^0.5
+p = 1
+p = 0.1
+p = 0.01
+p = 0.001
+
+128
+
+256
+
+512
+
+1024
+
+2048
+
+4096
+
+8192
+
+16384
+
+32768
+
+65536
+
+131072
+
+Documents
+
+Fig. 5 The number of runs of 1-bits in Sadakane’s bitvector H0 on synthetic collections of DNA sequences
+(r = 4). Each collection has been generated by taking a random sequence of length m = 27–217, duplicating
+it d = 217–27 times (making the total size of the collection 224), and mutating the sequences with random
+point mutations at probability p = 0.001–1. The mutations preserve zero-order empirical entropy by
+replacing the mutated symbol with a randomly chosen symbol according to the distribution in the original
+sequence. The dashed line represents the expected case upper bound for p = 1
+
+6 A multi-term index
+
+The queries we deﬁned in the Introduction are single-term, that is, the query pattern P is a
+single string. In this section we show how our indexes for single-term retrieval can be used
+for ranked multi-term queries on repetitive text collections. The key idea is to regard our
+incremental top-k algorithm of Sect. 4.2 as an abstract representation of the inverted lists
+of the individual query terms, sorted by decreasing weight, and then apply any algorithm
+that traverses those lists sequentially. Since our relevance score will depend on the term
+frequency and the document frequency of the terms, we will integrate a document counting
+structure as well (Sects. 3.4 or 5).
+Let Q ¼ hq1; . . .; qmi be a query consisting of m patterns qi. We support ranked queries,
+which return the k documents with the highest scores among the documents matching the
+query. A disjunctive or ranked-OR query matches document D if at least one of the patterns
+occurs in it, while a conjunctive or ranked-AND query matches D if all query patterns
+occur in it. Our index supports both conjunctive and disjunctive queries with tf-idf-like
+scores
+
+wðD; QÞ ¼
+
+X
+m
+
+i¼1
+
+wðD; qiÞ ¼
+
+fðtfðD; qiÞÞ  gðdfðqiÞÞ;
+
+X
+m
+
+i¼1
+
+where f C 0 is an increasing function, tfðD; qiÞ is the term frequency (the number of
+occurrences) of pattern qi in document D, g C 0 is a decreasing function, and dfðqiÞ is the
+document frequency of pattern qi. For example, the standard tf-idf scoring scheme corresponds 
+to using fðtfÞ ¼ tf and gðdfÞ ¼ lgðd= maxðdf; 1ÞÞ.
+
+From Sect. 4.2, we use the incremental variant, which stores the full answers for all the
+sufﬁx tree nodes above leaves. The query algorithm uses CSA to ﬁnd the lexicographic
+range [‘i..ri] matching each pattern qi. We then use PDL to ﬁnd the sparse sufﬁx tree node
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+271
+
+vi corresponding to range [‘i..ri] and fetch its list Dvi , which is stored in decreasing term
+frequency order. If vi is not in the sparse sufﬁx tree, we use instead the CSA to build Dvi by
+brute force from SA½‘i::ri. We also compute dfðqiÞ ¼ countðviÞ for all query patterns qi
+with our document counting structure. The algorithm then iterates the following loop with
+k0 ¼ 2k; 4k; 8k; . . .:
+1. Extract k0 more documents from the document list of vi for each pattern qi.
+2.
+
+If the query is conjunctive, ﬁlter out extracted documents that do not match the query
+patterns with completely decompressed document lists.
+
+3. Determine a lower bound for w(D, Q) for all documents D extracted so far. If
+document D has not been encountered in the document list of vi, use 0 as a lower
+bound for w(D, qi).
+4. Determine an upper bound for w(D, Q) for all documents D. If document D has not
+been encountered in the document list of vi, use tfðD0; qiÞ, where D0 is the next
+unextracted document for pattern qi, as an upper bound for tfðD; qiÞ.
+If the query is disjunctive, ﬁlter out extracted documents D with smaller upper bounds
+for w(D, Q) than the lower bounds for the current top-k documents. Stop if the topk 
+set cannot change further.
+If the query is conjunctive, stop if the top-k documents match all query patterns and the
+upper bounds for the remaining documents are lower than the lower bounds for the
+top-k documents.
+
+6.
+
+5.
+
+The algorithm always ﬁnds a correct top-k set, although the scores may be incorrect if a
+disjunctive query stops early.
+
+7 Experiments and discussion
+
+7.1 Experimental setup
+
+7.1.1 Document collections
+
+We performed extensive experiments with both real and synthetic collections.7 Most of our
+document collections were relatively small, around 100 MB in size, as some of the
+implementations (Navarro et al. 2014b) use 32-bit libraries. We also used larger versions
+of some collections, up to 1 GB in size, to see how the collection size affects the results. In
+general, collection size is more important in top-k document retrieval. Increasing the
+number of documents generally increases the df=k ratio, and thus makes brute-force
+solutions based on document listing less appealing. In document listing, the size of the
+documents is more important than collection size, as a large occ=df ratio makes brute-force
+solutions based on pattern matching less appealing.
+
+The performance of various solutions depends both on the repetitiveness of the collection 
+and the type of the repetitiveness. Hence we used a fair number of real and
+synthetic collections with different characteristics for our experiments. We describe them
+next, and summarize their statistics in Table 2.
+
+A note on collection size The index structures evaluated in this paper should be
+understood as promising algorithmic ideas. In most implementations, the construction
+algorithms do not scale up for collections larger than a couple of gigabytes. This is often
+
+7 See http://jltsiren.kapsi.ﬁ/rlcsa for the datasets and full results.
+
+123
+
+272
+
+Inf Retrieval J (2017) 20:253–291
+
+c
+o
+d
+
+r
+e
+p
+
+s
+c
+c
+O
+
+s
+c
+c
+o
+
+t
+n
+e
+m
+u
+c
+o
+D
+
+s
+e
+c
+n
+e
+r
+r
+u
+c
+c
+O
+
+s
+n
+r
+e
+t
+t
+a
+P
+
+e
+z
+i
+s
+
+c
+o
+d
+
+.
+
+g
+v
+A
+
+s
+t
+n
+e
+m
+u
+c
+o
+D
+
+)
+f
+d
+=
+c
+c
+o
+(
+
+5
+7
+.
+2
+4
+2
+
+9
+7
+.
+4
+4
+4
+
+4
+0
+.
+9
+2
+4
+
+9
+0
+.
+2
+
+3
+4
+.
+2
+
+2
+4
+.
+2
+
+7
+7
+.
+3
+
+1
+6
+.
+3
+
+4
+4
+.
+3
+
+5
+3
+.
+1
+
+6
+3
+.
+1
+
+3
+3
+.
+1
+
+)
+f
+d
+(
+
+3
+
+6
+
+7
+
+1
+7
+3
+
+5
+6
+0
+1
+
+8
+8
+1
+1
+
+5
+0
+5
+
+6
+5
+8
+2
+
+6
+7
+9
+4
+
+7
+4
+5
+
+,
+
+8
+1
+
+2
+1
+0
+4
+4
+
+,
+
+1
+2
+1
+
+)
+c
+c
+o
+(
+
+1
+8
+7
+
+1
+0
+6
+2
+
+9
+8
+8
+2
+
+6
+7
+7
+
+2
+9
+5
+2
+
+6
+7
+8
+2
+
+4
+0
+9
+1
+
+6
+1
+3
+
+,
+
+0
+1
+
+2
+9
+0
+
+,
+
+7
+1
+
+5
+7
+9
+
+,
+
+4
+2
+
+7
+9
+9
+
+,
+
+9
+5
+
+0
+6
+1
+
+6
+8
+2
+
+,
+
+4
+1
+
+6
+3
+5
+
+,
+
+0
+2
+
+4
+8
+2
+
+,
+
+4
+1
+
+6
+3
+5
+
+,
+
+0
+2
+
+5
+3
+9
+8
+1
+
+,
+
+8
+2
+6
+9
+1
+
+,
+
+5
+0
+8
+
+,
+
+9
+1
+
+8
+5
+6
+7
+
+8
+5
+6
+7
+
+0
+0
+0
+1
+
+0
+0
+0
+1
+
+0
+0
+0
+
+,
+
+0
+1
+
+2
+7
+2
+
+,
+
+5
+1
+–
+8
+3
+5
+7
+
+1
+7
+2
+
+,
+
+5
+1
+–
+7
+3
+5
+7
+
+0
+0
+0
+1
+–
+9
+8
+8
+
+2
+8
+3
+
+,
+
+9
+1
+9
+
+,
+
+1
+
+1
+2
+9
+
+,
+
+4
+3
+5
+
+,
+
+3
+
+5
+4
+1
+
+,
+
+3
+8
+8
+
+,
+
+3
+
+)
+d
+
+/
+
+n
+(
+
+5
+0
+0
+3
+1
+
+,
+
+0
+9
+4
+1
+2
+
+,
+
+2
+5
+5
+
+,
+
+6
+1
+
+2
+3
+9
+
+,
+
+6
+1
+
+6
+3
+2
+
+,
+
+5
+1
+
+0
+5
+0
+
+,
+
+2
+1
+
+6
+3
+4
+1
+
+0
+8
+4
+1
+
+8
+9
+3
+
+0
+4
+5
+
+,
+
+4
+1
+
+)
+d
+(
+
+0
+6
+
+0
+9
+1
+
+0
+8
+2
+
+8
+0
+2
+
+,
+
+1
+3
+
+5
+6
+5
+
+,
+
+5
+6
+
+4
+3
+8
+8
+
+0
+0
+0
+
+,
+
+4
+4
+
+0
+0
+0
+
+,
+
+0
+9
+
+0
+0
+0
+7
+
+0
+0
+0
+
+,
+
+0
+0
+1
+
+6
+5
+3
+
+,
+
+7
+2
+2
+
+4
+4
+2
+3
+4
+1
+
+,
+
+0
+9
+1
+
+,
+
+3
+0
+1
+
+0
+0
+0
+
+,
+
+0
+0
+1
+
+0
+0
+0
+1
+–
+0
+1
+
+0
+0
+0
+
+,
+
+0
+1
+
+)
+
+B
+M
+
+(
+
+)
+
+A
+S
+C
+L
+R
+
+(
+
+e
+z
+i
+s
+A
+S
+C
+
+)
+
+B
+M
+
+(
+
+)
+n
+(
+
+e
+z
+i
+S
+
+n
+o
+i
+t
+c
+e
+l
+l
+o
+C
+
+8
+5
+
+.
+
+2
+
+0
+0
+
+.
+
+9
+
+9
+5
+
+.
+
+2
+
+4
+0
+
+.
+
+9
+
+5
+4
+
+.
+
+7
+1
+
+5
+5
+
+.
+
+7
+1
+
+4
+4
+
+.
+
+9
+4
+
+.
+
+1
+3
+9
+0
+3
+
+.
+
+6
+1
+2
+8
+4
+
+2
+5
+
+.
+
+5
+
+3
+5
+
+.
+
+0
+1
+
+9
+1
+
+.
+
+5
+2
+
+0
+9
+
+.
+
+2
+4
+
+0
+1
+1
+
+1
+4
+6
+
+7
+3
+0
+1
+
+0
+1
+1
+
+0
+4
+6
+
+5
+3
+0
+1
+
+3
+1
+1
+
+9
+3
+6
+
+4
+3
+0
+1
+
+7
+3
+1
+
+1
+2
+3
+
+4
+5
+
+2
+3
+4
+1
+
+5
+9
+
+5
+9
+
+5
+9
+
+n
+o
+i
+s
+i
+v
+e
+R
+
+i
+k
+i
+w
+n
+E
+
+e
+g
+a
+P
+
+a
+z
+n
+e
+u
+ﬂ
+n
+I
+
+t
+o
+r
+p
+s
+s
+i
+w
+S
+
+t
+a
+c
+n
+o
+C
+
+n
+o
+i
+s
+r
+e
+V
+
+i
+k
+i
+W
+
+A
+N
+D
+
+t
+n
+e
+m
+u
+c
+o
+d
+d
+n
+a
+
+s
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+f
+o
+r
+e
+b
+m
+u
+n
+e
+g
+a
+r
+e
+v
+a
+
+,
+s
+n
+r
+e
+t
+t
+a
+p
+f
+o
+r
+e
+b
+m
+u
+n
+
+,
+
+h
+t
+g
+n
+e
+l
+
+t
+n
+e
+m
+u
+c
+o
+d
+e
+g
+a
+r
+e
+v
+a
+
+,
+s
+t
+n
+e
+m
+u
+c
+o
+d
+f
+o
+
+r
+e
+b
+m
+u
+n
+
+,
+s
+e
+l
+p
+m
+a
+s
+y
+a
+r
+r
+a
+x
+ﬁ
+f
+u
+s
+
+t
+u
+o
+h
+t
+i
+
+w
+e
+z
+i
+s
+A
+S
+C
+L
+R
+
+,
+e
+z
+i
+s
+
+n
+o
+i
+t
+c
+e
+l
+l
+o
+C
+
+y
+l
+t
+a
+e
+r
+g
+
+y
+r
+a
+v
+
+s
+c
+i
+t
+s
+i
+t
+a
+t
+s
+
+e
+h
+t
+
+f
+o
+
+t
+s
+o
+m
+
+,
+)
+n
+o
+i
+s
+r
+e
+V
+d
+n
+a
+
+,
+t
+a
+c
+n
+o
+C
+
+,
+
+A
+N
+D
+
+(
+
+s
+n
+o
+i
+t
+c
+e
+l
+l
+o
+c
+
+c
+i
+t
+e
+h
+t
+n
+y
+s
+
+e
+h
+t
+
+r
+o
+F
+
+.
+s
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+t
+n
+e
+m
+u
+c
+o
+d
+
+o
+t
+
+s
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+f
+o
+
+o
+i
+t
+a
+r
+
+e
+h
+t
+
+d
+n
+a
+
+,
+s
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+)
+s
+t
+n
+a
+i
+r
+a
+v
+
+e
+g
+r
+a
+l
+
+d
+n
+a
+
+,
+
+m
+u
+i
+d
+e
+m
+
+,
+l
+l
+a
+m
+
+s
+(
+
+s
+n
+o
+i
+t
+c
+e
+l
+l
+o
+c
+
+t
+n
+e
+m
+u
+c
+o
+d
+
+r
+o
+f
+
+s
+c
+i
+t
+s
+i
+t
+a
+t
+S
+
+2
+
+e
+l
+b
+a
+T
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+273
+
+intentional. In this line of research, being able to easily evaluate variations of the fundamental 
+idea is more important than the speed or memory usage of construction. As a result,
+many of the construction algorithms build an explicit sufﬁx tree for the collection and store
+various kinds of additional information in the nodes. Better construction algorithms can be
+designed once the most promising ideas have been identiﬁed. See ‘‘Appendix 2’’ for
+further discussion on index construction.
+
+Real collections We use various document collections from real-life repetitive scenarios.
+ Some collections come in small, medium, and large variants. Page and Revision are
+repetitive collections generated from a Finnish-language Wikipedia archive with full
+version history. There are 60 (small), 190 (medium), or 280 (large) pages with a total of
+8834, 31,208, or 65,565 revisions. In Page, all the revisions of a page form a single
+document, while each revision becomes a separate document in Revision. Enwiki is a nonrepetitive 
+collection of 7000, 44,000, or 90,000 pages from a snapshot of the Englishlanguage 
+Wikipedia. Inﬂuenza is a repetitive collection containing 100,000 or 227,356
+sequences from inﬂuenza virus genomes (we only have small and large variants). Swissprot 
+is a non-repetitive collection of 143,244 protein sequences used in many document
+retrieval papers (e.g., Navarro et al. 2014b). As the full collection is only 54 MB, only the
+small version of Swissprot exists. Wiki is a repetitive collection similar to Revision. It is
+generated by sampling all revisions of 1% of pages from the English-language versions of
+Wikibooks, Wikinews, Wikiquote, and Wikivoyage.
+
+Synthetic collections To explore the effect of collection repetitiveness on document
+retrieval performance in more detail, we generated three types of synthetic collections,
+using ﬁles from the Pizza & Chili corpus.8 DNA is similar to Inﬂuenza. Each collection
+has d = 1, 10, 100, or 1000 base documents, 100,000/d variants of each base document,
+and mutation rate p = 0.001, 0.003, 0.01, 0.03, or 0.1. We take a preﬁx of length 1000
+from the Pizza & Chili DNA ﬁle and generate the base documents by mutating the preﬁx at
+probability 10p under the same model as in Fig. 5. We then generate the variants in the
+same way with mutation rate p. Concat and Version are similar to Page and Revision,
+respectively. We read d = 10, 100, or 1000 base documents of length 10,000 from the
+Pizza & Chili English ﬁle, and generate 10,000/d variants of each base document with
+mutation rates 0.001, 0.003, 0.01, 0.03, and 0.1, as above. Each variant becomes a separate
+document in Version, while all variants of the same base document are concatenated into a
+single document in Concat.
+
+7.1.2 Queries
+
+Real collections For Page and Revision, we downloaded a list of Finnish words from the
+Institute for the Languages in Finland, and chose all words of length C5 that occur in the
+collection. For Enwiki, we used search terms from an MSN query log with stopwords
+ﬁltered out. We generated 20,000 patterns according to term frequencies, and selected
+those that occur in the collection. For Inﬂuenza, we extracted 100,000 random substrings
+of length 7, ﬁltered out duplicates, and kept the 1000 patterns with the largest occ=df ratios.
+For Swissprot, we extracted 200,000 random substrings of length 5, ﬁltered out duplicates,
+and kept the 10,000 patterns with the largest occ=df ratios. For Wiki, we used the TREC
+2006 Terabyte Track efﬁciency queries9 consisting of 411,394 terms in 100,000 queries.
+
+8 http://pizzachili.dcc.uchile.cl.
+9 http://trec.nist.gov/data/terabyte06.html.
+
+123
+
+274
+
+Inf Retrieval J (2017) 20:253–291
+
+Synthetic collections We generated the patterns for DNA with a similar process as for
+Inﬂuenza and Swissprot. We extracted 100,000 substrings of length 7, ﬁltered out
+duplicates, and chose the 1000 with the largest occ=df ratios. For Concat and Version,
+patterns were generated from the MSN query log in the same way as for Enwiki.
+
+7.1.3 Test environment
+
+We used two separate systems for the experiments. For document listing and document
+counting, our test environment had two 2.40 GHz quad-core Intel Xeon E5620 processors
+and 96 GB memory. Only one core was used for the queries. The operating system was
+Ubuntu 12.04 with Linux kernel 3.2.0. All code was written in C??. We used g??
+version 4.6.3 for the document listing experiments and version 4.8.1 for the document
+counting experiments.
+
+For the top-k retrieval and tf-idf experiments, we used another system with two 16-core
+AMD Opteron 6378 processors and 256 GB memory. We used only a single core for the
+single-term queries and up to 32 cores for the multi-term queries. The operating system
+was Ubuntu 12.04 with Linux kernel 3.2.0. All code was written in C?? and compiled
+with g?? version 4.9.2.
+
+We executed the query benchmarks in the following way:
+
+1. Load the RLCSA with the desired sample period for the current collection into
+
+memory.
+
+2. Load the query patterns corresponding to the collection into memory and execute find
+
+queries in the RLCSA. Store the resulting lexicographic ranges [‘..r] in vector V.
+
+3. Load the index to be benchmarked into memory.
+4.
+
+Iterate through vector V once using a single thread and execute the desired query for
+each range [‘..r]. Measure the total wall clock time for executing the queries.
+
+We divided the measured time by the number of patterns, and listed the average time per
+query in milliseconds or microseconds and the size of the index structure in bits per
+symbol. There were certain exceptions:
+• LZ and Grammar do not use a CSA. With them, we iterated through the vector of
+patterns as in step 4, once the index and the patterns had been loaded into memory. The
+average time required to get the range [‘..r] in CSA-based indexes (4-6 ls, depending
+on the collection) was negligible compared to the average query times of LZ (at least
+170 ls) and Grammar (at least 760 ls).
+
+• We used the existing benchmark code with SURF. The code ﬁrst loads the index into
+memory and then iterates through the pattern ﬁle by reading one line at a time. To
+reduce the overhead from reading the patterns, we cached them by using cat[/dev/
+null. Because SURF queries were based on the pattern instead of the corresponding
+range [‘..r], we executed find queries ﬁrst and subtracted the time used for them from
+the subsequent top-k queries.
+In our tf-idf
+construct.
+
+index, we parallelized step 4 using the OpenMP parallel for
+
+• We used the existing benchmark code with Terrier. We cached the queries as with
+SURF, set trec.querying.outputformat to NullOutputFormat, and set
+the logging level to off.
+
+•
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+275
+
+7.2 Document listing
+
+We compare our new proposals from Sects. 3.3 and 4.1 to the existing document listing
+solutions. We also aim to determine when these sophisticated approaches are better than
+brute-force solutions based on pattern matching.
+
+7.2.1 Indexes
+
+Brute force (Brute) These algorithms simply sort the document identiﬁers in the range
+DA½‘::r and report each of them once. Brute-D stores DA in n lg d bits, while Brute-L
+retrieves the range SA½‘::r with the locate functionality of the CSA and uses bitvector B
+to convert it to DA½‘::r.
+
+Sadakane (Sada) This family of algorithms is based on the improvements of Sadakane
+(2007) to the algorithm of Muthukrishnan (2002). Sada-L is the original algorithm, while
+Sada-D uses an explicit document array DA instead of retrieving the document identiﬁers
+with locate.
+
+ILCP (ILCP) This is our proposal in Sect. 3.3. The algorithms are the same as those of
+Sadakane (2007), but they run on the run-length encoded ILCP array. As for Sada, ILCPL 
+obtains the document identiﬁers using locate on the CSA, whereas ILCP-D stores array
+DA explicitly.
+Wavelet tree (WT) This index stores the document array in a wavelet tree (Sect. 2.2) to
+efﬁciently ﬁnd the distinct elements in DA½‘::r (Va¨lima¨ki and Ma¨kinen 2007). The best
+known implementation of this idea (Navarro et al. 2014b) uses plain, entropy-compressed,
+and grammar-compressed bitvectors in the wavelet tree-depending on the level. Our WT
+implementation uses a heuristic similar to the original WT-alpha (Navarro et al. 2014b),
+multiplying the size of the plain bitvector by 0.81 and the size of the entropy-compressed
+bitvector by 0.9, before choosing the smallest one for each level of the tree. These constants 
+were determined by experimental tuning.
+
+Precomputed document lists (PDL) This is our proposal in Sect. 4.1. Our implementation 
+resorts to Brute-L to handle the short regions that the index does not cover. The
+variant PDL-BC compresses sets of equal documents using a Web graph compressor
+(Herna´ndez and Navarro 2014). PDL-RP uses Re-Pair compression (Larsson and Moffat
+2000) as implemented by Navarro10 and stores the dictionary in plain form. We use block
+size b = 256 and storing factor b = 16, which have proved to be good general-purpose
+parameter values.
+
+Grammar-based (Grammar) This index (Claude and Munro 2013) is an adaptation of a
+grammar-compressed self-index (Claude and Navarro 2012) to document listing. Conceptually 
+similar to PDL, Grammar uses Re-Pair to parse the collection. For each nonterminal 
+symbol in the grammar, it stores the set of identiﬁers of the documents whose
+encoding contains the symbol. A second round of Re-Pair is used to compress the sets.
+Unlike most of the other solutions, Grammar is an independent index and needs no CSA
+to operate.
+
+Lempel-Ziv (LZ) This index (Ferrada and Navarro 2013) is an adaptation of a patternlisting.
+ Like
+
+matching index based on LZ78 parsing (Navarro 2004) to document
+Grammar, LZ does not need a CSA.
+
+10 http://www.dcc.uchile.cl/gnavarro/software.
+
+123
+
+276
+
+Inf Retrieval J (2017) 20:253–291
+
+We implemented Brute, Sada, ILCP, and the PDL variants ourselves11 and modiﬁed
+existing implementations of WT, Grammar, and LZ for our purposes. We always used
+the RLCSA (Ma¨kinen et al. 2010) as the CSA, as it performs well on repetitive collections.
+ The locate support in RLCSA includes optimizations for long query ranges and
+repetitive collections, which is important for Brute-L and ILCP-L. We used sufﬁx array
+sample periods 8, 16, 32, 64, 128 for non-repetitive collections and 32, 64, 128, 256, 512
+for repetitive ones.
+
+When a document listing solution uses a CSA, we start the queries from the lexicographic 
+range [‘..r] instead of the pattern P. This allows us to see the performance differences 
+between the fastest solutions better. The average time required for obtaining the
+ranges was 4–6 ls per pattern, depending on the collection, which is negligible compared
+to the average time used by Grammar (at least 760 ls) and LZ (at least 170 ls).
+
+7.2.2 Results
+
+Real collections Figures 6 and 7 contain the results for document listing with small and
+large real collections, respectively. For most of the indexes, the time/space trade-off is
+given by the RLCSA sample period. The trade-off of LZ comes from a parameter speciﬁc
+to that structure involving RMQs (Ferrada and Navarro 2013). Grammar has no trade-off.
+Brute-L always uses the least amount of space, but it is also the slowest solution. In
+collections with many short documents (i.e., all except Page), we have occ=df\4 on the
+average. The additional effort made by Sada-L and ILCP-L to report each document only
+once does not pay off, and the space used by the RMQ structure is better spent on
+increasing the number of sufﬁx array samples for Brute-L. The difference is, however,
+very noticeable on Page, where the documents are large and there are hundreds of
+occurrences of the pattern in each document. ILCP-L uses less space than Sada-L when
+the collection is repetitive and contains many similar documents (i.e., on Revision and
+Inﬂuenza); otherwise Sada-L is slightly smaller.
+
+The two PDL alternatives usually achieve similar performance, but in some cases PDLBC 
+uses much less space. PDL-BC, in turn, can use signiﬁcantly more space than BruteL,
+ Sada-L, and ILCP-L, but is always orders of magnitude faster. The document sets of
+versioned collections such as Page and Revision are very compressible, making the collections 
+very suitable for PDL. On the other hand, grammar-based compression cannot
+reduce the size of the stored document sets enough when the collections are non-repetitive.
+Repetitive but unstructured collections like Inﬂuenza represent an interesting special case.
+When the number of revisions of each base document is much larger than the block size b,
+each leaf block stores an essentially random subset of the revisions, which cannot be
+compressed very well.
+
+Among the other indexes, Sada-D and ILCP-D can be signiﬁcantly faster than PDLBC,
+ but they also use much more space. From the non-CSA-based indexes, Grammar
+reaches the Pareto-optimal curve on Revision and Inﬂuenza, while being too slow or too
+large on the other collections. We did not build Grammar for the large version of Page, as
+it would have taken several months.
+
+In general, we can recommend PDL-BC as a medium-space alternative for document
+listing. When less space is available, we can use ILCP-L, which offers robust time and
+space guarantees. If the documents are small, we can even use Brute-L. Further, we can
+
+11 http://jltsiren.kapsi.ﬁ/rlcsa.
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+277
+
+)
+y
+r
+e
+u
+q
+
+ 
+/
+ 
+s
+m
+
+(
+ 
+e
+m
+T
+
+i
+
+)
+y
+r
+e
+u
+q
+ 
+/
+ 
+s
+m
+
+(
+ 
+e
+m
+T
+
+i
+
+)
+y
+r
+e
+u
+q
+
+ 
+/
+ 
+s
+m
+
+(
+ 
+e
+m
+T
+
+i
+
+0
+0
+0
+1
+
+0
+0
+1
+
+0
+1
+
+1
+
+1
+
+.
+
+0
+
+1
+0
+
+.
+
+0
+
+0
+0
+0
+1
+
+0
+0
+1
+
+0
+1
+
+1
+
+1
+
+.
+
+0
+
+1
+0
+
+.
+
+0
+
+0
+0
+0
+1
+
+0
+0
+1
+
+0
+1
+
+1
+
+1
+
+.
+
+0
+
+1
+0
+
+.
+
+0
+
+0
+
+4
+
+8
+
+Revision
+
+Page
+
+Brute−L
+Brute−D
+Sada−L
+Sada−D
+ILCP−L
+ILCP−D
+PDL−BC
+PDL−RP
+WT
+LZ
+Grammar
+
+Enwiki
+
+Influenza
+
+12
+
+16
+
+20
+Size (bps)
+
+24
+
+28
+
+32
+
+Swissprot
+
+0
+
+4
+
+8
+
+12
+
+16
+
+20
+Size (bps)
+
+24
+
+28
+
+32
+
+Fig. 6 Document listing on small real collections. The total size of the index in bits per symbol (x) and the
+average time per query in milliseconds (y)
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+Revision
+
+Page
+
+Brute−L
+Brute−D
+Sada−L
+Sada−D
+ILCP−L
+ILCP−D
+PDL−BC
+PDL−RP
+WT
+LZ
+Grammar
+
+Enwiki
+
+Influenza
+
+278
+
+)
+y
+r
+e
+u
+q
+
+ 
+/
+ 
+s
+m
+
+(
+ 
+e
+m
+T
+
+i
+
+)
+y
+r
+e
+u
+q
+
+ 
+/
+ 
+s
+m
+
+(
+ 
+e
+m
+T
+
+i
+
+0
+0
+0
+1
+
+0
+0
+1
+
+0
+1
+
+1
+
+1
+
+.
+
+0
+
+1
+0
+
+.
+
+0
+
+0
+0
+0
+1
+
+0
+0
+1
+
+0
+1
+
+1
+
+1
+
+.
+
+0
+
+1
+0
+
+.
+
+0
+
+0
+
+4
+
+8
+
+12
+
+16
+
+20
+Size (bps)
+
+24
+
+28
+
+32
+
+0
+
+4
+
+8
+
+12
+
+16
+
+20
+Size (bps)
+
+24
+
+28
+
+32
+
+Fig. 7 Document listing on large real collections. The total size of the index in bits per symbol (x) and the
+average time per query in milliseconds (y)
+
+use fast document counting to compare df with occ = r - ‘ ? 1, and choose between
+ILCP-L and Brute-L according to the results.
+
+Synthetic collections Figures 8 and 9 show our document listing results with synthetic
+collections. Due to the large number of collections, the results for a given collection type
+and number of base documents are combined in a single plot, showing the fastest algorithm
+for a given amount of space and mutation rate. Solid lines connect measurements that are
+the fastest for their size, while dashed lines are rough interpolations.
+
+The plots were simpliﬁed in two ways. Algorithms providing a marginal and/or
+inconsistent improvement in speed in a very narrow region (mainly Sada-L and ILCP-L)
+were left out. When PDL-BC and PDL-RP had a very similar performance, only one of
+them was chosen for the plot.
+
+On DNA, Grammar was a good solution for small mutation rates, while LZ was good
+with larger mutation rates. With more space available, PDL-BC became the fastest
+algorithm. Brute-D and ILCP-D were often slightly faster than PDL, when there was
+enough space available to store the document array. On Concat and Version, PDL was
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+279
+
+e
+
+t
+
+a
+r
+ 
+n
+o
+
+i
+t
+
+t
+
+a
+u
+M
+
+e
+t
+a
+r
+ 
+n
+o
+i
+t
+a
+t
+u
+M
+
+e
+t
+a
+r
+ 
+n
+o
+i
+t
+a
+t
+u
+M
+
+1
+
+.
+
+0
+
+3
+0
+
+.
+
+0
+
+1
+0
+
+.
+
+0
+
+3
+0
+0
+
+.
+
+0
+
+1
+0
+0
+
+.
+
+0
+
+1
+
+.
+
+0
+
+3
+0
+
+.
+
+0
+
+1
+0
+
+.
+
+0
+
+3
+0
+0
+
+.
+
+0
+
+1
+0
+0
+
+.
+
+0
+
+1
+
+.
+
+0
+
+3
+0
+
+.
+
+0
+
+1
+0
+
+.
+
+0
+
+3
+0
+0
+
+.
+
+0
+
+1
+0
+0
+
+.
+
+0
+
+None
+
+Brute−L
+
+WT
+
+D
+−
+e
+t
+u
+r
+B
+
+None
+
+Brute−L
+
+C
+B
+−
+L
+D
+P
+
+LZ
+
+Sada−D
+
+Grammar
+
+Brute−D
+
+ILCP−D
+
+None
+
+Brute−L
+
+WT
+
+Brute−D
+
+Sada−D
+
+None
+
+Brute−L
+
+LZ
+
+Brute−D
+
+PDL−RP
+
+PDL−RP
+
+None
+
+Sada−L
+
+L
+−
+ute
+Br
+
+PDL−BC
+
+None
+
+Brute−L
+
+LZ
+
+Brute−D
+
+Brute−D
+
+PDL−RP
+
+0
+
+4
+
+8
+
+12
+
+16
+
+20
+Size (bps)
+
+24
+
+28
+
+32
+
+0
+
+4
+
+8
+
+12
+
+16
+
+20
+Size (bps)
+
+24
+
+28
+
+32
+
+Fig. 8 Document listing on synthetic collections. The fastest solution for a given size in bits per symbol and
+a mutation rate. From top to bottom: 10, 100, and 1000 base documents with Concat (left) and Version
+(right). None denotes that no solution can achieve that size
+
+usually a good mid-range solution, with PDL-RP being usually smaller than PDL-BC. The
+exceptions were the collections with 10 base documents, where the number of variants
+(1000) was clearly larger than the block size (256). With no other structure in the collection,
+ PDL was unable to ﬁnd a good grammar to compress the sets. At the large end of
+the size scale, algorithms using an explicit document array DA were usually the fastest
+choices.
+
+7.3 Top-k retrieval
+
+7.3.1 Indexes
+
+We compare the following top-k retrieval algorithms. Many of them share names with the
+corresponding document listing structures described in Sect. 7.2.1.
+
+Brute force (Brute) These algorithms correspond to the document listing algorithms
+the distinct
+
+Brute-D and Brute-L. To perform top-k retrieval, we not only collect
+
+123
+
+280
+
+Inf Retrieval J (2017) 20:253–291
+
+t
+
+e
+a
+r
+ 
+n
+o
+
+i
+t
+
+t
+
+a
+u
+M
+
+e
+t
+a
+r
+ 
+n
+o
+i
+t
+a
+t
+u
+M
+
+1
+
+.
+
+0
+
+3
+0
+
+.
+
+0
+
+1
+0
+
+.
+
+0
+
+3
+0
+0
+
+.
+
+0
+
+1
+0
+0
+
+.
+
+0
+
+1
+.
+0
+
+3
+0
+.
+0
+
+1
+0
+.
+0
+
+3
+0
+0
+.
+0
+
+1
+0
+0
+.
+0
+
+e
+n
+o
+N
+
+L
+−
+e
+
+t
+
+u
+r
+
+B
+
+LZ
+
+ar
+m
+m
+Gra
+
+e
+n
+o
+N
+
+Brute−L
+
+LZ
+
+PDL−BC
+
+PDL−BC
+
+r
+a
+m
+m
+a
+r
+G
+
+None
+
+Brute−L
+
+LZ
+
+PDL−BC
+
+Grammar
+
+Brute−D
+
+ILCP−D
+
+None
+
+LZ
+
+Brute−L
+
+PDL−RP
+
+ar
+m
+m
+Gra
+
+PDL−BC
+
+0
+
+4
+
+8
+
+12
+
+16
+
+20
+
+24
+
+28
+
+32
+
+0
+
+4
+
+8
+
+Size (bps)
+
+12
+
+16
+
+20
+Size (bps)
+
+Brute−D
+
+ILCP−D
+
+Brute−D
+
+24
+
+28
+
+32
+
+Fig. 9 Document listing on synthetic collections. The fastest solution for a given size in bits per symbol and
+a mutation rate. DNA with 1 (top left), 10 (top right), 100 (bottom left), and 1000 (bottom right) base
+documents. None denotes that no solution can achieve that size
+
+document identiﬁers after sorting DA½‘::r, we also record the number of times each one
+appears. The k identiﬁers appearing most frequently are then reported.
+
+Precomputed document lists (PDL) We use the variant of PDL-RP modiﬁed for topk 
+retrieval, as described in Sect. 4.2. PDL-b denotes PDL with block size b and with
+document sets for all sufﬁx tree nodes above the leaf blocks, while PDL-b1F is the same
+with term frequencies. PDL-b-b is PDL with block size b and storing factor b.
+
+Large and fast (SURF) This index (Gog and Navarro 2015b) is based on a conceptual
+idea by Navarro and Nekrich (2012), and improves upon a previous implementation
+(Konow and Navarro 2013). It can answer top-k queries quickly if the pattern occurs at
+least twice in each reported document. If documents with just one occurrence are needed,
+SURF uses a variant of Sada-L to ﬁnd them.
+
+We implemented the Brute and PDL variants ourselves12 and used the existing
+implementation of SURF.13 While WT (Navarro et al. 2014b) also supports top-k queries,
+the 32-bit implementation cannot index the large versions of the document collections used
+in the experiments. As with document listing, we subtracted the time required for ﬁnding
+the lexicographic ranges [‘..r] using a CSA from the measured query times. SURF uses a
+CSA from the SDSL library (Gog et al. 2014), while the rest of the indexes use RLCSA.
+
+7.3.2 Results
+
+Figure 10 contains the results for top-k retrieval using the large versions of the real collections.
+ We left Page out of the results, as the number of documents (280) was too low for
+
+12 http://jltsiren.kapsi.ﬁ/rlcsa.
+13 http://github.com/simongog/surf/tree/single_term.
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+281
+
+)
+y
+r
+e
+u
+q
+
+ 
+/
+ 
+s
+m
+
+(
+ 
+e
+m
+T
+
+i
+
+)
+y
+r
+e
+u
+q
+ 
+/
+ 
+s
+m
+
+(
+ 
+e
+m
+T
+
+i
+
+)
+y
+r
+e
+u
+q
+
+ 
+/
+ 
+s
+m
+
+(
+ 
+e
+m
+T
+
+i
+
+0
+0
+0
+1
+
+0
+0
+1
+
+0
+1
+
+1
+
+1
+
+.
+
+0
+
+1
+0
+
+.
+
+0
+
+0
+0
+0
+1
+
+0
+0
+1
+
+0
+1
+
+1
+
+1
+
+.
+
+0
+
+1
+0
+
+.
+
+0
+
+0
+0
+0
+1
+
+0
+0
+1
+
+0
+1
+
+1
+
+1
+
+.
+
+0
+
+1
+0
+
+.
+
+0
+
+Revision
+
+Revision
+
+Enwiki
+
+Enwiki
+
+Influenza
+
+Influenza
+
+Brute−L
+Brute−D
+PDL−64
+PDL−256
+PDL−64+F
+PDL−256+F
+PDL−256−2
+PDL−256−4
+SURF
+
+0
+
+8
+
+16
+
+24
+
+32
+
+40
+
+48
+
+0
+
+8
+
+16
+
+24
+
+32
+
+40
+
+48
+
+Size (bps)
+
+Size (bps)
+
+Fig. 10 Single-term top-k retrieval on real collections with k = 10 (left) and k = 100 (right). The total size
+of the index in bits per symbol (x) and the average time per query in milliseconds (y)
+
+123
+
+282
+
+Inf Retrieval J (2017) 20:253–291
+
+meaningful top-k queries. For most of the indexes, the time/space trade-off is given by the
+RLCSA sample period, while the results for SURF are for the three variants presented in
+the paper.
+
+The three collections proved to be very different. With Revision, the PDL variants were
+both fast and space-efﬁcient. When storing factor b was not set, the total query times were
+dominated by rare patterns, for which PDL had to resort to using Brute-L. This also made
+block size b an important time/space trade-off. When the storing factor was set, the index
+became smaller and slower and the trade-offs became less signiﬁcant. SURF was larger
+and faster than Brute-D with k = 10 but became slow with k = 100.
+
+On Enwiki, the variants of PDL with storing factor b set had a performance similar to
+Brute-D. SURF was faster with roughly the same space usage. PDL with no storing factor
+was much larger than the other solutions. However, its time performance became competitive 
+for k = 100, as it was almost unaffected by the number of documents requested.
+The third collection, Inﬂuenza, was the most surprising of the three. PDL with storing
+factor b set was between Brute-L and Brute-D in both time and space. We could not build
+PDL without the storing factor, as the document sets were too large for the Re-Pair
+compressor. The construction of SURF also failed with this dataset.
+
+7.4 Document counting
+
+7.4.1 Indexes
+
+We use two fast document listing algorithms as baseline document counting methods (see
+Sect. 7.2.1): Brute-D sorts the query range DA½‘::r to count the number of distinct document 
+identiﬁers, and PDL-RP returns the length of the list of documents obtained. Both
+indexes use the RLCSA with sufﬁx array sample period set to 32 on non-repetitive
+datasets, and to 128 on repetitive datasets.
+We also consider a number of encodings of Sadakane’s document counting structure
+(see Sect. 5). The following ones encode the bitvector H0 directly in a number of ways:
+• Sada uses a plain bitvector representation.
+• Sada-RR uses a run-length encoded bitvector as supplied in the RLCSA implementation.
+ It uses d-codes to represent run lengths and packs them into blocks of 32 bytes
+of encoded data. Each block stores how many bits and 1s are there before it.
+
+• Sada-RS uses a run-length encoded bitvector, represented with a sparse bitmap
+(Okanohara and Sadakane 2007) marking the beginnings of the 0-runs and another for
+the 1-runs.
+
+• Sada-RD uses run-length encoding with d-codes to represent the lengths. Each block in
+the bitvector contains the encoding of 128 1-bits, while three sparse bitmaps are used to
+mark the number of bits, 1-bits, and starting positions of block encodings.
+
+• Sada-Gr uses a grammar-compressed bitvector (Navarro and Ordo´n˜ez 2014).
+The following encodings use ﬁlters in addition to bitvector H0:
+• Sada-P-G uses Sada for H0 and a gap-encoded bitvector for the ﬁlter bitvector F. The
+gap-encoded bitvector is also provided in the RLCSA implementation. It differs from
+the run-length encoded bitvector by only encoding runs of 0-bits.
+
+• Sada-P-RR uses Sada for H0 and Sada-RR for F.
+• Sada-RR-G uses Sada-RR for H0 and a gap-encoded bitvector for F.
+• Sada-RR-RR uses Sada-RR for both H0 and F.
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+283
+
+• Sada-S uses sparse bitmaps for both H0 and the sparse ﬁlter FS.
+• Sada-S-S is Sada-S with an additional sparse bitmap for the 1-ﬁlter F1
+• Sada-RS-S uses Sada-RS for H0 and a sparse bitmap for F1.
+• Sada-RD-S uses Sada-RD for H0 and a sparse bitmap for F1.
+Finally, ILCP implements the technique described in Sect. 3.4, using the same encoding as
+in Sada-RS to represent the bitvectors in the wavelet tree.
+
+Our implementations of the above methods can be found online.14
+
+7.4.2 Results
+
+Due to the use of 32-bit variables in some of the implementations, we could not build all
+structures for the large real collections. Hence we used the medium versions of Page,
+Revision, and Enwiki, the large version of Inﬂuenza, and the only version of Swissprot
+for the benchmarks. We started the queries from precomputed lexicographic ranges [‘..r] in
+order to emphasize the differences between the fastest variants. For the same reason, we
+also left out of the plots the size of the RLCSA and the possible document retrieval
+structures. Finally, as it was almost always the fastest method, we scaled the plots to leave
+out anything much larger than plain Sada. The results can be seen in Fig. 11. Table 5 in
+‘‘Appendix 1’’ lists the results in further detail.
+
+On Page, the ﬁltered methods Sada-P-RR and Sada-RR-RR are clearly the best
+choices, being only slightly larger than the baselines and orders of magnitude faster. Plain
+Sada is much faster than those, but it takes much more space than all the other indexes.
+Only Sada-Gr compresses the structure better, but it is almost as slow as the baselines.
+On Revision, there were many small encodings with similar performance. Among
+those, Sada-RS-S is the fastest. Sada-S is somewhat larger and faster. As on Page, plain
+Sada is even faster, but it takes much more space.
+
+The situation changes on the non-repetitive Enwiki. Only Sada-RD-S, Sada-RS-S, and
+Sada-Gr can compress the bitvector clearly below 1 bit per symbol, and Sada-Gr is much
+slower than the other two. At around 1 bit per symbol, Sada-S is again the fastest option.
+Plain Sada requires twice as much space as Sada-S, but is also twice as fast.
+
+Inﬂuenza and Swissprot contain, respectively, RNA and protein sequences, making
+each individual document quite random. Such collections are easy cases for Sadakane’s
+method, and many encodings compress the bitvector very well. In both cases, Sada-S was
+the fastest small encoding. On Inﬂuenza, the small encodings ﬁt in CPU cache, making
+them often faster than plain Sada.
+
+Different compression techniques succeed with different collections, for different reasons,
+ which complicates a simple recommendation for a best option. Plain Sada is always
+fast, while Sada-S is usually smaller without sacriﬁcing too much performance. When more
+space-efﬁcient solutions are required, the right choice depends on the type of the collection.
+Our ILCP-based structure, ILCP, also outperforms Sada in space on most collections, but it
+is always signiﬁcantly larger and slower than compressed variants of Sada.
+
+7.5 The multi-term tf-idf index
+
+We implement our multi-term index as follows. We use RLCSA as the CSA, PDL-2561F
+for single-term top-k retrieval, and Sada-S for document counting. We could have
+
+14 http://jltsiren.kapsi.ﬁ/rlcsa and http://github.com/ahartik/succinct.
+
+123
+
+284
+
+Inf Retrieval J (2017) 20:253–291
+
+)
+y
+r
+e
+u
+q
+
+ 
+/
+ 
+s
+µ
+(
+ 
+e
+m
+T
+
+i
+
+)
+y
+r
+e
+u
+q
+
+ 
+/
+ 
+s
+µ
+(
+ 
+e
+m
+T
+
+i
+
+)
+y
+r
+e
+u
+q
+
+ 
+/
+ 
+s
+µ
+(
+ 
+e
+m
+T
+
+i
+
+)
+y
+r
+e
+u
+q
+
+ 
+/
+ 
+s
+µ
+(
+ 
+e
+m
+T
+
+i
+
+)
+y
+r
+e
+u
+q
+
+ 
+/
+ 
+s
+µ
+(
+ 
+e
+m
+T
+
+i
+
+Brute−D
+PDL−RP
+Sada
+Sada−P−G
+Sada−P−RR
+Sada−RR
+Sada−RR−G
+Sada−RR−RR
+
+Sada−Gr
+Sada−RS
+Sada−RS−S
+Sada−RD
+Sada−RD−S
+Sada−S
+Sada−S−S
+ILCP
+
+Page
+
+Revision
+
+Enwiki
+
+Influenza
+
+Swissprot
+
+0
+0
+0
+1
+
+0
+0
+1
+
+0
+1
+
+1
+
+1
+.
+0
+
+0
+0
+0
+1
+
+0
+0
+1
+
+0
+1
+
+1
+
+1
+
+.
+
+0
+
+0
+0
+0
+1
+
+0
+0
+1
+
+0
+1
+
+1
+
+1
+
+.
+
+0
+
+0
+0
+0
+1
+
+0
+0
+1
+
+0
+1
+
+1
+
+1
+
+.
+
+0
+
+0
+0
+0
+1
+
+0
+0
+1
+
+0
+1
+
+1
+
+1
+
+.
+
+0
+
+0
+
+0.25
+
+0.5
+
+0.75
+
+1
+
+1.25
+
+Size (bps)
+
+1.5
+
+1.75
+
+2
+
+2.25
+
+2.5
+
+Fig. 11 Document counting on different datasets. The size of the counting structure in bits per symbol
+(x) and the average query time in microseconds (y). The baseline document listing methods are presented as
+having size 0, as they take advantage of the existing functionalities in the index
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+285
+
+Table 3 Ranked multi-term queries on the Wiki collection
+
+Query
+
+Ranked-AND
+
+Ranked-OR
+
+k
+
+10
+
+100
+
+10
+
+100
+
+1 thread
+
+8 threads
+
+16 threads
+
+32 threads
+
+152
+
+136
+
+229
+
+163
+
+914
+
+862
+
+1529
+
+1089
+
+1699
+
+1523
+
+2734
+
+1905
+
+2668
+
+2401
+
+4179
+
+2919
+
+Query type, number of documents requested, and the average number of queries per second with 1, 8, 16,
+and 32 query threads
+
+Table 4 Our index (PDL) and an inverted index (Terrier) on the Wiki collection
+
+Index
+
+Vocabulary
+
+Posting lists
+
+Collection
+
+Size (MB)
+
+Queries/s
+
+PDL
+
+39.2M
+
+8840M
+
+Terrier
+
+substrings
+
+documents
+
+0.134M
+tokens
+
+42.3M
+
+documents
+
+1500M
+
+symbols
+
+133M
+
+tokens
+
+757
+
+90.1
+
+229
+(k = 10)
+
+231
+(k = 10)
+
+163
+(k = 100)
+
+228
+(k = 100)
+
+The size of the vocabulary, the posting lists, and the collection in millions of elements, the size of the index
+in megabytes, and the number of Ranked-OR queries per second with k = 10 or 100 using a single thread
+
+integrated the document counts into the PDL structure, but a separate counting structure
+makes the index more ﬂexible. Additionally, encoding the number of redundant documents
+in each internal node of the sufﬁx tree (Sada) often takes less space than encoding the total
+number of documents in each node of the sampled sufﬁx tree (PDL). We use the basic
+tf-idf scoring scheme.
+
+We tested the resulting performance on the 1432 MB Wiki collection. RLCSA took
+0.73 bps with sample period 128 (the sample period did not have a signiﬁcant impact on
+query performance), PDL-2561F took 3.37 bps, and Sada-S took 0.13 bps, for a total of
+4.23 bps (757 MB). Out of the total of 100,000 queries in the query set, there were matches
+for 31,417 conjunctive queries and 97,774 disjunctive queries.
+
+The results can be seen in Table 3. When using a single query thread, the index can
+process 136–229 queries per second (around 4–7 ms per query), depending on the query
+type and the value of k. Disjunctive queries are faster than conjunctive queries, while larger
+values of k do not increase query times signiﬁcantly. Note that our ranked disjunctive
+query algorithm preempts the processing of the lists of the patterns, whereas in the conjunctive 
+ones we are forced to expand the full document lists for all the patterns; this is
+why the former are faster. The speedup from using 32 threads is around 18x.
+
+Since our multi-term index offers a functionality similar to basic inverted index queries,
+it seems sensible to compare it to an inverted index designed for natural language texts. For
+this purpose, we indexed the Wiki collection using Terrier (Macdonald et al. 2012)
+version 4.1 with the default settings. See Table 4 for a comparison between the two
+indexes.
+
+Note that the similarity in the functionality is only superﬁcial: our index can ﬁnd any
+text substring, whereas the inverted index can only look for indexed words and phrases.
+Thus our index has an index point per symbol, whereas Terrier has an index point per
+word (in addition, inverted indexes usually discard words deemed uninteresting, like
+stopwords). Note that PDL also chooses frequent strings and builds their lists of documents,
+ but since it has many more index points, its posting lists are 200 times longer than
+
+123
+
+286
+
+Inf Retrieval J (2017) 20:253–291
+
+those of Terrier, and the number of lists is 300 times larger. Thanks to the compression of
+its lists, however, PDL uses only 8 times more space than Terrier. On the other hand, both
+indexes have similar query performance. When logging and output was set to minimum,
+Terrier could process 231 top-10 queries and 228 top-100 queries per second under the
+tf-idf scoring model using a single query thread.
+
+8 Conclusions
+
+We have investigated the space/time tradeoffs involved in indexing highly repetitive string
+collections, with the goal of performing information retrieval tasks on them. Particularly,
+we considered the problems of document listing, top-k retrieval, and document counting.
+We have developed new indexes that perform particularly well on those types of collections,
+ and studied how other existing data structures perform in this scenario, and in which
+cases the indexes are actually better than brute-force approaches. As a result, we offered
+recommendations on which structures to use depending on the kind of repetitiveness
+involved and the desired space usage. As a proof of concept, we have shown how the tools
+we developed can be assembled to build an efﬁcient index supporting ranked multi-term
+queries on repetitive string collections.
+
+We do not aim to outperform inverted indexes on natural language text collecions,
+where they are unbeatable, but rather to offer similar capabilities on generic string collections,
+ where inverted indexes cannot be applied. Our developments are at the level of
+algorithmic ideas and prototypes. In order to have our most promising structures scale up to
+real-world information systems, where inverted indexes are now the norm, various research
+problems must be faced:
+
+1. Our construction algorithms scale up to a few gigabytes. This limits the collection
+sizes we can handle, even if they are repetitive and thus the ﬁnal structures are much
+smaller. For example, our PDL structure ﬁrst builds the classical sufﬁx tree and then
+samples it. Using construction space proportional to that of the ﬁnal structures in the
+case of repetitive scenarios, or building efﬁciently using the disk, is an important
+research problem.
+
+2. When the datasets are sufﬁciently large, even the compressed structures will have to
+operate on disk. Inverted indexes are extremely disk-friendly, which makes them
+perform well on huge text collections. We have not yet studied this aspect of our
+structures, although PDL seems well-suited to this case: it traverses one or a few
+contiguous lists (which should be decompressed in main memory) or a contiguous area
+of the sufﬁx array.
+
+3. Our data structures are static,
+
+is,
+
+that
+
+they must be rebuilt from scratch when
+documents are inserted in the collection or deleted from it. Inverted indexes tolerate
+updates much better, though they are not fully dynamic either. Instead, since in many
+scenarios updates are not so frequent, popular solutions combine a large part of the
+collection that is indexed and a small recent part that is traversed sequentially. It is
+likely that our structures will also perform well under such a scheme, as long as we
+manage to rebuild the index periodically within controlled space and time.
+
+4. We showed that our structures can handle multi-term queries under the simple tf-idf
+scoring scheme. While this can be acceptable in some applications for generic string
+collections, information retrieval on natural language texts uses, nowadays, much
+more sophisticated formulas. Inverted indexes have been adapted to successfully
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+287
+
+support those formulas that are used for a ﬁrst ﬁltration step, such as BM25. Studying
+how to extend our indexes to handle these is another interesting research problem.
+
+5. One point where our indexes could outperform inverted indexes is in phrase queries,
+where inverted indexes must perform costly list intersections. Our sufﬁx-array based
+indexes, instead, need not do anything special. For a fair comparison, we should regard
+the text as a sequence of tokens (i.e., the terms that are indexed by the inverted index)
+and build our indexes on them. The resulting structure would then only answer term
+and phrase queries, just like an inverted index, but would be must faster at phrases.
+
+Acknowledgements This work was supported in part by Academy of Finland Grants 268324, 258308,
+250345 (CoECGR), and 134287; the Helsinki Doctoral Programme in Computer Science; the Jenny and
+Antti Wihuri Foundation, Finland; the Wellcome Trust Grant 098051, UK; Fondecyt Grant 1-140796, Chile;
+the Millennium Nucleus for Information and Coordination in Networks (ICM/FIC P10-024F), Chile; Basal
+Funds FB0001, Conicyt, Chile; and European Unions Horizon 2020 research and innovation programme
+under the Marie Sklodowska-Curie Grant Agreement No. 690941. Finally, we thank the reviewers for their
+useful comments, which helped improve the presentation, and Meg Gagie for correcting our grammar.
+
+Open Access This article is distributed under the terms of the Creative Commons Attribution 4.0 International 
+License (http://creativecommons.org/licenses/by/4.0/), which permits unrestricted use, distribution,
+and reproduction in any medium, provided you give appropriate credit to the original author(s) and the
+source, provide a link to the Creative Commons license, and indicate if changes were made.
+
+Appendix 1: Detailed results
+
+Table 5 shows the precise numerical results displayed in Fig. 11, to allow for a ﬁnergrained 
+comparison.
+
+Table 5 Document counting on different datasets
+
+Page
+
+Revision
+
+Enwiki
+
+Inﬂuenza
+
+Swissprot
+
+Brute-D
+
+PDL-RP
+
+Sada
+
+Sada-P-G
+
+Sada-P-RR
+
+Sada-RR
+
+Sada-RR-G
+
+Sada-RR-RR
+
+Sada-Gr
+
+59.419 ls
+
+0.000 b
+43.356 ls
+0.000 b
+0.218 ls
+2.094 b
+2.030 ls
+
+1.307 b
+0.852 ls
+0.146 b
+1.105 ls
+
+5.885 b
+2.268 ls
+
+1.297 b
+1.088 ls
+0.136 b
+23.750 ls
+
+0.086 b
+
+124.286 ls
+0.000 b
+217.804 ls
+
+714.481 ls
+0.000 b
+1107.470 ls
+
+4557.310 ls
+0.000 b
+6221.610 ls
+
+0.000 b
+0.213 ls
+2.094 b
+1.442 ls
+
+2.469 b
+0.882 ls
+
+2.455 b
+0.506 ls
+
+0.125 b
+1.535 ls
+
+0.070 b
+0.974 ls
+
+0.056 b
+21.643 ls
+0.024 b
+
+0.000 b
+0.250 ls
+2.094 b
+1.608 ls
+
+2.694 b
+1.572 ls
+
+2.748 b
+1.013 ls
+
+1.223 b
+2.001 ls
+
+1.088 b
+1.960 ls
+
+1.142 b
+18.542 ls
+
+0.439 b
+
+0.000 b
+0.624 ls
+
+2.093 b
+1.291 ls
+
+2.466 b
+1.356 ls
+
+2.466 b
+0.581 ls
+
+0.007 b
+1.046 ls
+
+0.007 b
+1.108 ls
+
+0.007 b
+33.502 ls
+
+0.005 b
+
+9.392 ls
+0.000 b
+24.848 ls
+
+0.000 b
+0.246 ls
+2.091 b
+
+–
+
+–
+
+–
+
+–
+0.779 ls
+0.076 b
+
+–
+
+–
+
+–
+
+–
+25.236 ls
+0.034 b
+
+123
+
+288
+
+Table 5 continued
+
+Sada-RS
+
+Sada-RS-S
+
+Sada-RD
+
+Sada-RD-S
+
+Sada-S
+
+Sada-S-S
+
+ILCP
+
+Inf Retrieval J (2017) 20:253–291
+
+Page
+
+Revision
+
+Enwiki
+
+Inﬂuenza
+
+Swissprot
+
+0.742 ls
+
+5.991 b
+0.897 ls
+
+1.042 b
+1.019 ls
+
+3.717 b
+1.205 ls
+
+0.989 b
+0.604 ls
+
+5.729 b
+0.735 ls
+
+3.432 b
+4.399 ls
+
+18.454 b
+
+0.396 ls
+
+0.222 b
+0.492 ls
+0.059 b
+0.521 ls
+
+0.088 b
+0.641 ls
+0.046 b
+0.269 ls
+0.209 b
+0.380 ls
+0.142 b
+4.482 ls
+
+0.484 b
+
+0.688 ls
+
+1.180 b
+0.923 ls
+0.424 b
+1.119 ls
+
+0.942 b
+1.316 ls
+0.374 b
+0.525 ls
+1.079 b
+0.755 ls
+0.823 b
+6.033 ls
+
+4.575 b
+
+0.584 ls
+
+0.006 b
+0.767 ls
+0.005 b
+0.856 ls
+
+0.006 b
+1.005 ls
+
+0.005 b
+0.439 ls
+0.006 b
+0.624 ls
+
+0.006 b
+7.252 ls
+
+0.525 b
+
+0.538 ls
+
+0.082 b
+0.545 ls
+
+0.082 b
+0.792 ls
+0.062 b
+0.799 ls
+
+0.062 b
+0.396 ls
+0.078 b
+0.399 ls
+
+0.078 b
+3.414 ls
+
+0.992 b
+
+The average query time in microseconds and the size of the counting structure in bits per symbol. Results on
+the Pareto frontier have been highlighted. The baseline document listing methods Brute-D and PDL-RP are
+presented as having size 0, as they take advantage of the existing functionalities in the index. We did not
+build Sada-P-G, Sada-P-RR, Sada-RR-G, and Sada-RR-RR for Swissprot, because the ﬁlter was empty
+and the remaining structure was equivalent to Sada or Sada-RR
+
+Appendix 2: Index construction
+
+Our construction algorithms prioritize ﬂexibility over performance. For example, the
+construction of the tf-idf index (Sect. 6) proceeds as follows:
+
+1. Build RLCSA for the collection.
+2. Extract the LCP array and the document array from the RLCSA, traverse the sufﬁx
+
+tree by using the LCP array, and build PDL with uncompressed document sets.
+
+3. Compress the document sets using a Re-Pair compressor.
+4. Build the Sada-S structure using a similar algorithm as for PDL construction.
+
+See Table 6 for the time and space requirements of building the index for the Wiki
+collection.
+
+Scaling the index up for larger collections requires faster and more space-efﬁcient
+
+construction algorithms for its components. There are some obvious improvements:
+
+Table 6 Building the tf-idf index for the Wiki collection
+
+Sada-S
+
+Time (min)
+
+Memory (GB)
+
+RLCSA
+Total
+
+10.5
+
+19.6
+
+PDL
+
+Re-Pair
+
+39.2
+
+111
+
+123
+
+202
+
+74.7
+
+92.8
+
+248
+
+202
+
+Construction time in minutes and peak memory usage in gigabytes for RLCSA construction, PDL construction,
+ compressing the document sets using Re-Pair, Sada-S construction, and the entire construction
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+289
+
+• RLCSA construction can be done in less memory by building the index in multiple
+parts and merging the partial indexes (Sire´n 2009). With 100 parts, the indexing of a
+repetitive collection proceeds at about 1 MB/s using 2–3 bits per symbol (Sire´n 2012).
+Newer sufﬁx array construction algorithms achieve even better time/space trade-offs
+(Ka¨rkka¨inen et al. 2015).
+
+• We can use a compressed sufﬁx tree for PDL construction. The SDSL library (Gog
+et al. 2014) provides fast scalable implementations that require around 2 bytes per
+symbol.
+
+• We can write the uncompressed document sets to disk as soon as the traversal returns to
+
+the parent node.
+
+• We can build the H array for Sada-S by keeping track of the lowest common ancestor
+of the previous occurrence of each document identiﬁer and the current node. If node
+v is the lowest common ancestor of consecutive occurrences of a document identiﬁer,
+we increment the corresponding cell of the H array. Storing the array requires about a
+byte per symbol.
+
+The main bottleneck in the construction is Re-Pair compression. Our compressor requires
+24 bytes of memory for each integer in the document sets, and the number of integers
+(8.9 billion) is several
+times larger than the number of symbols in the collection
+(1.5 billion). It might be possible to improve compression performance by using a specialized 
+compressor. If interval DA½‘::r corresponds to sufﬁx tree node u and the collection
+is repetitive, it is likely that the interval DA½‘0::r0 corresponding to the node reached by
+taking the sufﬁx link from u is very similar to DA½‘::r.
+
+References
+
+Anick, P. G., & Flynn, R. A. (1992). Versioning a full-text information retrieval system. In Proceedings of
+the 15th annual international ACM conference on research and development in information retrieval
+(SIGIR) (pp. 98–111).
+
+Baeza-Yates, R., & Ribeiro-Neto, B. (2011). Modern information retrieval (2nd ed.). Reading: AddisonWesley.
+
+
+Belazzougui, D., Cunial, F., Gagie, T., Prezza, N., & Rafﬁnot, M. (2015). Composite repetition-aware data
+structures. In Proceedings of the 26th annual symposium on combinatorial pattern matching (CPM)
+(pp. 26–39).
+
+Broder, A., Eiron, N., Fontoura, M., Herscovici, M., Lempel, R., McPherson, J., et al. (2006). Indexing
+shared content in information retrieval systems. In Proceedings of the 10th international conference on
+extending database technology (EDBT), LNCS 3896 (pp. 313–330).
+
+Bu¨ttcher, S., Clarke, C., & Cormack, G. (2010). Information retrieval: Implementing and evaluating search
+
+engines. Cambridge: MIT Press.
+
+Clark, D. (1996). Compact PAT trees. PhD thesis, University of Waterloo, Canada.
+Claude, F., Farin˜a, A., Martı´nez-Prieto, M., & Navarro, G. (2010). Compressed q-gram indexing for highly
+repetitive biological sequences. In Proceedings of the 10th international conference on bioinformatics
+and bioengineering (BIBE) (pp. 86–91).
+
+Claude, F., Farin˜a, A., Martı´nez-Prieto, M., & Navarro, G. (2016). Universal indexes for highly repetitive
+
+document collections. Information Systems, 61, 1–23.
+
+Claude, F., & Munro, I. (2013). Document listing on versioned documents. In Proceedings of the 20th
+international symposium on string processing and information retrieval (SPIRE), LNCS 8214 (pp.
+72–83).
+
+Claude, F., & Navarro, G. (2010). Self-indexed grammar-based compression. Fundamenta Informaticae,
+
+111(3), 313–337.
+
+Claude, F., & Navarro, G. (2012). Improved grammar-based compressed indexes. In Proceedings of the 19th
+international symposium on string processing and information retrieval (SPIRE), LNCS 7608 (pp.
+180–192).
+
+123
+
+290
+
+Inf Retrieval J (2017) 20:253–291
+
+Dhaliwal, J., Puglisi, S. J., & Turpin, A. (2012). Practical efﬁcient string mining. IEEE Transactions on
+
+Knowledge and Data Engineering, 24(4), 735–744.
+
+Do, H. H., Jansson, J., Sadakane, K., & Sung, W. K. (2014). Fast relative Lempel–Ziv self-index for similar
+
+sequences. Theoretical Computer Science, 532, 14–30.
+
+Ferrada, H., & Navarro, G. (2013). A Lempel–Ziv compressed structure for document listing. In Proceedings 
+of the 20th international symposium on string processing and information retrieval (SPIRE),
+LNCS 8214 (pp. 116–128).
+
+Fischer, J., & Heun, V. (2011). Space-efﬁcient preprocessing schemes for range minimum queries on static
+
+arrays. SIAM Journal on Computing, 40(2), 465–492.
+
+Gagie, T., Gawrychowski, P., Ka¨rkka¨inen, J., Nekrich, Y., & Puglisi, S. J., (2012a) A faster grammar-based
+self-index. In Proceedings of the 6th international conference on language and automata theory and
+applications (LATA), LNCS 7183 (pp. 240–251).
+
+Gagie, T., Gawrychowski, P., Ka¨rkka¨inen, J., Nekrich, Y., & Puglisi, S. J. (2014). LZ77-based self-indexing
+with faster pattern matching. In Proceedings of the 11th Latin American theoretical informatics
+symposium (LATIN), LNCS 8392 (pp. 731–742).
+
+Gagie, T., Hartikainen, A., Ka¨rkka¨inen, J., Navarro, G., Puglisi, S. J., & Sire´n, J. (2015). Document counting
+in compressed space. In Proceedings of the 25th data compression conference (DCC) (pp. 103–112).
+Gagie, T., Karhu, K., Navarro, G., Puglisi, S. J., & Sire´n, J. (2013). Document listing on repetitive collections.
+ In Proceedings of the 24th annual symposium on combinatorial pattern matching (CPM),
+LNCS 7922 (pp. 107–119).
+
+Gagie, T., Navarro, G., & Puglisi, S. J. (2012b). New algorithms on wavelet trees and applications to
+
+information retrieval. Theoretical Computer Science, 426–427, 25–41.
+
+Gog, S., Beller, T., Moffat, A., & Petri, M. (2014). From theory to practice: Plug and play with succinct data
+structures. In Proceedings of the 13th international symposium on experimental algorithms (SEA),
+LNCS 8504 (pp. 326–337).
+
+Gog, S., & Navarro, G. (2015a). Improved single-term top-k document retrieval. In Proceedings of the 17th
+
+workshop on algorithm engineering and experiments (ALENEX) (pp. 24–32).
+
+Gog, S., & Navarro, G. (2015b). Improved single-term top-k document retrieval. In Proceedings of the 17th
+
+Workshop on Algorithm Engineering and Experiments (ALENEX) (pp. 24–32).
+
+Grossi, R., Gupta, A., & Vitter, J. (2003). High-order entropy-compressed text indexes. In Proceedings of
+
+the 14th Annual ACM-SIAM Symposium on Discrete Algorithms (SODA) (pp. 841–850).
+
+He, J., & Suel, T. (2012). Optimizing positional index structures for versioned document collections. In
+Proceedings of the 35th international ACM conference on research and development in information
+retrieval (SIGIR) (pp. 245–254).
+
+He, J., Yan, H., & Suel, T. (2009) Compact full-text indexing of versioned document collections. In
+Proceedings of the 18th ACM international conference on information and knowledge management
+(CIKM) (pp. 415–424).
+
+He, J., Zeng, J., & Suel, T. (2010). Improved index compression techniques for versioned document
+collections. In Proceedings of the 19th ACM international conference on information and knowledge
+management (CIKM) (pp. 1239–1248).
+
+Herna´ndez, C., & Navarro, G. (2014). Compressed representations for web and social graphs. Knowledge
+
+and Information Systems, 40(2), 279–313.
+
+Hon, W. K., Patil, M., Shah, R., Thankachan, S. V., & Vitter, J. S. (2013). Indexes for document retrieval
+
+with relevance. Space-Efﬁcient Data Structures, Streams, and Algorithms, LNCS, 8066, 351–362.
+
+Ka¨rkka¨inen, J., Kempa, D., & Puglisi, S. J. (2015). Parallel external memory sufﬁx sorting. In Proceedings
+of the 26th annual symposium on combinatorial pattern matching (CPM), LNCS 9133 (pp. 329–342).
+Konow, R., & Navarro, G. (2013). Faster compact top-k document retrieval. In Proceedings of the 23rd data
+
+compression conference (DCC) (pp. 351–360).
+
+Kreft, S., & Navarro, G. (2013). On compressing and indexing repetitive sequences. Theoretical Computer
+
+Science, 483, 115–133.
+
+Larsson, N. J., & Moffat, A. (2000). Off-line dictionary-based compression. Proceedings of the IEEE,
+
+88(11), 1722–1732.
+
+Macdonald, C., McCreadie, R., Santos, R., & Ounis, I. (2012). From puppy to maturity: Experiences in
+developing Terrier. In Proceedings of the SIGIR 2012 workshop in open source information retrieval
+(pp. 60–63).
+
+Ma¨kinen, V., Navarro, G., Sire´n, J., & Va¨lima¨ki, N. (2010). Storage and retrieval of highly repetitive
+
+sequence collections. Journal of Computational Biology, 17(3), 281–308.
+
+Manber, U., & Myers, G. (1993). Sufﬁx arrays: A new method for on-line string searches. SIAM Journal on
+
+Computing, 22(5), 935–948.
+
+123
+
+Inf Retrieval J (2017) 20:253–291
+
+291
+
+Marschall, T., et al (2016). Computational pan-genomics: Status, promises and challenges. Tech. rep., Cold
+
+Spring Harbor bioRxiv. http://biorxiv.org/content/early/2016/03/29/043430.
+
+Muthukrishnan, S. (2002). Efﬁcient algorithms for document retrieval problems. In Proceedings of the 13th
+
+annual ACM–SIAM symposium on discrete algorithms (SODA) (pp. 657–666).
+
+Navarro, G. (2004). Indexing text using the Ziv–Lempel trie. Journal of Discrete Algorithms, 2(1), 87–114.
+Navarro, G. (2014). Spaces, trees and colors: The algorithmic landscape of document retrieval on sequences.
+
+ACM Computing Surveys, 46(4), article 52.
+
+Navarro, G., & Ma¨kinen, V. (2007). Compressed full-text indexes. ACM Computing Surveys, 39(1),
+
+article 2.
+
+Navarro, G., & Nekrich, Y. (2012). Top-k document retrieval in optimal time and linear space. In Proceedings 
+of the 23rd annual ACM–SIAM symposium on discrete algorithms (SODA) (pp. 1066–1078).
+Navarro, G., & Ordo´n˜ez, A. (2014). Grammar compressed sequences with rank/select support. In Proceedings 
+of the 21st international symposium on string processing and information retrieval (SPIRE),
+LNCS 8799 (pp. 31–44).
+
+Navarro, G., Puglisi, S. J., & Sire´n, J. (2014a). Document retrieval on repetitive collections. In Proceedings
+
+of the 22nd annual european symposium on algorithms (ESA B), LNCS 8737 (pp. 725–736).
+
+Navarro, G., Puglisi, S. J., & Valenzuela, D. (2014b). General document retrieval in compact space. ACM
+
+Journal of Experimental Algorithmics, 19(2), article 3.
+
+Okanohara, D., & Sadakane, K. (2007). Practical entropy-compressed rank/select dictionary. In Proceedings
+
+of the 9th workshop on algorithm engineering and experiments (ALENEX) (pp. 60–70).
+
+Raman, R., Raman, V., & Rao, S.S. (2007). Succinct indexable dictionaries with applications to encoding kary 
+trees, preﬁx sums and multisets. ACM Transactions on Algorithms, 3(4), article 43.
+
+Rochkind, M. (1975). The source code control system. IEEE Transactions on Software Engineering, 1(4),
+
+364–370.
+
+Sadakane, K. (2007). Succinct data structures for ﬂexible text retrieval systems. Journal of Discrete
+
+Algorithms, 5, 12–22.
+
+Sire´n, J. (2009). Compressed sufﬁx arrays for massive data. In Proceedings of the 16th symposium on string
+
+processing and information retrieval (SPIRE), LNCS 5721 (pp. 63–74).
+
+Sire´n, J. (2012). Compressed full-text indexes for highly repetitive collections. PhD thesis, University of
+
+Helsinki.
+
+Stephens, Z. D., Lee, S. Y., Faghri, F., Campbell, R. H., Zhai, C., Efron, M. J., et al. (2015). Big data:
+
+Astronomical or genomical? PLoS Biology, 13(7), e1002,195.
+
+Szpankowski, W. (1993). A generalized sufﬁx tree and its (un)expected asymptotic behaviors. SIAM Journal
+
+on Computing, 22(6), 1176–1198.
+
+Va¨lima¨ki, N., & Ma¨kinen, V. (2007) Space-efﬁcient algorithms for document retrieval. In Proceedings of
+
+the 18th annual symposium on combinatorial pattern matching (CPM), LNCS 4580 (pp. 205–215).
+
+Weiner, P. (1973). Linear pattern matching algorithm. In Proceedings of the 14th annual IEEE symposium
+
+on switching and automata theory (pp. 1–11).
+
+123
+
+

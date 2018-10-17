@@ -1,0 +1,3329 @@
+Empir Software Eng (2016) 21:483–516
+DOI 10.1007/s10664-015-9365-9
+
+Understanding and addressing exhibitionism in Java
+empirical research about method accessibility
+Santiago A. Vidal · Alexandre Bergel · Claudia Marcos ·
+J. Andr´es D´ıaz-Pace
+
+Published online: 10 February 2015
+© Springer Science+Business Media New York 2015
+
+Abstract Information hiding is a positive consequence of properly defining component
+interfaces. Unfortunately, determining what should constitute a public interface remains difficult.
+ We have analyzed over 3.6 million lines of Java open-source code and found that
+on the average, at least 20 % of defined methods are over-exposed, thus threatening public
+interfaces to unnecessary exposure. Such over-exposed methods may have their accessibility 
+reduced to exactly reflect the method usage. We have identified three patterns in the
+source code to identify over-exposed methods. We also propose an Eclipse plugin to guide
+practitioners in identifying over-exposed methods and refactoring their applications. Our
+plugin has been successfully used to refactor a non-trivial application.
+Keywords Method accessibility · Information hiding
+
+1 Introduction
+
+Developing activities are centered on the premise that software is made to be
+changed (Booch 2004). Limiting the impact of a component modification to the rest of the
+
+Communicated by: Arie van Deursen
+S. A. Vidal ((cid:2)) · J. A. D´ıaz-Pace
+ISISTAN, UNICEN, Argentina and CONICET, Tandil, Argentina
+e-mail: svidal@exa.unicen.edu.ar
+
+J. A. D´ıaz-Pace
+e-mail: adiaz@exa.unicen.edu.ar
+
+A. Bergel
+Pleiad Lab, Department of Computer Science (DCC), University of Chile, Santiago, Chile
+e-mail: abergel@dcc.uchile.cl
+
+C. Marcos
+ISISTAN, UNICEN, Argentina and CIC, Buenos Aires, Argentina
+e-mail: cmarcos@exa.unicen.edu.ar
+
+484
+
+Empir Software Eng (2016) 21:483–516
+
+system is known to be particularly difficult (Robbes et al. 2012). It is widely recognized that
+encapsulation and information hiding play a key role in software maintenance and evolution.
+In his seminal contribution (Parnas 1972), David L. Parnas phrased:
+
+“Every module [...] is characterized by its knowledge of a design decision which it
+hides from all others. Its interface or definition is chosen to reveal as little as possible
+about its inner workings.”
+
+Parnas’ work closely associates the notion of information hiding with component interfaces.
+ Among the different interfaces a software component may have (Meyer B 2009), its
+public interface determines which services may be used and by whom. Reducing the public 
+interface to a minimum is an elementary design rule in software engineering that has
+received scarce attention from the research community (Riel 1996; Martin 2002; Zoller and
+Schmolitzky 2012; Steimann and Thies 2009).
+
+Method accessibility has a direct impact on the public interface by enforcing information
+hiding, one of the key features of object-oriented programming. Over-exposed methods are
+associated with a strong negative aspect: a programmer may wrongly consider an overexposed 
+method as part of the public interface. Each public method is an entry point for the
+class itself and the web of classes connected to that class, thus the more entry points a class
+has, the more likely the runtime state of an object is to be exposed.
+
+Despite the advances in programming environments and methodologies, little assistance
+is offered to programmers to define the public interface of classes. Along this line, we think
+that the developer should be assisted in this task.
+
+Our analysis of 30 open-source Java applications reveals that at least 20 % of the methods
+are defined with an accessibility that is broader than necessary: a typical situation is when
+a method is declared as public, whereas it may simply be protected or private. Consider the
+following situation inspired by one of our case studies:
+
+The class defines a constructor and two public methods. Being public allows any
+other method in the system to merely invoke giveName(...) and getName(). The constructor 
+Author calls method giveName(...) to set a name. In the whole application, method
+giveName(...) is referenced and called nowhere, except by the class constructor. Method
+giveName() may therefore be private without affecting the application integrity. The programmer 
+probably made giveName(...) public on the assumption that setting an author name
+is an operation important enough to be used by client classes, either in future versions
+of the application or in external components. However, in the current version of the system,
+ this assumption is a mere speculation because there is no evidence that this method
+is useful outside c‘lass Author. An over-exposed method is a method with an accessibility
+broader than necessary based on the location of its caller methods, as the method give-
+Name(...) in the example given above. Note that a method can be over-exposed as part of the
+
+Empir Software Eng (2016) 21:483–516
+
+485
+
+developer’s design intent, either to support future application evolution or to usage by
+external components, but it can also be over-exposed because of “over-design” or by
+mistake.
+
+Mainstream programming languages have a sophisticated access modifiers system for
+its methods and classes. Unfortunately no assistance is offered to a programmer to properly
+pick the right accessibility. This article contributes to rectifying this situation by carefully
+answering relevant questions and providing a robust prototype.
+
+To understand the extent of the over-exposure phenomenon, we have studied over 3.6
+millions lines of Java code, looking at how method accessibility manifests in practice. We
+structure our empirical analysis along the following research questions:
+
+– Q1 - Is there a difference in terms of method accessibility distribution between libraries
+
+/ frameworks and plain applications?
+
+– Q2 - Do libraries and frameworks contain, on average, more over-exposed methods
+
+than plain applications?
+
+– Q3 - Are over-exposed methods effectively used in future system versions?
+
+In order to answer these questions, we provide three code patterns that represent situations 
+where a method is over-exposed. These patterns are based on a combination of
+invocations between methods and classes. Using these patterns as detectors, over-exposed
+methods may then be refactored to reduce their accessibility to their strict necessity. The
+size of the public interface of classes will be consequently reduced.
+
+Additionally, to assist the refactoring of method accessibility, we have developed an
+Eclipse plugin to automatically identify over-exposed methods and propose refactorings to
+remove the unnecessary method exposure.
+
+To verify that no changes are observed in the behavior of applications when reducing
+method accessibility, we refactored SweetHome3D, a 84K LOC Java application. Based
+on a series of tests, no impact on its behavior at runtime has been observed. This gives us
+confidence that the semantics of the application are preserved to some extent, after reducing
+the accessibility.
+
+This article makes the following contributions:
+
+–
+
+–
+
+–
+–
+
+It highlights a limitation of programming environments to assist programmers in
+rightfully choosing the access modifier of a method.
+It empirically studies the presence of over-exposed methods which has not been
+rigorously been covered in the past.
+It provides three code patterns to identify over-exposed methods.
+It describes the implementation and the evaluation of a prototype to efficiently identify
+over-exposed methods.
+
+Outline The article is structured as follows. Section 2 briefly summarizes the different
+access modifiers for a method in Java. The section further analyzes a set of 15 libraries and
+15 plain applications. Section 3 discusses three code patterns for detecting over-exposed
+methods, and then analyzes the proportion of exposure in our 30 applications. Section 4
+monitors changes in over-exposed methods over application versions. Section 5 discusses
+possible reasons for finding so many over-exposed methods. Section 6 presents the threats of
+validity of our approach. Section 7 briefly presents and evaluates our Eclipse plugin for identifying 
+and refactoring over-exposed methods. Section 8 describes a case-study conducted
+
+486
+
+Empir Software Eng (2016) 21:483–516
+
+on a non-trivial Java application. Section 9 analyzes related work. Section 10 concludes and
+discusses future lines of work.
+
+2 Method Accessibility in Java Applications
+
+This section discusses the access modifiers offered by the Java programming language and
+their presence in a set of 30 Java applications.
+
+2.1 Access Modifiers Offered by Java
+
+The Java programming language gives to each field and method one of four different accessibilities.
+ The accessibility of a method m unambiguously determines which methods in the
+system have the right to invoke m. This “right” depends on the class and the package of the
+calling method.
+
+A public method may be invoked by any method. A protected method may be invoked
+only by (i) the classes that belong to the same package of the protected method and (ii) the
+subclasses of the class that defines the protected method. A package method may be invoked
+only by the methods of the same package. Package is the accessibility per default, when
+no accessibility is specified (i.e., method declared without an access modifier). A private
+method may be invoked only by its defining class.
+
+These four accessibilities may be ordered along the degree of exposure a method may
+have (cf Fig. 1, inspired by a Java tutorial1). A public method is more exposed than a
+protected method, itself more exposed than a package or a private method.
+
+The Java compiler makes sure that each method call conforms to the accessibility of the
+targeted method. A compilation error is reported if the targeted method is not accessible for
+a caller. On the contrary, no error or warning is provided if a method is accessible to more
+methods than necessary. The premise on which this paper is based is that the more public
+methods a class has, the more exposed it is. On the opposite, the more private methods a
+class has, the less exposed it is.
+
+We informally define a class C as “exhibitionist” if parts of C are unnecessarily
+
+accessible to other classes via methods.
+
+2.2 Study of Java Applications
+
+We have selected 30 open-source Java applications and measured the use of access modifiers
+for methods. The appendix lists these applications and the results of the metrics relevant
+to our study in Tables 4, 5, 6 and 7. Some of these applications were chosen because of
+their popularity others were found on the website sourceforge.net, a popular hosting platform 
+for open source software projects. In all the cases we checked for the availability of its
+source code and a strong commitment of their supporting community (e.g., existence of an
+active mailing list, availability of unit tests). Additionally, we sought to select applications
+involving different sizes and belonging to different domains. The size of the applications we
+
+1http://docs.oracle.com/javase/tutorial/java/javaOO/accesscontrol.html
+
+Empir Software Eng (2016) 21:483–516
+
+487
+
+Accessibility
+
+public
+protected
+package
+private
+
+class
+A
+A
+A
+A
+
+package
+
+subclass
+
+world
+
+A
+A
+A
+-
+
+A
+A
+-
+-
+
+A
+-
+-
+-
+
+Fig. 1 Method accessibility in Java (A = accessible, − = not accessible)
+
+are considering ranges from 15K to 689K lines of code. We have analyzed nearly 275,000
+methods totaling over 3.6 million lines of code. The appendix contains all the software
+versions to let one easily reproduce our findings. Additionally, the datasets2 and the processing 
+code3 (package Spirit-ExhibitionismTests) used to conduct the experiments are available
+for download.
+
+In this paper we focus on method accessibility but we do not consider variable accessibility.
+ While the analysis of variable accessibility is relevant, we have focused on methods
+because their accessibility is essential to the notion of encapsulation and it is a topic largely
+under-considered by both practitioners and researchers.
+
+We classify these applications into two distinct categories:
+
+–
+
+–
+
+library / framework - applications that are either self-claimed as a library (e.g., JUnit,
+Struts) or applications that are meant to complement functionalities offered by Java
+(e.g., Commons-Primitives, Commons-Compress). These applications are meant to be
+used by other applications, and cannot be directly considered as an end product for a
+non-programmer.
+plain application - applications that are meant by their authors to be used directly by
+an end-user (e.g., Jedit, Jmol). We include in this category applications that operate on
+other applications (e.g., PMD, Cobertura, FindBugs). Although such applications are
+also meant to be extended, we the end user the primary user of these applications, with
+extensions meant as possibilities to add features for these users.
+
+The reason for these two categories stems from the two very different ways of using these
+applications. A library is meant to be extended and/or used by an application. A library has
+therefore to provide public services and hooks in the source code to be easily extended. A
+plain application does not necessarily have the same constraints, since its typical usage does
+not involve an extension of its source code.
+
+We therefore hypothesize that a library has more public methods and fewer private methods 
+than an application for end users. We further expect to find a larger number of methods
+without calls in library systems than in plain applications, since a library defines methods
+that will be called when the library is used by third applications.
+
+2.3 Accessibility in Java Applications
+
+We have studied the distribution of method accessibilities across libraries and plain applications.
+ This section addresses both: the hypothesis presented in the previous section and
+
+2http://bit.ly/mseFiles
+3http://ss3.gemstone.com/ss/SPIRIT.html
+
+488
+
+Empir Software Eng (2016) 21:483–516
+
+the Q1 research question stated earlier. Specifically, in this section we try to determine if
+there is any statistical significant difference in the number of methods defined with a given
+accessibility between plain application and libraries.
+
+Figure 2 gives the distribution of the four access modifiers for methods (public, private,
+protected, and package) for the 30 Java applications of our study. Each chart is a box plot,
+plotting the frequency against the number of methods of a particular accessibility. For example,
+ the top left chart gives the number of applications with a particular portion range of
+private methods. The metrics we obtained from the applications have a precision of 0.01 %
+(cf Appendix), meaning that we rounded up the values to the second decimal place.
+
+Public Methods On average, plain applications have 67.1 % of public methods. The standard 
+deviation is 12.5 %. Libraries have an average of 77.2 % of public methods, with a
+standard deviation of 6.5 %. That is, libraries report on average more public methods than
+plain applications.
+
+Although the box plots give descriptive insights, no conclusion can be made so far on
+whether there is a significant difference between the distribution of public methods between
+libraries and plain applications. A statistical test is necessary.
+
+0
+6
+
+5
+2
+
+0
+5
+
+0
+4
+
+0
+3
+
+t
+
+s
+d
+o
+h
+e
+m
+e
+a
+v
+i
+r
+
+t
+
+ 
+
+0
+2
+
+ 
+
+P
+%
+
+0
+2
+
+5
+1
+
+0
+1
+
+t
+
+ 
+
+s
+d
+o
+h
+e
+m
+e
+g
+a
+k
+c
+a
+P
+%
+
+ 
+
+0
+1
+
+0
+
+2
+1
+
+5
+
+Applications
+
+Libraries/Frameworks
+
+Applications
+
+Libraries/Frameworks
+
+Private (N=15)
+
+Package (N=15)
+
+0
+8
+
+t
+
+s
+d
+o
+h
+e
+m
+d
+e
+
+ 
+
+t
+
+t
+c
+e
+o
+r
+P
+%
+
+ 
+
+0
+1
+
+8
+
+6
+
+4
+
+0
+7
+
+s
+d
+o
+h
+e
+m
+ 
+c
+
+t
+
+i
+l
+
+0
+6
+
+b
+u
+P
+%
+
+ 
+
+0
+5
+
+2
+
+0
+4
+
+Applications
+
+Libraries/Frameworks
+
+Applications
+
+Protected (N=15)
+
+Fig. 2 Accessibility distribution
+
+Libraries/Frameworks
+
+Public (N=15)
+
+Empir Software Eng (2016) 21:483–516
+
+Table 1 Shapiro-Wilks test
+results (normality)
+
+Accessibility modifier
+
+Public
+Protected
+Package
+Private
+
+489
+
+p-value
+
+0.001708
+0.04801
+0.002281
+0.00511
+
+First, we test the data for normality using the Shapiro-Wilks test. Table 1 shows the pvalues 
+obtained from the tests for the different accessibility data. Since all the p-values are
+lower than 0.05, we can conclude that the data deviate from normality.
+
+As the data of public method accessibilities is not normally distributed across applications,
+ we use the Mann-Whitney-test to check the difference between plain applications
+and libraries on defining public methods. In this context, we define the following null
+hypothesis:
+
+– H0: there is no difference between plain applications and libraries on how frequently
+
+public accessibility is used
+
+−
+
+−
+
+and T
+
+The alternative hypothesis (H1) is that there is a difference between plain applications and
++
+libraries with regards to how often the public accessibility is used. Table 2 describes the T
+and T
+values which are calculated based on the sum of the ranks between the percentage of
+methods with an accessibility modifier. The H0 hypothesis could be rejected if the smallest
++
+of T
+is less than or equal to a value indicated in a statistical table (Wohlin et al.
+2000). In this case, for n = 15 the value is 25. From Table 2, the null hypothesis H0 cannot
+be rejected with a two-tailed test with a probability of error (or significance level) α = 0.05
++
+(i.e. there is a 5 % chance of wrongly accepted H0) and a p-value of 0.007544 since min(T
+,
+−
+) is larger than 25 (Siegel and Castellan 1988). That is, there is no statistically significant
+T
+difference between plain applications and libraries on how public accessibility is used.
+
+As we have just seen, a large proportion of methods are declared public in Java applications 
+(around 70 %). This is a rather surprising fact since information hiding and
+encapsulation principles promote the idea of restricting public interfaces to their minimum.
+ That is, the accessibility of the methods should be reduced to their strict necessity
+based on the locations of caller methods. Our analysis shows the opposite tendency in
+practice.
+
+Protected Methods Protected methods are used much less than the other accessibilities.
+Plain applications have on average 5.1 % (standard deviation = 2.9) protected methods
+
+Table 2 Mann-Whitney-test
+results
+
+Factor
+
+Public
+Protected
+Package
+Private
+
+n
+
+15
+15
+15
+15
+
++
+
+T
+
+82
+79
+26
+30
+
+−
+
+T
+
+38
+41
+94
+90
+
+490
+
+Empir Software Eng (2016) 21:483–516
+
+and libraries have 7.2 % (standard deviation = 3.4). Similarly to public methods, we define
+the null hypothesis as:
+
+– H0: there is no difference between plain applications and libraries on how frequently
+
+protected accessibility is used
+
++
+
+, T
+
+−
+
+) = 41.
+
+As shown in Table 2, a new Mann-Whitney-test for these measurements failed to reject
+the null hypothesis with a significance level of 0.05 and a p-value of 0.0742 since
+min(T
+Package Methods Plain applications have an average of 9.8 % (standard deviation =
+7.0) package accessible methods and libraries have an average of 7.6 % (standard deviation 
+= 5.7). The null hypothesis for the Mann-Whitney-test is formulated similarly to
+that of the previous accessibilities. From Table 2, the null hypothesis cannot be rejected
+with a two-tailed test with a probability of error of 0.05 and a p-value of 0.6832 since
+min(T
+
+) = 26.
+
+, T
+
++
+
+−
+
+−
+
+Private Methods Plain applications have an average of 18 % of private methods (standard
+deviation = 13.8) and libraries have an average of 7.9 % (standard deviation = 5). The null
+hypothesis for the Mann-Whitney-test is formulated similarly to the previous accessibili-
++
+,
+ties. The test returns a p-value of 0.002306 with a probability of error of 0.05 and min(T
+) = 30, which is comparable to the result of the previous analyse. That is to say, there
+T
+is not enough statistical evidence to reject the null hypothesis. That means that there is no
+statistically significant difference between plain applications and libraries on how private
+accessibility is used. Surprisingly, we found that there are about 2.2 times more private
+methods in plain applications than in libraries.
+
+Note that the application Cobertura is an outlier, as shown in Table 6 of the appendix.
+This 50K LOC application is composed of 3,313 methods, in which 1,970 are private and
+1,190 are public. Cobertura has 59.46 % private methods, which is a higher number than
+for the remaining applications. A closer look at this application reveals that a large portion
+of these private methods belong to a built-in Java parser. This parser has been automatically
+generated by the JavaCC parser generator.
+
+In summary, answering Q1 showed that there is not a difference in terms of method
+accessibility distribution between libraries/frameworks and plain applications. Also, we
+have found that, on average, 70 % of the methods are defined as public. All the experiments
+given in the article have been performed on the Moose software analysis platform.4 Moose
+offers a meta-model on which we formulate queries and compute metrics. The parsing of
+the Java application has been done using the VerveineJ Java analyzer.5
+
+3 Over-exposed Methods
+
+We qualify a method as over-exposed if it has an accessibility that is greater than the one
+being necessary. Necessity here should be interpreted in the “context” of the application,
+which can be that of a plain application or a library. As a consequence, an over-exposed
+
+4http://www.moosetechnology.org
+5http://www.moosetechnology.org/tools/verveinej
+
+Empir Software Eng (2016) 21:483–516
+
+491
+
+method may have its accessibility reduced to reflect its actual use. Being over-exposed
+for a method depends on (i) other methods that call the over-exposed method and (ii) the
+accessibility of the original method in presence of overriding.
+
+A typical scenario for a method to be over-exposed is when the method is declared public
+and used as if it were a private method (i.e., solely called within its class). This method
+is over-exposed and its accessibility could be restricted without impacting the application
+behavior. An example of such a situation is the class Author given earlier (Section 1).
+
+3.1 Accessibility Patterns
+
+In this section, we present an approach to identify over-exposed methods through three code
+patterns. We illustrate these patterns using contrived but representative examples.
+
+Pattern 1 - Package Method A method a() defined as public or protected in a class C is
+over-exposed and its accessibility may be changed to package if:
+
+–
+–
+
+it is called by at least one method that is not defined in C and,
+all the caller methods are defined in the same package as a()
+
+Example: Classes Library and Author live in the same package:
+
+Method Library.deﬁneNewAuthor() invokes Author.giveName(). Method giveName() is
+not called anywhere else except by Library. The most restricted accessibility allowed for
+giveName() is package. If giveName() is protected or public, then it is over-exposed.
+
+Pattern 2 - Protected Method A method defined as public in a class C is over-exposed and
+its accessibility may be changed to protected if:
+
+–
+
+it is only called by methods defined in classes that inherit from C
+
+Example:IndexedAuthor and Author are two classes living in different packages:
+
+IndexedAuthor invokes giveName(), which is defined in a superclass. Method giveName()
+is not called anywhere except by IndexedAuthor. The accessibility of giveName() is public.
+The minimum accessibility for method giveName() is protected, and it is over-exposed if it
+is public.
+
+492
+
+Empir Software Eng (2016) 21:483–516
+
+Pattern 3 - Private Method A method a() defined as public, package or protected in a class
+C is over-exposed and its accessibility may be changed to private if:
+
+–
+
+it is only called by methods defined in Foo
+
+Example: Class Author defines giveName(), which is declared as public:
+
+Method giveName() is solely called by Author itself. If the accessibility of giveName()
+is either public, protected or package, then it is over-exposed. The minimum accessibility
+for method giveName() that is strictly necessary is private. Note that giveName() does not
+override any method. Because the accessibility of an overridden method cannot be more
+restrictive than that of the method that it is overriding (this case is discussed in Section 3.3),
+overridden methods are considered in our patterns only when their accessibilities can be
+effectively reduced. If an overridden method fits with one of the patterns but its accessibility
+cannot be reduced because of the method that is being overridden accessibility, the method
+is not considered over-exposed.
+
+To sum up, we qualify a method as over-exposed (e.g.,giveName()) if it is involved in
+at least one of the three patterns described above. Note that a private method cannot be
+over-exposed since private is the most restrictive accessibility.
+
+3.2 Proportion of Unnecessary Exposure
+
+We have seen that libraries and plain applications have a slightly different profile of
+method accessibility (Section 2.3). This finding therefore suggests that these two kinds
+of applications should be treated distinctly. This section analyzes the distribution of
+the unnecessary method exposure of 30 Java applications. The source code of the 30
+applications (15 plain applications and 15 libraries) we analyzed totals 457,351 method
+invocations.
+
+Libraries and Frameworks Not all the methods defined in an application are relevant for
+our analysis. We consider a method m analyzable if (i) m is called at least once by another
+method and (ii) m is non-private. In order to determine whether the accessibility of m is
+appropriate, m must be called. If this is not the case, then it cannot be involved in one of
+the patterns P1, P2, or P3, presented earlier (Section 3.1). Note that methods that are not
+analyzable in our study might or might not be over-exposed.
+
+For the total number of methods, the range of over-exposed methods goes from 11.15 %
+to 32.98 %, with an average of 24.81 %, a median of 26.41 %, and a standard deviation is
+5.93. For calculating these values, we took into account the calls from the test methods of
+the libraries.
+
+Empir Software Eng (2016) 21:483–516
+
+493
+
+The 15 libraries define 138,568 methods, for which 8,541 are private. The following
+
+table gives the proportion of the accessibility for non-private methods:
+
+methods
+
+defined
+
+analyzable
+
+public
+protected
+package
+
+total
+
+110,438
+9,220
+10,369
+
+130,027
+
+44,771
+5,826
+2,435
+
+53,032
+
+right
+accessibility
+
+17,056
+2,145
+1,834
+
+21,035
+
+over
+exposed
+
+27,715
+3,681
+601
+
+31,997
+
+The defined column gives the number of methods that are defined. In total we have
+130,027 non-private methods (138,568 - 8,541). Note that we also include abstract methods,
+since an abstract method has an access modifier making it relevant to our analysis (one of
+its implementations may be invoked). The analyzable column gives the number of methods
+being called at least once for each kind of accessibility, and finally it totals the number of
+methods being called at least once that are not private (53,032). The right accessibility is the
+number of methods that have an adequate accessibility (i.e., the accessibility that is strictly
+necessary), meaning that they do not fit into any of the three patterns presented earlier.
+From the 130,027 methods, only 40.78 % (= 53,032) are analyzable. The remaining
+59.22 % of methods are either not called by the actual applications or references to them
+could not be determined. Out of the 53,032 methods, 21,035 have an adequate accessibility,
+meaning that 31,997 are over-exposed. In total, 23.09 % of the 138,568 methods are overexposed.
+ We found that 86.6 % of the over-exposed methods are public methods whose
+accessibilities can be reduced. The following table details the changes suggested by our
+pattern-based analysis of the accessibility modifiers.
+
+Current accessibility
+
+Suggested accessibility
+
+# of methods over-exposed
+
+Public
+Public
+Public
+Protected
+Package
+Package
+
+Private
+Protected
+Package
+Private
+Private
+Protected
+
+6798
+2612
+18305
+3681
+477
+124
+
+Plain Applications Similar to the case of libraries, public methods make up a large proportion 
+when compared to the other methods. The 15 plain applications define 144,795 methods,
+ which include 16,017 private methods. We present the proportion of the accessibility
+for the 128,778 non-private methods:
+
+methods
+
+defined
+
+analyzable
+
+public
+protected
+package
+
+total
+
+95,433
+9,744
+14,551
+
+128,778
+
+46,336
+7,192
+4,429
+
+57,957
+
+right
+accessibility
+
+24,861
+4,423
+3,617
+
+32,901
+
+over
+exposed
+
+21,475
+2,769
+812
+
+25,056
+
+494
+
+Empir Software Eng (2016) 21:483–516
+
+Out of the 57,957 methods that are analyzable, 32,901 methods have an adequate accessibility.
+ As a consequence, 17.30 % (= 25,056) of the 144,795 methods are over-exposed.
+A 85.7 % of the over-exposed methods are public methods whose accessibility should be
+reduced. The following table details the reductions suggested by our analysis.
+
+Current accessibility
+
+Suggested accessibility
+
+# of methods over-exposed
+
+Public
+Public
+Public
+Protected
+Package
+Package
+
+Private
+Protected
+Package
+Private
+Private
+Protected
+
+5962
+1838
+13675
+2769
+702
+110
+
+Libraries/frameworks Versus Plain Applications The libraries we analyzed have on the
+average 5.79% (= 23.09 - 17.30) more over-exposed methods than the plain applications do.
+Figure 3 shows the distributions of over-exposed methods for libraries and plain applications.
+ We tested the normality of the data using the Shapiro-Wilks test. We obtained a
+p-value of 0.2681. Since the p-value is higher than 0.05 we can conclude that the data is
+normal. The graph in Fig. 3 follows the intuition that libraries offer public services that are
+meant to be used by external applications. This analysis answers the second research question 
+stated earlier (Q2, Section 1). Since the data is normal we can use a Student’s t-test to
+check for any statistical difference between the number of over-exposed methods in libraries
+and plain applications. H0 is that libraries have the same percentage of over-exposed methods 
+than applications have. After testing we reject the null hypothesis with α = 0.05 and
+p-value = 0.01 indicating that the two distributions are statistically different. That means
+that libraries have on average more over-exposed methods than plain applications.
+
+0
+3
+
+5
+2
+
+0
+2
+
+5
+1
+
+t
+
+ 
+
+s
+d
+o
+h
+e
+m
+d
+e
+s
+o
+p
+x
+e
+-
+r
+e
+v
+o
+%
+
+ 
+
+Applications
+
+Libraries.Frameworks
+
+N=15
+
+Fig. 3 Distribution of over-exposed methods in plain applications and libraries/frameworks
+
+Empir Software Eng (2016) 21:483–516
+
+495
+
+Use of Libraries / Frameworks We have earlier determined that 23.09 % of the methods
+contained in libraries are over-exposed, a higher value than for plain applications (17.30 %).
+This is not really surprising since the intention of a library is to be used or instantiated.The
+question that naturally follows is whether the number of over-exposed methods for libraries
+is reduced when they are used by external applications. Answering this question implies
+analyzing a number of client applications for each library. This is a significant amount of
+work that we leave for future efforts. To get a sense of the possible answer, we analyzed
+three applications that use the JFreeChart library. We measured the number of over-exposed
+methods in JFreeChart when used by each of the client applications. We then compared the
+number of over-exposed methods to that of JFreeChart alone.
+
+Specifically, we analyzed the way in which iTracker,6 OpenReports7 and JSky8 use
+JFreeChart. We conducted an experiment similar to the one conducted with the libraries, but
+instead of focusing on the analysis of the methods of the client applications (i.e., iTracker,
+OpenReports and JSky), we computed the number of over-exposed methods in the version 
+of JFreeChart used by the applications. The following table compares our results for
+JFreeChart and the usage of this library in the three aforementioned applications:
+
+system
+
+defined
+
+analyzable
+
+JFreeChart
+iTracker
+JSky
+OpenReports
+
+8,207
+8,207
+8,207
+8,207
+
+3,456
+3,456
+3,482
+3,473
+
+right
+accessibility
+
+985
+985
+1,032
+1,021
+
+over
+exposed
+
+2,471
+2,471
+2,450
+2,452
+
+Without being used by a client application, JFreeChart defines 8,207 methods, from
+which 2,471 (= 30.1 %) are over-exposed. When JFreeChart is used, the number of analyzable 
+methods (i.e., non-private methods that are called at least once) is slightly higher.
+These methods that turn into being analyzable are entry points of the library. The number
+of over-exposed methods is slightly reduced to 29.8 %., presumably because some methods 
+are effectively used by external clients (note that the values reported for iTracker are
+the same as the ones reported to JFreeChart because iTracker calls a subset of the methods
+called internally by JFreeChart). Still, this small analysis indicates that using a library may
+not strongly reduce the number of over-exposed methods. Nonetheless, more experiments
+are needed to confirm this claim.
+
+3.3 Discussion of the Study
+
+A number of points related to our measurements are worth discussing.
+
+Callbacks It is common to have methods defined in an application that are not directly
+called by the application itself. Methods intended to be called by the Java runtime, such
+as event callbacks, belong to this category. Since a method defining the callback is not
+
+6http://www.itracker.org
+7http://oreports.com/
+8http://archive.eso.org/cms/tools-documentation/jsky/
+
+496
+
+Empir Software Eng (2016) 21:483–516
+
+directly called by the application, the method cannot be analyzed. Consider the following
+code excerpt found in SweetHome3D:
+
+Method invokeLater(...) takes as argument an instance of an anonymous class that implements 
+the interface Runnable. This anonymous class implements the method public void
+run(). This method is invoked by a particular thread, called the dispatch thread by the Java
+runtime. The call of run() is therefore made in classes that belong to Java.
+
+Our analysis focuses on what directly constitutes the applications, that is, their source
+code. We did not consider the runtime environment in order to avoid having redundancy for
+each analyzed application.
+
+Use of Reflection We assessed the 30 applications by analyzing their source code. We therefore 
+discarded all aspects that may occur at runtime. In addition to callbacks, one limitation
+of our approach is that it does not take into account reflective method invocations. As an
+example, consider the following code excerpt obtained from SweetHome3D:
+
+An instance of the Java class Method is obtained, and then it
+
+is invoked using
+destroyMethod.invoke(...). The call to the actual destroy() method cannot be statically identified.
+ Although this method is called by the application itself, this call is not considered in
+our analysis.
+
+In the 30 applications we analyzed, 23 make use of the reflective capabilities of Java.
+Of these 23, 16 are actually invoking methods via reflection. We analyzed the percentages
+of classes that invoke methods via reflection. On average we found that only the 2.98 % of
+the classes of the libraries and 0.7 % of the classes of the applications use reflection. While
+the values obtained for the different applications were similar, there were two outliers in
+the libraries: JavaAssist (9.24 %) and JUnit (7.3 %). We think that these values are related
+
+Empir Software Eng (2016) 21:483–516
+
+497
+
+to the domain of the libraries (bytecode manipulation and testing, respectively). We did not
+specifically measure the impact of reflection in our analysis. We plan to investigate this
+aspect in the future using a dynamic analysis, similarly to Thies and Bodden (2012).
+
+Inheritance and Accessibility Java allows overriding methods to have their accessibility
+widened. It means that (i) a package method may be made protected or public and (ii)
+a protected method may be made public when being overridden.9 Consider the following
+example:
+
+Each override has an accessibility wider than the original method of the root class. The
+class Author defines the method giveName(), which has a package accessibility. IndexedAuthor 
+redefines it and makes it public.KeyedAuthor redefines the giveName() method as
+protected.
+Among the 283,363 methods we analyzed, we found only 1,339 (= 0.47 %) occurrences
+of overriding methods that have a wider accessibility than the declaration in a superclass.
+
+4 Monitoring the Evolution
+
+This section assesses whether the presence of over-exposed methods is intended to satisfy
+future needs of different applications. The reported results address our third research question 
+(Q3). For each of the plain applications, we analyzed and compared the evolution of
+over-exposed methods along the history of the applications. We could not find more than
+one version of the Logisim application and therefore report our measurements for the 14
+remaining applications. We have analyzed 7 versions for all but one application. Only 5
+versions are publicly available for CheckStyle. For each application A, we denote Ax the
+version x of A. The argument x ranges from 0 to 6.
+
+4.1 Evolution of Over-exposed Methods
+
+For each version of each application, we measured the number of defined methods, overexposed 
+methods, and the ratio between these two. Our results are presented in Fig. 7, given
+in the appendix. Each application comes with two graphs:
+
+–
+
+–
+
+the graph with two curves located on the left-hand side shows the evolution of the total
+number of methods with the number of over-exposed methods.
+the graph with one curve located on the right-hand side indicates the evolution of the
+relative number of over-exposed methods.
+
+9Note that a private method cannot be overridden.
+
+498
+
+Empir Software Eng (2016) 21:483–516
+
+These graphs visually convey the intuition that the number of over-exposed methods seems
+to correlate with the total number of methods. In fact, plotting all the pairs (# methods
+in Ax, # over-exposed methods in Ax) indicates a linear correlation between these two10.
+We therefore computed Spearman’s correlation coefficient (denoted p). We found that 10
+of the 14 applications11 have a strong positive correlation (> 0.8) between the number of
+defined methods and the number of over-exposed methods. Although we cannot deduce the
+causality between these two, the strong correlation indicates that a new application version
+that contains more methods is likely to have more over-exposed methods than in its previous
+version.
+Out of the remaining five applications, we distinguish three applications with little variation 
+in their number of defined methods and over-exposed methods. Checkstyle (r = 0.23),
+Jajuk (r = 0.82) and Jedit (r = 0.18) loosely correlate because of the small variations in
+their corresponding measurements. The two remaining applications, Jmol (r = 0.04) and
+Portecle (r = −0.90), went through some major change, which breaks the continuity of our
+measurements, thus resulting in a low correlation.
+
+4.2 What do Over-exposed Methods Become?
+
+One question that naturally arises is what do over-exposed method become over time. We
+provide an answer to this question by monitoring each over-exposed method of our applications 
+over time. There are three different fates for a method that is over-exposed. A method
+that is over-exposed in a version Ax, may in a version Ay (y > x):
+
+–
+
+–
+
+–
+
+be not over-exposed anymore – This happens if the method has new calling methods
+that fit well with its accessibility. Based on the Author class given in the introduction,
+ the method giveName(...) may be called from another package in version y of the
+application that contains Author.
+not exist anymore – This situation corresponds to a method removal or renaming.
+Version y does not contain the method Author.giveName(...).
+remain over-exposed – The method is still over-exposed in version y. This does not
+prevent the method from having additional calling methods, however its accessibility
+remains still too permissive.
+
+We measured the proportion of over-exposed methods that fall into each of these three situations 
+by tracing each over-exposed method found in an early version of each application.
+For each application A, we compare the over-exposed methods found in A0 (the initial ver-
+sion) with the methods found in a later version; A0 is therefore used as a reference point.
+The six last versions are denoted A1, ..., A6, from the oldest to the newest one. Figure 8
+shows four metrics for each application:
+
+– Over-exposed methods (OEM) in A0: this value simply corresponds to the number of
+over-exposed methods in A0. This value is equal to the sum of the following three
+metrics.
+
+– OEM in A0 that are not OEM in Ax: The number of over-exposed methods in A0 that
+
+are not over-exposed in Ax.
+
+10These scatterplots are not reported in this paper.
+11ArgoUML, SweetHome3D, FreeMind, Ant, Cobertura, Findbugs, Jajuk, JStock, PMD, TuxGuitar
+
+Empir Software Eng (2016) 21:483–516
+
+499
+
+– OEM in A0 that do not exist in Ax: The number of over-exposed methods in A0 that do
+
+– OEM in A0 that are OEM in Ax: The number of over-exposed methods in A0 that
+
+not exist in Ax anymore.
+
+remain over-exposed in Ax.
+
+Each graph (in the Appendix) describes the profile of the application regarding the evolution 
+of over-exposed methods. Consider the applications SweetHome3D, Jedit, CheckStyle,
+Jajuk, Jedit and PMD. These applications have the number of over-exposed methods from
+A0 reduced by less than 5 %, only. Although the size of these applications increases
+over time, the number of over-exposed methods found in an early version of these
+applications remains over-exposed across the analyzed versions.
+
+On the other end of the spectrum, the applications TuxGuitar and Jmol show their number
+of over-exposed methods found in A0 reduced by 76 % and 64 %, respectively. These two
+applications have the number of over-exposed methods found in their initial version largely
+reduced over time.
+
+An interesting result is that the number of methods that become not over-exposed is
+relatively small for all applications. The 14 applications we considered in this paper have
+less than 19 % of the over-exposed methods found in an early version turned into a
+non-over-exposed. This measurement indicates that the intuition giving an accessibility
+
+20,000
+
+15,000
+
+10,000
+
+5,000
+
+0
+
+Version 1
+
+Version 3
+
+Version 5
+
+Over-exposed methods (OEM) in A0
+
+OEM in A0 that are not OEM in Ax
+
+OEM in A0 that do not exist in Ax
+
+OEM in A0 that are OEM in Ax
+
+Fig. 4 Cumulative evolution of over-exposed methods
+
+500
+
+Empir Software Eng (2016) 21:483–516
+
+greater than necessary to a method for future usage holds only for a small portion of the
+methods.
+
+Figure 4 gives a global estimation of the evolution of over-exposed methods for the 6
+versions of the 13 applications (without CheckStyle and Logisim). The graph summed up
+the four metrics given above. It shows that, from the 15,276 over-exposed methods found in
+the initial version of the applications and after six successive versions, 71.97 % (= 10,994)
+methods remain over-exposed, 19.71 % (= 3,011) are removed and 8.32 % (= 1,271)
+become not over-exposed.
+
+5 Why so many Over-exposed Methods?
+
+Fully understanding the causes of having an average of 20 % of over-exposed methods is
+difficult. Furthermore, around 70 % of these methods are likely to remain over-exposed
+over time. Many factors related to education, programming culture and habits may explain
+the rather high number of over-exposed methods. One reason that explains why method
+accessibility is improperly used and rarely changed may be found in the support offered
+by programming environments. An exhaustive explanation cannot reasonably be provided
+in this article due to the complexity of the task. Instead of focusing on the root of the
+problem, we investigate how frequently access modifiers are changed and provide a possible
+explanation for this.
+
+Code Review Tools Code review tools are popular for quality control, and they usually
+exercise static analysis on a source code. These kinds of tools come with a set of rules that
+identify anomalies based on the source code.
+
+Popular code review tools for Java are PMD 5.0.1,12 CheckStyle 5.6,13 and FindBugs
+2.0.14 We have reviewed the rules offered by each of these tools, with the purpose of
+analyzing whether they help identify and reduce the number of over-exposed methods. Surprisingly,
+ none of them offer check rules to identify over-exposed methods. Several rules are
+about improper usage of method accessibility. For example, the three tools provide a rule
+to identify protected methods defined in final classes. Having a protected method in a final
+class is rather meaningless. However, the tools do not assess the accessibility of a method
+based on the callers of that method.
+
+Refactoring Tools We have reviewed the set of refactorings offered by three popular programming 
+environments for Java, namely Eclipse,15 IntelliJ IDEA16 and NetBeans Java.17
+These environments offer to practitioners a large set of refactorings to improve the quality
+of the source code. These three environments support a specific refactoring to change its
+signature for a given method, its return type, and the order of the parameters. The accessibility 
+may also be changed, and the consistency of the code is verified against the new
+
+12http://pmd.sourceforge.net
+13http://checkstyle.sourceforge.net
+14http://findbugs.sourceforge.net
+15version Juno (4.2)
+16version 9.0.4
+17version 7.0.1
+
+Empir Software Eng (2016) 21:483–516
+
+501
+
+given accessibility. However, using this refactoring to modify the accessibility is equivalent
+to directly changing the source code: no suggestion about the optimal method accessibility.
+ During a programming activity, a programming environment makes suggestions about
+obvious and simple modifications (e.g., unnecessary package imports or variables that are
+never read). However, over-exposed methods are not reported.
+
+Eclipse automatically generates method stubs.18 If the generated method is in the same
+
+class from where it is called, then the private accessibility is given.
+
+Other Potential Factors Other factors besides a poor support of the programming environments 
+may explain the large proportion of over-exposed methods. Although we did not
+conduct any controlled study, our extensive experience in teaching Java shows that method
+accessibility in Java is a complex topic. For example, our experience has shown us that engineers 
+and students are often not aware that a private instance method is statically bound or
+that a protected method is in fact visible within its package (and not only to its subclasses).
+Our feeling is that the Java accessibility model is more complex than, for example, the Ruby
+accessibility model. One way to verify this is to conduct a similarly study of applications
+written in Ruby.
+
+Another intuition we have from our teaching experience, is that most students spend
+effort on the actual behavior of a given method. Students caring about design will typically 
+try to find out how to shorten methods or properly distribute responsibilities.
+However, method accessibility is apparently rarely considered in the thinking effort. In
+the future, we plan to monitor programming activities (Ge et al. 2012) to verify this
+intuition.
+
+6 Threats to Validity
+
+Our case-study and its results are subject to validity threats. Since the approach is based on
+the call graph analysis of the methods, the main threats are related to whether a method is
+rightfully exposed to a particular interface. Such threats constitute a source of false negatives
+and false positives.
+
+Effects of other Research Some of the applications we analyzed have also been analyzed in
+other research experiments. For example, Zoller and Schmolitzky (2012) analyzes SweetHome3D,
+ PMD, FreeMind. Numerous papers analyze JHotDraw, (Binkley et al. 2005).
+Researchers have a tendency to contact authors to share and validate their findings (as we
+did with SweetHome3D, Section 8). This means that the design of these applications may
+have been influenced by previous experiments.
+
+Sampling In total, we analyzed 30 applications, which represent over 3.6 million lines of
+code. Identifying these 30 applications is non-trivial. We spent a fair amount of time finding
+Java applications that (i) have several versions for us to monitor the evolution and (ii) may be
+imported into the Eclipse programming environment to be processed by our plugin. Having
+an application that is “compilable” is important since we have to make sure that no errors are
+
+18This happens when you call a method that does not exist and you ask Eclipse to automatically generate the
+missing method.
+
+502
+
+Empir Software Eng (2016) 21:483–516
+
+present in the application before running our analysis tool. We first naturally opted for the
+Qualitas Corpus (Tempero et al. 2010), a popular corpus of 112 software systems. However,
+many of the applications in that corpus are not in a compilable state. Configuration files
+are crucial and are not always distributed with the applications. This means that we would
+have to manually repeat the tedious loop of (i) downloading an application, (ii) manually
+identifying what the downloaded archive is made of, (iii) importing the application into
+Eclipse, and (iv) fixing dependencies by downloading missing libraries.
+
+Design Some methods may be intentionally defined as over-exposed by programmers.
+Our personal experience and the discussion with some authors (Section 8) show that
+a number of methods are often left over-exposed to address some possible future
+need.
+
+Studying software evolution (Section 4) clearly indicates that over-exposed methods
+found in an early version of an application remain over-exposed. However, programmers
+believe that some of these over-exposed methods deserve to be visible to an audience larger
+than necessary. This fact clearly reflects an intuition shared by programmers. Unfortunately,
+we were not able to measure or even confirm this intuition. Measuring the number of overexposed 
+methods that are intentionally over-exposed requires (i) carrying out the case-study
+we conducted for SweetHome3D with the 14 remaining applications and (ii) identifying the
+authors of each software component and getting in touch with them. The software we have
+chosen for our case-study is the result of a large community effort, for which traceability
+of classes and methods may not be carried out in a satisfactory manner (for example, most
+source code versioning systems for Java operate at file level granularity, therefore extracting 
+information about methods is challenging). Since open source communities are places
+with a significant turnover of developers, identifying and contacting the primary author of
+over-exposed method is difficult.
+
+Static Analysis Our approach employs static analysis to identify over-exposed methods. We
+are thus facing limitations that static analysis imposes on us. There could be callers that
+are not identified because of an under approximation of the virtual method call resolution
+(at runtime) or because of the use of callbacks or reflection. This situation could lead to
+false positives due to missing calls or simply dead code. However, we think that the number
+of caller methods missed is generally low. This is supported by the fact that Moose, the
+tool that we used to analyze the source code, implements a call analysis algorithm similar
+to rapid type analysis (RTA) (Bacon and Sweeney 1996) to construct the call graph of the
+applications. Also, Moose analyzes the presence of keywords such as this and super to refine
+the virtual calls. It has been reported that the precision of RTA for resolving virtual method
+calls is in the range of 70–100 % (Liang et al. 2001).
+
+7 Support for Practitioners
+
+In order to help software engineers in managing the accessibility of methods, we extended
+the Eclipse programming environment with Cover,19 a plugin to identify and address
+improper method accessibility.
+
+19http://sites.google.com/site/santiagoavidal/projects/cover-methods
+
+Empir Software Eng (2016) 21:483–516
+
+503
+
+Fig. 5 Methods list
+
+7.1 Plugin Description
+
+Cover takes as input the source code of a Java application. After analyzing it, Cover provides
+the following output:
+
+–
+
+–
+
+the list of over-exposed methods structured along packages and classes of the
+application;
+possible refactorings by indicating the most appropriate accessibility for the current
+state of the application.
+
+The number of over-exposed methods is given for each reported package and class. For
+example, Fig. 5 reports some results for the SweetHome3D application. Cover indicates that
+871 methods are over-exposed, which account for 20.3 % of the total number of methods
+defined in the application. By delving down into the structure of the application, relevant 
+information is given for each of the packages and classes. For example, packa ge
+com.eteks.sweethome3d.io contains 20 over-exposed methods. These 20 methods represent 
+14.1% of the methods defined in the package. Additionally, over-exposed methods are
+marked in the source code along with the proper accessibility (Fig. 6).
+
+The plugin uses the Java development tools of Eclipse (JDT) to iterate over all the methods 
+and retrieve the calling methods for each method of the application. Retrieving calling
+methods can be a time-consumming operation. For instance, our plugin takes approximately 
+11 minutes to analyze SweetHome3D.20 However, we believe the performance of
+the method analysis can be improved by adding appropriate caches.
+
+7.2 Plugin Evaluation
+
+With the goal of evaluating if Cover helps developers achieve the task of choosing the most
+appropriate accessibility for methods, we conducted an experiment with ten PhD students.
+The experiment was run off-line. All students had previous experience with Java and OOP
+in an industrial setting. Also, they had access to a tutorial that described how to install and
+use our plugin.
+
+We assigned to each student the task of refactoring the over-exposed methods of the
+application Clustermines.21 Specifically, the students had to go through the methods listed
+
+20Experiments were conducted on a MacBook Air, CPU 1.8 GHz Intel Core 5. 4Gb of memory.
+21http://clustermines.sourceforge.net
+
+504
+
+Empir Software Eng (2016) 21:483–516
+
+Fig. 6 Refactoring suggestion
+
+as over-exposed by the plugin and apply the suggested refactorings on the accessibilities of
+the methods.
+
+After running the experiment we checked that the students refactored all the overexposed 
+methods identified. Also, the students filled out survey about the plugin and
+the experiment. The results of this survey are presented in Table 3. For each affirmative 
+statement, the table indicates how many participants chose a level of agreement with
+it.
+
+While this experiment is not completely comprehensive, it shows that the participants
+found the plugin easy to use, and that they think that there is a need to change method
+accessibilities. Specifically, we found that 80 % of the participants agree on a need to control 
+method accessibilities (agree+strongly agree). Also, the 80 % of the participants agree
+that the plugin is easy to use. All the students agree on the usefulness of the plugin. The
+ninety percents of the participants also agree on the clearness of the suggestions of the plugin.
+ Finally, while 30 % of the students think that they will be able to find over-exposed
+methods without the plugin, 60 % disagree or strongly disagree on this point. These observations 
+reinforce the need for a tool like our plugin that helps developers control method
+accessibilities.
+
+Table 3 Plugin survey
+
+Statement
+
+There is a need for
+controlling method accessibility
+The plugin is easy to use
+The plugin is useful
+The suggestions made by the
+plugin are clear
+You will be able to find
+the over-exposed methods
+and perform the refactoring
+without using the plugin
+
+Strongly
+disagree
+
+Disagree
+
+Neither
+
+Agree
+
+2
+
+2
+
+1
+
+1
+
+4
+
+3
+4
+4
+
+3
+
+1
+
+5
+
+Strongly
+agree
+
+4
+
+5
+6
+5
+
+Empir Software Eng (2016) 21:483–516
+
+505
+
+8 Reducing Method Accessibility
+
+Section 2.3 identified a large proportion of over-exposed methods in about 30 Java applications.
+ We claim that a large portion of those methods may be removed by simply reducing
+their accessibility modifier. We empirically verified this claim by refactoring an application
+and assessing that its (observable) behavior did not change.
+
+8.1 Manual Refactoring
+
+SweetHome3D22 is a 84K LOC application. It comes with 26 unit tests, themselves defining
+40 test methods. According to Cobertura, a popular test code coverage for Java,23 the test
+coverage of SweetHome3D is 70.16 %. An application is considered well-tested with a test
+coverage over 70 % (Mockus et al. 2009).
+
+Methodology To measure the impact of reducing the accessibility of over-exposed methods,
+we conducted the following experiment on SweetHome3D:
+
+1.
+2.
+3.
+4.
+5.
+6.
+7.
+
+run all the tests and verify that they all pass
+run the application and try out the tutorial
+find the over-exposed methods
+reduce the accessibility of each over-exposed method to its strict necessary accessibility.
+recompile SweetHome3D
+run all the tests and verify that they all pass
+run the tutorial and look for odd behavior
+
+These steps can be easily applied to other applications. Our refactoring of SweetHome3D
+
+source code is available online at http://bit.ly/SweetHomeRefactoring.
+
+We ran the tests and looked for odd behavior after changing the accessibility of the
+methods to check that no method shadows24 existed (i.e. conflicts between methods or
+classes with the same name). Odd behavior refers to test failures, visualization errors, or
+application crashes, among others.
+
+Experiment Results All tests remained green and we did not notice any odd or unexpected
+behavior. The variation of accessibility is given in the table below:
+
+methods
+
+private
+package
+protected
+public
+over-exposed
+
+before
+
+945
+270
+221
+4,080
+682
+
+after
+
+1,022
+620
+227
+3,647
+31
+
+
+
++ 8.14 %
++ 129.62 %
++ 2.71 %
+− 10.61 %
+− 95.45 %
+
+The before and after columns give the number of methods before and after the refactoring.
+ The variation is computed as  = (after - before) /before. The over-exposed row
+corresponds to the number of over-exposed methods.
+
+22http://www.sweethome3d.com
+23http://cobertura.sourceforge.net
+24http://docs.oracle.com/javase/specs/jls/se7/html/jls-6.html#jls-6.4
+
+506
+
+Empir Software Eng (2016) 21:483–516
+
+SweetHome3D defines 5,516 methods, for which 12.36 % (= 682) are over-exposed. We
+removed 95.45 % of the over-exposed methods by simply changing the accessibility modifier.
+ The over-exposed methods whose visibility could not be reduced were false positives
+caused by callbacks and reflective method invocations.
+
+While we cannot generalize the results of this refactoring to other applications, future
+
+work could replicate this experiment with a larger set of applications.
+
+8.2 Feedback from the Authors
+
+We submitted our refactored version of SweetHome3D to its authors. They expressed great
+interest in our results because, ensuring a high quality of their products is indeed a strong
+priority.
+
+Our refactoring addressed many public methods defined in private inner classes. Since
+private inner classes cannot be accessed from outside the encapsulating class, the authors
+did not feel it relevant to include these refactorings.
+
+As we discussed earlier for other applications, having over-exposed methods may prepare
+the application to address future requirements. The authors of SweetHome3D have deliberately 
+over-exposed many methods and constructors for that purpose. The authors prefer
+to leave such methods untouched. This feedback could lead to an improvement of our plugin.
+ For instance, a future feature is to support filtering criteria, so that the user can exclude
+certain methods from the analysis.
+
+Using our plugin, we found a number of public methods that could be private. The
+authors recognized them and agreed with their resolution. The next version of SweetHome3D 
+4.0 will include parts of our refactoring.
+
+9 Related Work
+
+As far as we are aware of, no large-scale empirical study has been conducted on the accessibilities 
+of methods in object-oriented programming languages. However, some works have
+identified the uses of access modifiers that are not restrictive enough.
+
+Bouillon et al. (2008) present a tool that checks for over-exposed methods in Java
+applications. Similar to ours, their tool determines the best access modifier by analyzing
+the references to each method. However, the tool was only tested in some packages of
+4 applications (i.e. the applications were not carefully analyzed). This approach does not
+analyze overridden methods (which can also be over-exposed). The authors suggest that
+any over-exposed method could be the result of the developer’s intention of extending the
+applications, but unlike our study, no historical analysis is performed.
+
+M¨uller (2010) uses bytecode analysis to detect those access modifiers of methods and
+fields that should be more restrictive. However, the work does not describe the algorithm
+used to detect these situations nor presents case-studies to validate their tool.
+
+Zoller and Schmolitzky (2012) present a tool called AccessAnalysis to detect overexposed 
+methods and classes by analyzing the references to them. To measure the usage of
+access modifiers for types and methods they employ two software metrics: Inappropriate
+Generosity with Accessibility of Types (IGAT) and Inappropriate Generosity with Accessibility 
+of Methods (IGAM). IGAM is equivalent to our concept of over-exposure. To evaluate
+AccessAnalysis, the authors report on the analysis of 12 open-source applications. Their
+
+Empir Software Eng (2016) 21:483–516
+
+507
+
+findings include that “general access modifiers are often chosen more generously than nec-
+essary” which agrees with our observations. Interestingly, this work reports that, on average,
+35 % of methods are over-exposed.25 This value is higher than the 20 % we measured. We
+think that this difference is because the authors do take not overridden methods into account.
+Steimann and Thies (2009) highlight the difficulties of carrying out refactoring in the
+presence of non-public classes and methods. Steimann and Thies formalize accessibility
+constraints in order to check the preconditions of a refactoring (e.g., moving a class to
+another package requires checking whether the visibility of the class allows its users to
+still reference it). In particular, the authors analyze the cases in which a class or a method
+is moved between packages or classes with the goal of adapting their access modifiers to
+preserve the original behavior. They propose the change accessibility refactoring to change
+the access modifier of a declared entity. This refactoring recursively changes all the entities
+that are directly or indirectly related to the refactored entity. For example, consider the
+following example:
+
+If C1.bar() is not used by anyone else in the system, then protected is identified by our
+approach as the ideal visibility for C1.bar(). Applying the change accessibility refactoring
+to turn C1.bar() into a private method may have a ripple effect of refactoring (e.g., moving
+C2.foo() into C1). This change of C2 may in turn be governed by other constraints, which
+must be generated as well. A general approach for naming and accessibility for refactoring 
+was later build upon this work (Schafer et al. 2012). An Eclipse plugin has also been
+proposed as an implementation of the constraint-based model of accessibility. Their plugin
+differs from our since we focus on over-exposure.
+
+Fowler (2002) emphasizes the distinction between public methods and published interfaces.
+ While the changes of a public method of an application can be measured, Fowler’s
+work alerts that changes on interfaces may severely affect other systems that use the application.
+ For this reason, he suggests that the number of published interfaces should be as
+limited as possible.
+
+Patenaude et al. (1999) present the extension of a proprietary source code analysis tool
+with Java metrics. This extension contains simple metrics related to coupling such as: number 
+of public, private and protected methods, and numbers of calls to a method. After
+applying the metrics to a group of seven library applications, a very low number of private 
+methods and a majority of public methods were found. However, the reason for those
+findings are not analyzed.
+
+Briand et al. (1999) empirically analyze the relationship between coupling and the rippled 
+effect in object-oriented applications. They determined that classes with high coupling
+values are more prone to be changed when changes in the public interfaces of classes are
+performed.
+
+25We obtained the value 35 % by computing the average of the IGAM metric from Fig. 3 in Zoller and
+Schmolitzky (2012).
+
+508
+
+Empir Software Eng (2016) 21:483–516
+
+Singh and Kahlo (2011) use static analysis to predict bad smells in code using software
+metrics. They present two metrics to measure information hiding that are focused on the
+number of public and private methods of a class respectively. This work found that both
+metrics are useful in diagnosing smelly classes.
+
+Chowdhury and Zulkernine (2010) analyze the existence of a relationship between different 
+metrics of complexity, coupling and cohesion and security failures. After analyzing
+several versions of an application they conclude that an important correlation exists between
+these metrics and vulnerabilities. A similar conclusion is achieved by Singh et al. (2012)
+who also analyze the relation of coupling with software defects.
+
+10 Conclusion and Future Work
+
+Determining the right accessibility when defining a method is key to preserving the right
+amount of encapsulation and information hiding in object-oriented systems, favoring maintenance 
+and modifiability. We have empirically measured, for a given corpus, that over 20 %
+of the methods are over-exposed. We also found that more of the 70 % of the methods of
+the applications are defined as public (Q1). Also, we have found that libraries have on average 
+more over-exposed methods than plain applications (Q2). Additionally, we found that
+less than 10 % of the over-exposed methods defined in early versions of the applications
+become non-over-exposed in future versions (Q3).
+
+We have proposed three patterns to identify over-exposed methods in code. We have
+developed an Eclipse plugin that augments the programming environment with the ability
+to detect and refactor over-exposed methods.
+
+As future work we plan to:
+
+–
+
+–
+
+–
+
+refine our analysis by carefully considering the use of reflection and callbacks,
+increasing the range of analyzable methods;
+perform a study of over-exposed methods in framework-based applications, so as to
+determine whether our preliminary findings for JFreeChart can be generalized.
+refine our set of accessibility patterns with the aim of identifying the type of information
+being exposed by methods.
+
+– monitor programming activity to see how often method accessibility is re-considered
+
+–
+
+–
+
+by programmers;
+analyze the impact of over-exposed methods on the interfaces of high-level design
+software elements (e.g., packages, modules, layers, architectural patterns).
+extend the Cover plugin to support the automated refactoring of the over-exposed
+methods, ensuring the preservation of behavior.
+
+Overall,
+
+this work empirically studied the accessibility modifiers of the methods
+from multiples angles. We analyzed the over-exposing phenomenon in plain applications 
+and libraries/frameworks. We also measured the impact of software evolution on
+method accessibility. We argue that these multiple angles provide a clear analysis of the
+phenomenon.
+
+Acknowledgments We thank Emmanuel Puybaret, principal author of SweetHome3D, for his feedback on
+our refactoring. We gratefully thank Romain Robbes and Renato Cerro for their feedback on an earlier draft
+of the manuscript. We also thank Hugo Manterola and Ignacio Orlando for contributing to the development
+of the plugin. We thank the anonymous reviewers for their comments and suggestions to improve the quality
+of this work. This work was partially supported by PIP Project 112-201101-00078 (CONICET) - Argentina.
+
+Empir Software Eng (2016) 21:483–516
+
+509
+
+Appendix
+
+Table 4 Library / Frameworks analyzed
+
+#
+
+Library/ Framework Version #Meth %Pub %Prot %Pac %Priv #LOC
+
+#Clss
+
+#Pac
+
+1.8.3
+1.4.1
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10 JUnit
+11 Log4J
+12 Maven
+13 Struts
+14 Tomcat
+15 Xalan
+
+Ant
+Commons-Compress
+Commons-Primitives 1.0
+Dom4J
+2.0
+4.1.3
+Hibernate
+3.12
+JavAssist
+3.2
+Jericho-HTML
+JFreeChart
+1.0.14
+7.0.6
+JHotDraw
+4.10
+1.2.16
+3.0.4
+2.3.3
+7.0.27
+2.7.1
+
+Average
+
+13,517 79.09
+73.97
+1,625
+4,136
+79.64
+2,938
+84.72
+45,348 82.02
+65.02
+3,362
+67.85
+1,272
+8,635
+85.63
+80.79
+3,784
+79.28
+2,824
+75.38
+2,132
+6,527
+66.05
+15,541 77.12
+16,503 82.96
+10,424 78.99
+9,238
+77.23
+
+7.63
+3.32
+13.20
+10.11
+5.63
+5.74
+3.69
+4.02
+12.29
+7.26
+12.57
+3.26
+6.85
+8.54
+5.05
+7.28
+
+3.68
+4.74
+4.69
+3.00
+7.55
+13.27
+12.03
+5.40
+1.66
+5.67
+5.53
+23.55
+10.86
+2.53
+10.00
+7.61
+
+9.60
+17.97
+2.47
+2.18
+4.80
+15.97
+16.43
+4.96
+5.26
+7.79
+6.52
+7.14
+5.17
+5.97
+5.97
+7.88
+
+206
+505
+190
+
+178,759 1,730 79
+16
+27,730
+26,847
+4
+25,524
+14
+390,254 6,741 765
+17
+357
+42,460
+2
+15,032
+148
+15,9217 619
+37
+24
+470
+41,577
+58
+866
+16,185
+22
+315
+27,890
+72,063
+940
+112
+159,129 2,490 187
+234,945 1,775 112
+259,556 1,237 42
+111,811 1,239 99.4
+
+#Meth: number of methods;%Pub: number of public methods; %Prot: number of protected methods; %Pac:
+number of package visible methods; %Priv: number of private methods; #LOC: total number of lines of
+code; #Clss: number of classes, including inner classes; #Pac: number of packages;
+
+URLs: Ant: http://ant.apache.org/; Commons-Compress: http://commons.apache.org/compress/; Commons-
+Primitives: http://commons.apache.org/primitives/; Dom4J: http://dom4j.sourceforge.net/; Hibernate:
+http://www.hibernate.org/; JavAssist: http://www.jboss.org/javassist/; Jericho-HTML: http://jerichohtml.
+sourceforge.net/; JFreeChart: http://www.jfree.org/jfreechart/; JHotDraw: http://www.jhotdraw.org/; JUnit:
+http://www.junit.org/; Log4J: http://logging.apache.org/log4j/; Maven: http://maven.apache.org/; Struts:
+http://struts.apache.org/; Tomcat: http://tomcat.apache.org/Xalan: http://xml.apache.org/xalan-j/
+
+Table 5 Library / Frameworks analyzed
+
+#
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+
+Library/ Framework
+
+#OEM
+
+%OEM
+
+%OEMa
+
+Ant
+Commons-Compress
+Commons-Primitives
+Dom4J
+Hibernate
+JavAssist
+Jericho-HTML
+JFreeChart
+JHotDraw
+JUnit
+Log4J
+
+3101
+389
+1232
+969
+9121
+943
+369
+2471
+1150
+315
+563
+
+22.94
+23.94
+29.79
+32.98
+20.11
+28.05
+29.01
+28.62
+30.39
+11.15
+26.41
+
+65.64
+61.75
+86.7
+83.47
+55.07
+53.22
+65.54
+71.5
+64.5
+43.75
+64.05
+
+510
+
+Table 5
+
+(continued)
+
+Empir Software Eng (2016) 21:483–516
+
+#
+
+12
+13
+14
+15
+
+Library/ Framework
+
+#OEM
+
+%OEM
+
+%OEMa
+
+Maven
+Struts
+Tomcat
+Xalan
+
+Average
+
+1017
+2865
+4859
+2633
+
+2133
+
+15.58
+18.44
+29.44
+25.26
+
+24.81
+
+54.18
+57.18
+61.15
+58.15
+
+63.06
+
+#OEM: number of over-exposed methods; %OEM a: Over-exposed methods taking into account only
+analyzable methods.
+
+Table 6 Applications analyzed
+
+#
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+
+Application
+
+Version
+
+#Meth %Pub %Prot %Pac %Priv
+
+#LOC
+
+#Clss
+
+#Pac
+
+0.34
+Argo
+4.7.12
+Azureus
+5.5
+Checkstyle
+1.9.4.1
+Cobertura
+2.0.1
+FindBugs
+0.9
+FreeMind
+1.9.6
+Jajuk
+5.0
+JEdit
+12.2.33
+Jmol
+1.0.6
+Jstock
+0.0.1-a
+Logisim
+4.2.6
+PMD
+Portecle
+1.7
+Sweet Home 3D 3.5
+TuxGuitar
+1.2
+Average
+
+18,248
+42,619
+3,769
+3,313
+11,326
+5,980
+5,781
+7,696
+10,355
+3,797
+6,601
+4,949
+684
+5,516
+5,111
+9,050
+
+70.39
+75.99
+69.04
+35.92
+68.89
+77.21
+85.63
+70.80
+47.50
+68.00
+72.88
+71.91
+54.68
+73.97
+63.86
+67.11
+
+9.26
+11.42
+6.37
+1.66
+2.97
+5.37
+2.13
+3.73
+7.86
+1.90
+3.77
+3.15
+8.33
+4.01
+5.05
+5.13
+
+10.91
+8.02
+10.56
+2.96
+17.91
+7.26
+4.07
+10.58
+25.63
+4.98
+11.89
+2.14
+3.51
+4.89
+21.64
+9.80
+
+9.45
+4.57
+14.04
+59.46
+10.22
+10.17
+8.18
+14.89
+19.01
+25.13
+11.45
+22.79
+33.48
+17.13
+9.45
+17.96
+
+235,539
+689,989
+47,342
+50,719
+129,041
+56,766
+95,660
+134,399
+176,544
+56,779
+57,134
+49,648
+20,234
+84,632
+48,511
+128,862
+
+2,568
+7,874
+1,062
+115
+1,765
+960
+1,065
+1,271
+800
+799
+963
+706
+188
+1,351
+953
+1,496
+
+127
+476
+39
+19
+64
+48
+40
+40
+66
+19
+43
+47
+11
+9
+78
+75.07
+
+URLs: Argo: http://argouml.tigris.org/; Azureus/Vuse: http://azureus.sourceforge.net/; Checkstyle: http://
+checkstyle.sourceforge.net/; Cobertura:
+http://findbugs.
+sourceforge.net/; FreeMind: http://freemind.sourceforge.net/; Jajuk: http://jajuk.info/; JEdit: http://www.
+jedit.org/; Jmol: http://jmol.sourceforge.net/; Jstock: http://jstock.sourceforge.net/; Logisim: http://ozark.
+hendrix.edu/∼burch/logisim/; PMD: http://pmd.sourceforge.net/; Portecle: http://portecle.sourceforge.net/;
+SweetHome3D: http://www.sweethome3d.com/; TuxGuitar: http://www.tuxguitar.com.ar/
+
+http://cobertura.sourceforge.net/; FindBugs:
+
+Empir Software Eng (2016) 21:483–516
+
+511
+
+Table 7 Applications analyzed
+
+Application
+
+#OEM
+
+%OEM
+
+%OEMa
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+
+Argo
+Azureus
+Checkstyle
+Cobertura
+FindBugs
+FreeMind
+Jajuk
+JEdit
+Jmol
+Jstock
+Logisim
+PMD
+Portecle
+SweetHome3D
+TuxGuitar
+
+Average
+
+3710
+6712
+428
+758
+2753
+1235
+802
+1864
+1546
+743
+1017
+1428
+143
+682
+1235
+
+1670
+
+20.33
+15.75
+11.36
+22.88
+24.31
+20.65
+13.87
+24.22
+14.93
+19.57
+15.41
+28.85
+20.91
+12.36
+24.16
+
+19.30
+
+56.48
+35.25
+59.44
+82.84
+59.68
+45.04
+35.87
+48.43
+28.12
+50.34
+32.57
+76.73
+60.08
+31.7
+42.16
+
+49.65
+
+SweetHome3D
+
+Total amount of methods
+Amount of over-exposed methods
+
+FreeMind
+
+% of over-exposed methods
+
+Empir Software Eng (2016) 21:483–516
+
+0
+2.6 3.0 3.1 3.2 3.3 3.4 3.5
+
+0
+2.6 3.0 3.1 3.2 3.3 3.4 3.5
+
+ArgoUML
+
+0.26
+
+0.30.2
+
+0.34
+
+0
+1.6.5
+
+1.7.1
+
+1.8.1
+
+1.8.3
+
+0
+1.6.5
+
+1.7.1
+
+1.8.1
+
+1.8.3
+
+4.4.2
+
+4.5.1
+
+5.0
+
+0
+11.0
+
+11.4.0 11.8.1 12.2.33
+
+0
+11.0
+
+11.4.0
+
+11.8.1 12.2.33
+
+512
+
+6000
+
+4500
+
+3000
+
+1500
+
+30.0
+
+22.5
+
+15.0
+
+7.5
+
+20000
+
+15000
+
+10000
+
+5000
+
+0
+0.22
+
+4000
+
+3000
+
+2000
+
+1000
+
+30.0
+
+22.5
+
+15.0
+
+7.5
+
+0
+0.22
+
+0.26
+
+0.30.2
+
+0.34
+
+CheckStyle
+
+30.0
+
+22.5
+
+15.0
+
+7.5
+
+12000
+
+9000
+
+6000
+
+3000
+
+0
+1.3.5
+
+1.3.7
+
+1.3.9
+
+2.0.1
+
+Jedit
+
+30.0
+
+22.5
+
+15.0
+
+7.5
+
+0
+4.3.3
+
+4.4.2
+
+4.5.1
+
+5.0
+
+JStock
+
+30.0
+
+22.5
+
+15.0
+
+7.5
+
+0
+1.0.0
+
+1.0.2
+
+1.0.4
+
+1.0.6
+
+Portecle
+
+30.0
+
+22.5
+
+15.0
+
+7.5
+
+8000
+
+6000
+
+4000
+
+2000
+
+0
+4.3.3
+
+4000
+
+3000
+
+2000
+
+1000
+
+0
+1.0.0
+
+900
+
+675
+
+450
+
+225
+
+0
+4.4 5.2 5.3 5.4 5.5
+
+0
+4.4 5.2 5.3 5.4 5.5
+
+Findbugs
+30.0
+
+22.5
+
+15.0
+
+7.5
+
+0
+1.3.5
+
+1.3.7
+
+1.3.9
+
+2.0.1
+
+1.0.2
+
+1.0.4
+
+1.0.6
+
+0
+1.1 1.2 1.3 1.4 1.5 1.6 1.7
+
+0
+1.1 1.2 1.3 1.4 1.5 1.6 1.7
+
+Fig. 7 Evolution of over-exposed methods
+
+7000
+
+5250
+
+3500
+
+1750
+
+0
+0.5
+
+15000
+
+11250
+
+7500
+
+3750
+
+0.6.7
+
+0.8.0
+
+0.9.0
+
+30.0
+
+22.5
+
+15.0
+
+7.5
+
+0
+0.5
+
+Ant
+
+30.0
+
+22.5
+
+15.0
+
+7.5
+
+0.6.7
+
+0.8.0
+
+0.9.0
+
+Cobertura
+
+30.0
+
+22.5
+
+15.0
+
+7.5
+
+0
+1.8
+
+1.9.1
+
+1.9.3
+
+1.9.4.1
+
+1.9.1
+
+1.9.3
+
+1.9.4.1
+
+Jajuk
+30.0
+
+22.5
+
+15.0
+
+7.5
+
+1.9.2
+
+1.9.4
+
+1.9.6
+
+0
+1.9
+
+1.9.2
+
+1.9.4
+
+1.9.6
+
+Jmol
+30.0
+
+22.5
+
+15.0
+
+7.5
+
+4000
+
+3000
+
+2000
+
+1000
+
+0
+1.8
+
+6000
+
+4500
+
+3000
+
+1500
+
+0
+1.9
+
+11000
+
+8250
+
+5500
+
+2750
+
+5000
+
+3750
+
+2500
+
+1250
+
+0
+4.2
+
+7000
+
+5250
+
+3500
+
+1750
+
+0
+0.7
+
+PMD
+30.0
+
+22.5
+
+15.0
+
+7.5
+
+4.2.2
+
+4.2.4
+
+4.2.6
+
+0
+4.2
+
+4.2.2
+
+4.2.4
+
+4.2.6
+
+TuxGuitar
+30.0
+
+22.5
+
+15.0
+
+7.5
+
+0.9
+
+1.0
+
+1.2
+
+0
+0.7 0.8 0.9 0.9.1 1.0 1.1 1.2
+
+Empir Software Eng (2016) 21:483–516
+
+600
+
+450
+
+300
+
+150
+
+0
+
+SweetHome3D
+
+600
+
+450
+
+300
+
+150
+
+3.0 3.1 3.2 3.3 3.4 3.5
+
+0
+0.6.1
+
+Ant
+
+500
+
+375
+
+250
+
+125
+
+0
+
+513
+
+ArgoUML
+
+0.32.1
+
+0.28.1
+Cobertura
+
+FreeMind
+
+0.8.1
+
+0.7.1
+CheckStyle
+
+3000
+
+2250
+
+1500
+
+750
+
+0
+
+0.24
+
+90
+
+68
+
+45
+
+23
+
+0
+
+3000
+
+2250
+
+1500
+
+750
+
+0
+1.7.0
+
+3000
+
+2250
+
+1500
+
+750
+
+0
+1.3.6
+
+2000
+
+1500
+
+1000
+
+500
+
+0
+11.2.0
+
+150
+
+113
+
+75
+
+38
+
+0
+
+1.8.0
+
+1.8.2
+
+5.2
+
+5.3
+
+5.4
+
+5.5
+
+1.9
+
+1.9.2
+
+1.9.4
+
+Findbugs
+
+1.3.8
+
+2.0.0
+
+Jmol
+
+11.6
+
+12.0.1
+
+Portecle
+
+Jajuk
+
+1.9.3
+
+1.9.5
+
+JStock
+
+1.0.3
+
+1.0.5
+
+TuxGuitar
+
+800
+
+600
+
+400
+
+200
+
+0
+1.9.1
+
+400
+
+300
+
+200
+
+100
+
+0
+1.0.1
+
+600
+
+450
+
+300
+
+150
+
+0
+
+Jedit
+
+4.5.0
+
+4.5.2
+
+PMD
+
+2000
+
+1500
+
+1000
+
+500
+
+0
+4.4.1
+
+1500
+
+1125
+
+750
+
+375
+
+0
+4.2.1
+
+4.2.3
+
+4.2.5
+
+Over-exposed methods (OEM) in A0
+
+OEM in A0 that are not OEM in Ax
+
+OEM in A0 that do not exist in Ax
+
+OEM in A0 that are OEM in Ax
+
+1.2 1.3 1.4 1.5 1.6 1.7
+
+0.8 0.9 0.9.1 1.0 1.1 1.2
+
+Fig. 8 Evolution of over-exposed methods identified in the first version of each application
+
+514
+
+References
+
+Empir Software Eng (2016) 21:483–516
+
+Bacon DF, Sweeney PF (1996). In: Anderson L, Coplien J (eds) Fast static analysis of c++ virtual function
+
+calls. OOPSLA ACM, pp 324–341
+
+Binkley D, Ceccato M, Harman M, Ricca F, Tonella P (2005) Automated refactoring of object oriented code
+into aspects In: Software Maintenance, 2005. ICSM’05. In: Proceedings of the 21st IEEE International
+Conference on, pp 27–36. doi:10.1109/ICSM.2005.27
+
+Booch G (2004) Object-Oriented Analysis and Design with Applications (3rd Edition). Addison Wesley
+
+Longman Publishing Co., Inc., Redwood
+
+Bouillon P, Grokinsky E, Steimann F (2008) Controlling accessibility in agile projects with the access modifier 
+modifier. In: Paige RF, Meyer B (eds) TOOLS (46), Springer, Lecture Notes in Business Information
+Processing, vol 11, pp 41–59
+
+Briand LC, Wst J, Lounis H (1999) Using coupling measurement for impact analysis in object-oriented
+
+systems. In: ICSM, pp 475–482
+
+Chowdhury I, Zulkernine M (2010) Can complexity, coupling, and cohesion metrics be used as early indicators 
+of vulnerabilities? In: Proceedings of the 2010 ACM Symposium on Applied Computing. ACM,
+New York, pp 1963–1969. SAC ’10. doi:10.1145/1774088.1774504
+
+Fowler M (2002) Public versus published interfaces. IEEE Softw 19(2):18–19
+Ge Xi, DuBose QL, Murphy-Hill E (2012) Reconciling manual and automatic refactoring. In: Proceedings
+of the 2012 International Conference on Software Engineering, IEEE Press, Piscataway, NJ, USA, ICSE
+2012, pp 211–221,. http://dl.acm.org/citation.cfm?id=2337223.2337249
+
+Liang D, Pennings M, Harrold MJ (2001) Extending and evaluating flow-insenstitive and context-insensitive
+points-to analyses for Java. In: Proceedings of the, 2001 ACM SIGPLAN-SIGSOFT Workshop on Program 
+Analysis for Software Tools and Engineering, ACM, New York, NY, USA, PASTE ’01, pp 73–79.
+doi:10.1145/379605.379676
+
+Martin RC (2002) Agile Software Development.Principles,Patterns, and Practices. Prentice-Hall
+Meyer B (2009) Touch of class: learning to program well with objects and contracts, 1st edn. Springer
+
+Publishing Company, Incorporated
+
+Mockus A, Nagappan N, Dinh-Trong TT (2009) Test coverage and post-verification defects: A multiple
+case study. In: Proceedings of the 2009 3rd International Symposium on Empirical Software Engineering 
+and Measurement, IEEE Computer Society, Washington, DC, USA, ESEM ’09, pp 291–301.
+doi:10.1109/ESEM.2009.5315981
+
+M¨uller A (2010) Bytecode analysis for checking Java access modifiers. In: Work in Progress and Poster
+Session, 8th Int. Conf. on Principles and Practice of Programming in Java (PPPJ, 2010), Vienna,
+Austria
+
+Parnas DL (1972) On the criteria to be used in decomposing systems into modules. CACM 15(12):1053–
+1058. doi:10.1145/361598.361623. http://www.cs.umd.edu/class/spring2003/cmsc838p/Design/criteria.
+pdf
+
+Patenaude JF, Merlo E, Dagenais M (1999) Extending software quality assessment techniques to Java
+
+systems In: IWPC. IEEE Computer Society, Lagu, B, p 49
+
+Riel A (1996) Object-oriented design heuristics. Addison Wesley, Boston
+Robbes R, Lungu M, Roethlisberger D (2012) How do developers react to API deprecation? The case of a
+Smalltalk ecosystem. In: Proceedings of the 20th International Symposium on the Foundations of Software 
+Engineering (FSE’12), pp 56:1–56:11, DOI doi:10.1145/2393596.2393662, (to appear in print).
+http://scg.unibe.ch/archive/papers/Rob12aAPIDeprecations.pdf
+
+Schafer M, Thies A, Steimann F, Tip F (2012) A comprehensive approach to naming and accessibility in
+
+refactoring Java programs. IEEE Trans Softw Eng 38(6):1233–1257. doi:10.1109/TSE.2012.13
+
+Siegel S, Castellan NJ (1988) Nonparametric statistics for the behavioral sciences, 2nd edn. McGraw-Hill,
+
+New York
+
+Singh S, Kahlo nKS (2011) Effectiveness of encapsulation and object-oriented metrics to refactor 
+code and identify error prone classes using bad smells. ACM SIGSOFT Softw Eng Notes
+36(5):1–10
+
+Singh V, Bhattacherjee V, Bhattacharjee S (2012) An analysis of dependency of coupling on software
+
+defects. ACM SIGSOFT Softw Eng. Notes 37(1):1–6
+
+Steimann F, Thies A (2009) From public to private to absent: Refactoring Java programs under constrained
+accessibility. In: Drossopoulou S (ed) Lecture Notes in Computer Science, vol 5653. ECOOP, Springer,
+pp 419–443
+
+Tempero E, Anslow C, Dietrich J, Han T, Li J, Lumpe M, Melton H, Noble J (2010) The qualitas corpus:A
+curated collection of Java code for empirical studies. In: Software Engineering Conference (APSEC),
+2010 17th Asia Pacific, pp 336–345. doi:10.1109/APSEC.2010.46
+
+Empir Software Eng (2016) 21:483–516
+
+515
+
+Thies A, Bodden E (2012) Refaflex: safer refactorings for reflective Java programs.In: Proceedings of the
+2012 International Symposium on Software Testing and Analysis, ACM, New York, NY, USA, ISSTA
+2012
+
+Wohlin C, Runeson P, H¨ost M, Ohlsson MC, Regnell B, Wessl´en A (2000) Experimentation in software
+
+engineering: an introduction. Kluwer Academic Publishers, Norwell
+
+Zoller C, Schmolitzky A (2012) Measuring inappropriate generosity with access modifiers in Java systems.
+In: Proceedings of the 2012 Joint Conference of the 22Nd International Workshop on Software Measurement 
+and the 2012 Seventh International Conference on Software Process and Product Measurement.
+IEEE Computer Society, Washington, DC, USA, IWSM-MENSURA ’12, pp 43–52. doi:10.1109/IWS-
+M-MENSURA.2012.15
+
+Santiago A. Vidal received the M. Sc. and Ph. D. degrees in computer science from UNICEN University
+in 2011 and 2013, respectively. He is a Teacher Assistant at the Computer Science Department of UNICEN.
+ Currently is a scholarship holder of the National Council for Scientific and Technological Research of
+Argentina (CONICET) in the ISISTAN Institute. His main research interests include software evolution and
+maintenance.
+
+Alexandre Bergel is Assistant Professor and researcher at the University of Chile. Alexandre Bergel and
+his collaborators carry out research in software engineering and software quality, more specifically on code
+profiling, testing and data visualization. Alexandre Bergel has authored over 80 articles, published in international 
+and peer reviewed scientific forums, including the most competitive conferences and journals in the
+field of software engineering. Alexandre has participated to over 70 program committees of international
+events. Alexandre has also a strong interest in applying his research results to industry. Several of his research
+prototypes have been turned into products and adopted by major companies in the semi-conductor industry
+and certification of critical software systems. Alexandre co-authored the book Deep Into Pharo.
+
+516
+
+Empir Software Eng (2016) 21:483–516
+
+Claudia Marcos has been a Professor in the School of Computer Science at Universidad Nacional del Centro
+de la Provincia de Buenos Aires (UNCPBA) since 1991. She is CIC (Comisi´on de Investigaci´on Cient´ıfica de
+la provincia de Buenos Aires) researcher. From 2000 to 2005 she was co director of the ISISTAN Research
+Institute. Her main research area is in software evolution, requirements engineering and agile development.
+She teaches several undergraduate and posgraduate courses at the UNICEN and has also national and international 
+publications in the area. She leads several university research projects in Argentina as well as abroad.
+She adviced two master and two PhD. At present, Dr Marcos is advising postgraduate and undergraduate
+students. Dr Marcos received her B. S. degree in 1993 from the UNCPBA State University in 1993. She
+obtained her PH .D degree in Computer Science in 2001.
+
+J. Andr´es D´ıaz-Pace is currently a professor at UNICEN University (Tandil, Argentina), and also a research
+fellow of CONICET-Argentina. From 2007 to 2010, he was a member of the technical staff at the Software
+Engineering Institute (SEI, Pittsburgh, USA). His primary research interests are: quality-driven architecture
+design, AI techniques in design, architecture evolution and conformance. He has authored several publications 
+on topics of design assistance and object-oriented frameworks. He also participated, as an architecture
+evaluator or as a lead architect, in several technology transfer projects with industry. Mr. D´ıaz-Pace received
+a Ph.D. in Computer Science from UNICEN University in 2004.
+
+

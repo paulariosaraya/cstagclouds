@@ -1,0 +1,1312 @@
+6
+1
+0
+2
+
+ 
+
+p
+e
+S
+6
+
+ 
+
+ 
+ 
+]
+
+C
+D
+.
+s
+c
+[
+ 
+ 
+
+1
+v
+0
+9
+4
+1
+0
+
+.
+
+9
+0
+6
+1
+:
+v
+i
+X
+r
+a
+
+A Non-linear GPU Thread Map for Triangular Domains
+
+Crist´obal A. Navarroa,∗, Benjam´ın Bustosb, Nancy Hitschfeldb
+
+aInstituto de Inform´atica, Universidad Austral de Chile.
+
+bDepartamento de Ciencias de la Computaci´on, Universidad de Chile.
+
+Abstract
+
+There is a stage in the GPU computing pipeline where a grid of thread-blocks,
+in parallel space, is mapped onto the problem domain, in data space. Since the
+parallel space is restricted to a box type geometry, the mapping approach is
+typically a k-dimensional bounding box (BB) that covers a p-dimensional data
+space. Threads that fall inside the domain perform computations while threads
+that fall outside are discarded at runtime.
+In this work we study the case
+of mapping threads eﬃciently onto triangular domain problems and propose
+a block-space linear map λ(ω), based on the properties of the lower triangular 
+matrix, that reduces the number of unnnecessary threads from O(n2) to
+O(n). Performance results for global memory accesses show an improvement of
+up to 18% with respect to the bounding-box approach, placing λ(ω) on second
+place below the rectangular-box approach and above the recursive-partition and
+upper-triangular approaches. For shared memory scenarios λ(ω) was the fastest
+approach achieving 7% of performance improvement while preserving thread
+locality. The results obtained in this work make λ(ω) an interesting map for
+eﬃcient GPU computing on parallel problems that deﬁne a triangular domain
+with or without neighborhood interactions. The extension to tetrahedral domains 
+is analyzed, with applications to triplet-interaction n-body applications.
+
+Keywords: block-space mapping, data re-organization, trianglular domain
+keywords here, in the form: keyword, keyword
+
+1. Introduction
+
+GPU computing has become a well established research area [1, 2, 3] since
+the release of programable graphics hardware and its programming platforms
+such as CUDA [4] and OpenCL [5]. In the CUDA GPU programming model
+there are three constructs1 that allow the execution of highly parallel algorithms;
+(1) thread, (2) block and (3) grid. Threads are the smallest elements and they
+
+∗Corresponding author
+
+Email address: cnavarro@inf.uach.cl (Crist´obal A. Navarro)
+1OpenCL chooses diﬀerent names for these constructs; (1) work-element, (2) work-group
+
+and (3) work-space, respectively.
+
+Preprint submitted to Parallel Computing
+
+July 12, 2018
+
+are in charge of executing the instructions of the GPU kernel. A block is an
+intermediate structure that contains a set of threads organized as an Euclidean
+box. Blocks provide fast shared memory access as well as local synchronization
+for all of its threads. The grid is the largest construct of all three and it keeps
+all blocks together spatially organized for the execution of a GPU kernel. These
+three constructs play an important role when mapping the execution resources
+to the problem domain.
+
+For every GPU computation there is a stage where threads are mapped
+onto the problem domain. A map, deﬁned as f : Rk → Rp, transforms each
+k-dimensional point x = (x1, x2, ..., xk) of the grid into a unique p-dimensional
+point f (x) = (y1, y2,··· , yp) of the problem domain. Since the grid lives in
+parallel space, we have that f (x) maps the parallel space onto the data space.
+In GPU computing, a typical mapping approach is to build a bounding-box
+(BB) type of parallel space, suﬃciently large to cover the data space and map
+threads using the identity f (x) = x. Such map is highly eﬃcient for the class of
+problems where data space is deﬁned by a p-dimensional box, such as vectors,
+lists, matrices and box-shaped volumes. For this reason, the identity map is
+typically considered as the default approach.
+
+There is a class of parallel problems where data space follows a triangular
+organization. Problems such as the Euclidean distance maps (EDM) [6, 7, 8],
+collision detection [9], adjacency matrices [10], cellular automata simulation on
+triangular domains [11], matrix inversion [12], LU/Cholesky decomposition [13]
+and the n-body problem [14, 15, 16], among others, belong to this class and are
+frequently encountered in the ﬁelds of science and technology. In this class, data
+space has a size of D = n(n + 1)/2 ∈ O(n2) and is organized in a triangular
+way. This data shape makes the default bounding-box (BB) approach ineﬃcient
+as it generates n(n − 1)/2 ∈ O(n2) unnesessary threads (see Figure 1).
+
+Figure 1: The BB strategy is not the best choice for a td-problem.
+
+For each unnecessary thread, a set of instructions must be executed in order
+to discard themselves from the useful work, leading to a performance penalty
+that can become notorious considering that ﬁne-grained parallelism usually produces 
+thousands of threads with a small amount of work per thread. In this
+
+2
+
+context, it is interesting to study how one can reduce the number of unnecessary
+threads to a marginal number and eventually produce a performance improvement 
+for all problems in this class. Throughout the paper, this class will be
+referred as the triangular-domain class or simply TD.
+
+This work addresses the problem depicted in Figure 1 and proposes a blockspace 
+map λ(ω) designed for the TD class that reduces the number of unnecessary 
+threads to o(n2), making kernel execution up to 18% faster than the BB
+approach in global memory scenarios and up to 7% faster in shared memory
+tiled scenarios. The rest of the paper includes a description of the related works
+(Section 2), a formal deﬁnition for λ(ω) (Section 3), an evaluation of square
+root implementations (Section 4), a performance comparison with the related
+works (Section 5) and an extension of the strategy to tetrahedral domains with
+its potential performance beneﬁt (Section 6).
+
+2. Related Work
+
+In the ﬁeld of distance maps, Ying et. al. have proposed a GPU implementation 
+for parallel computation of DNA sequence distances [17] which is based
+on the Euclidean distance maps (EDM). The authors mention that the problem
+domain is indeed symmetric and they do realize that only the upper or lower
+triangular part of the interaction matrix requires computation. Li et. al.
+[7]
+have also worked on GPU-based EDMs on large data and have also identiﬁed
+the symmetry involved in the computation.
+
+Jung et. al. [18] proposed packed data structures for representing triangular
+and symmetric matrices with applications to LU and Cholesky decomposition
+[13]. The strategy is based on building a rectangular box strategy (RB) for
+accessing and storing a triangular matrix (upper or lower). Data structures
+become practically half the size with respect to classical methods based on the
+full matrix. The strategy was originally intended to modify the data space (i.e.,
+the matrix), however one can apply the same concept to the parallel space.
+
+Ries et. al. contributed with a parallel GPU method for the triangular
+matrix inversion [12]. The authors identify that the parallel space indeed can
+be improved by using a recursive partition (REC) of the grid, based on a divide
+and conquer strategy.
+
+Q. Avril et. al. proposed a GPU mapping function for collision detection
+based on the properties of the upper-triangular map [9]. The map, referred here
+as UTM, is a thread-space function u(x) → (a, b), where x is the linear index
+of a thread tx and the pair (a, b) is a unique two-dimensional coordinate in the
+upper triangular matrix. Their map is accurate in the domain x ∈ [0, 100M ],
+with a range of (a, b) ∈ [0, 3000].
+The present work is an extended and improved version of a previous conference 
+research by Navarro and Hitschfeld [21].
+
+3
+
+3. Block-space triangular map
+
+3.1. Formulation
+
+It is important to distinguish between two possible approaches; (1) threadspace 
+mapping and (2) block-space mapping. Thread-space mapping is where
+each thread uses its own unique coordinate as the parameter for the mapping
+function. The approach has been used before in the work of Avril et. al. [9].
+On the other hand, block-space mapping uses the shared block coordinate to
+map to a speciﬁc location, followed by a local oﬀset on each thread according to
+the relative position in their block. This approach has not been considered by
+the earlier works and it has been chosen as it can give certain advantages over
+thread-space mapping specially on memory access patterns.
+
+For a problem in the TD class of linear size n, its total size is n(n+ 1)/2. Let
+m = ⌈n/ρ⌉ be the number of blocks needed to cover the data space along one
+dimension and ρ the number of threads per block per dimension, or dimensional
+block-size (for simplicity, we assume a regular block). A bounding-box mapping
+approach would build a box-shaped parallel space, namely PBB, of m×m blocks
+and put conditional instructions to cancel the computations outside the problem
+domain. Although the approach is correct, it is ineﬃcient since m(m + 1)/2
+blocks are already suﬃcient when organized as:
+
+D =
+
+0
+1
+3
+...
+
+m(m−1)
+
+2
+
+2
+4
+...
+m(m−1)
+
+2
+
+5
+...
++ 1 ...
+
+...
+... m(m+1)
+
+2
+
+(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)
+
+(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)(cid:12)
+
+− 1
+
+(1)
+
+We deﬁne a balanced two-dimensional parallel space P∆ (see Figure 2) of size of
+
+m′ × m′ blocks where m′ = lpm(m + 1)/2m. This setup reduces the number of
+unnecessary threads from n(n−1)/2 ∈ O(n2) to ρ(ρ−1)
+2 ⌈n/ρ⌉ ∈ o(n2)
+threads, with ρ ∈ O(1).
+
+⌈n/ρ⌉ < ρ2
+
+2
+
+Figure 2: parallel space P∆ is suﬃcient to cover the problem domain.
+
+4
+
+Spaces P∆ and D are both topologically equivalent, therefore the map has to
+be at least a homeomorphism from block coordinates to unique two-dimensional
+coordinates in the triangular data space.
+Theorem 3.1. There exists a non-linear homeomorphism λ : Z1 7→ Z2 that
+maps any block Bi,j ∈ P∆ onto the TD class.
+Proof. Let ω be the linear index of a block, expressed as
+
+ω =
+
+x
+
+Xr=1
+
+r
+
+(2)
+
+From expression (1), one can note that the index of the ﬁrst data element in the
+row of the ω-th linear block corresponds to the sum in the range [1, i], where
+i is the row for the ω-th block. Similarly, the index of the ﬁrst block from the
+next row is a sum in the range [1, i + 1]. Therefore, for all ω values of the i-th
+row, their summation range is bounded as
+
+i
+
+Xr=1
+
+r ≤ λ =
+
+i+ǫ
+
+Xr=1
+
+r <
+
+i+1
+
+Xr=1
+
+r
+
+(3)
+
+with ǫ < 1. With this, we have that x ∈ R and most importantly that i = ⌊x⌋.
+Since Px
+r=1 r = x(x + 1)/2, x is found by solving the second order equation
+x2 + x− 2ω = 0 where the solution x = p1/4 + 2ω− 1/2 allows the formulation
+
+of the homeomorphism
+
+λ(ω) = (i, j) = (cid:16)jr 1
+
+4
+
++ 2ω −
+
+1
+
+2k, ω − i(i + 1)/2(cid:17)
+
+(4)
+
+which is non-linear since ∃ω1, ω2 ∈ P∆ : g(ω1 + ω2) 6= g(ω1) + g(ω2), e.g.,
+ω1 = 4, ω2 = 3 =⇒ g(7) = (3, 1) 6= g(4) + g(3) = (4, 1).
+
+If the diagonal is not needed, then λ(ω) becomes:
+
+λ(ω) = (i, j) = (cid:16)jr 1
+
+4
+
++ 2ω +
+
+1
+
+2k, ω − i(i + 1)/2(cid:17)
+
+(5)
+
+There are three important diﬀerences when comparing λ(ω) with the UTM
+map [9]: (1) λ(ω) maps in block-space and not in thread-space as in UTM,
+allowing larger values of n, (2) thread organization and locality is not compromised,
+ making nearest-neighbors computations eﬃcient for shared memory
+and (3) λ(ω) uses fewer ﬂoating point operations than in UTM since it uses a
+lower-triangular approach.
+
+3.2. Bounds on the improvement factor
+
+The reduction of unnecessary threads from O(n2) to O(n) may suggest that
+the improvement could reach a factor of up to 2×. For this to be possible, one
+
+5
+
+would need to measure just the mapping stage, so that necessary and unnecessary 
+threads do similar amount of work, and assume that the mapping function
+λ(ω) is as cheap as in the BB strategy. In the following analysis we analyze
+the improvement factor considering a more realistic scenario where λ(ω) has a
+higher cost than the BB map, due to the square root computation involved.
+
+The performance of λ(ω) strongly depends on the square root which in theory
+costs O(M (n)) [20] where M (n) is the cost of multiplying two numbers of n
+digits. Considering that real numbers are represented by a ﬁnite number of
+digits (i.e., ﬂoating point numbers with a maximum of m digits), then all basic
+operations cost a ﬁxed amount of time, leading to a constant cost M (m) =
+Cs ∈ O(1). All other computations are elemental arithmetic operations and
+can be taken as an additional cost of Ca ∈ O(1). The total cost of λ(ω) is
+τ = Cs + Ca = O(1) for each mapped thread. On the other hand, the BB
+strategy uses the identity map and checks for each thread if Bj <= Bi in order
+to continue or be discarded, leading to a constant cost of β ∈ O(1). It is indeed
+evident that β is cheaper than τ , therefore τ = kβ with a constant k ≥ 1. The
+improvement factor I can expressed as
+
+I =
+
+β|PBB|ρ2
+τ|P∆|ρ2 =
+
+2βN 2
+D
+D + τ ND
+
+τ N 2
+
+=
+
+2β⌈n/ρ⌉2
+
+τ (⌈n/ρ⌉2 + ⌈n/ρ⌉)
+
+For large n the result approaches to
+
+I =
+
+lim
+n→∞
+
+2β
+τ
+
+(6)
+
+(7)
+
+Using the relation τ = kβ in (7) we have I ≈ 2/k for large n and since k > 1,
+the ﬁnal range for I becomes
+(8)
+
+0 < I < 2
+
+The parameter k can be interpreted as the penalty factor of λ(ω), where the
+lowest value is desired. In practice, a value k ≈ 1 is too optimistic. Given how
+actual GPU hardware works, one can expect that the cost of the square root
+will dominate the k parameter.
+
+4. Implementation
+
+This section presents technical details on choosing a proper square root implementation 
+for λ(ω) as well as a general description of the related works chosen
+for performance comparison later on.
+
+4.1. Choosing a proper square root
+
+The performance of map λ(ω) = (i, j) depends, in great part, on how fast
+the square root from eq. (4) is computed. Three versions of λ(ω) have been
+implemented, each one using a diﬀerent method for computing the square root.
+Results from each test are computed as the improvement factor with respect to
+
+6
+
+the BB strategy. The ﬁrst implementation, named λX , uses the default sqrtf (x)
+function from CUDA C and it is the simplest one.
+
+The second implementation, named λN , computes the square root by using
+three iterations of the Newton-Raphson method [20, 19] which is available from
+the implementation of Carmack and Lomont. This square root implementation
+has proved to be eﬀective for applications that allow small errors. The initial
+value used is the magic number “0x5f3759df” (this value became known when
+’Id Software’ released Quake 3 source code back in the year 2005). Adding a
+constant of ǫ = 10−4 to the result of the square root can ﬁx approximation
+errors in the range N ∈ [0, 30720].
+ciprocal square root, rsqrtf (x):
+√x =
+
+The third implementation, named λR, uses the hardware implemented re-
+
+(9)
+
+x
+√x
+
+= x · rsqrtf (x)
+
+In terms of simplicity, λR is similar to λX , with the only diﬀerence that it adds
+ǫ = 10−4 at the end to ﬁx approximation errors, just like in g2.
+
+For each implementation a performance improvement factor was obtained
+with respect to BB strategy, by running a dummy kernel that computes the i, j
+indices and writes the sum i+j to a constant location in memory. It is necessary
+to perform at least one memory access otherwise the compiler can optimize the
+code removing part of the mapping cost. Figure 3 shows the improvement factor
+as I = BB/λ(ω) using the three diﬀerent implementations, running on three
+diﬀerent Nvidia Kepler GPUs; GTX 680, GTX 765M and Tesla K40.
+
+Square Root Performance Comparison
+
+λ
+R-GTX680
+λ
+N-GTX680
+λ
+X-GTX680
+
+λ
+R-GTX765M
+λ
+N-GTX765M
+λ
+X-GTX765M
+
+λ
+R-TeslaK40
+λ
+N-TeslaK40
+λ
+X-TeslaK40
+
+I
+
+ 1.3
+
+ 1.25
+
+ 1.2
+
+ 1.15
+
+ 1.1
+
+ 1.05
+
+ 1
+
+ 0.95
+
+ 0.9
+
+ 0.85
+
+ 0.8
+
+ 0
+
+ 5
+
+ 10
+
+ 15
+
+ 20
+
+ 25
+
+ 30
+
+10
+
+N (2
+
+)
+
+Figure 3: Performance of the diﬀerent square root strategies.
+
+From the results, we observe that λX is slower than BB when running on the
+GTX 680 and GTX 765M, achieving I680 ≈ 0.87 and I765M ≈ 0.83, respectively.
+For the same two GPUs, λN achieves an improvement of I680 ≈ 1.025 and
+
+7
+
+I765M ≈ 0.96 which is practically the performance of BB. Lastly, λR achieves
+improvements of I680 ≈ 1.15 and I765M ≈ 1.1. From these results, we observe
+that using the inverse square root is the best option for the GTX 680 and GTX
+765M. For the case of the Tesla K40, we observe that all three implementations
+achieve an improvement of IK40 ≈ 1.08, allowing to have the precision of λX
+with the performance of λR.
+
+4.2. Implementing the other strategies
+
+The strategies from the relevant works, including the default one from CUDA,
+were implemented as well; bounding-box (BB), rectangle-box (RB),recursivepartition 
+(REC) and upper-triangular-matrix (UTM) following the details provided 
+by the authors [18, 9, 12]. To each implementation the following restriction 
+was added: the map cannot use any additional information that grows as a
+function of N . This means no auxiliary array such as lookup tables are allowed,
+only small constants size data if needed. The purpose of such constraint is to
+guarantee that GPU memory is dedicated to the application problem.
+
+For the bounding box (BB) strategy, blocks above the diagonal are discarded
+at runtime, without needing to compute a thread coordinate as it can be done
+by checking if Bi > Bj is true or not in the kernel. Threads that got a true
+result from the conditional proceed to compute their global coordinate and do
+the kernel work. The condition i > j is still performed to discard threads on
+blocks where Bi = Bj. It is important to note that this implementation of BB
+is faster than computing the thread coordinate ﬁrst and ﬁltering afterwards.
+
+The rectangular box (RB) takes a sub-triangular portion of the threads where
+tx > N/2, rotates it counter-clock-wise (CCW) and places it above the diagonal
+to form a rectangular grid (see Figure 4, left).
+
+Figure 4: On the left, the rectangular-box (RB). On the right, the recursive-partition (REC).
+
+The original work was actually a memory packing technique in data space,
+but the principle can be applied to the parallel space as well. For this, the lookup
+texture is no longer used and instead the mapping coordinates are computed
+at runtime. All threads below the diagonal just need to map to i = ty − 1,
+while j remains the same, and threads in or above the diagonal map to i =
+
+8
+
+n− ty − 1,j = n− i− 1. An important feature of the RB map is that the number
+of unnecessary threads is asymptotically O(1).
+The recursive partition (REC) [12] strategy was originally proposed for matrix 
+inversion problem. In this strategy the size of the problem is deﬁned as
+N = m2k where k and m are positive integers and m is a multiple of the blocksize 
+ρ. The idea is to do a binary bottom-up recursion of k levels (see Figure
+4, right), where the i-th level has half the number of blocks of the (i − 1)-th
+level, but with doubled linear size. This method requires an additional pass for
+computing the blocks at the diagonal (level k = 0 is a special one). More details
+of how the grid is built and how blocks are distributed are well explained in
+[12]. In the original work, the mapping of blocks to their respective locations
+at each level is achieved by using a lookup table stored in constant memory.
+In this case, the lookup table is discarded and instead the mapping is done at
+runtime.
+
+The upper-triangular mapping (UTM) was proposed by Avril et. al. [9] for
+performing eﬃcient collision detection on the GPU. Given a problem size N and
+
+a thread index k, its unique pair (a, b) is computed as a = ⌊ −(2n+1)+√4n2−4n−8k+1
+and b = (a + 1) + k − (a−1)(2n−a)
+. The UTM strategy uses the idea of mapping
+threads explicitly to the upper-triangular matrix, making it a thread space map.
+
+2
+
+−2
+
+⌋
+
+5. Performance Results
+
+The experimental design consists of measuring the performance of λ(ω) and
+compare it against the bounding box (BB), rectangular box (RB) [18], the recursive 
+partition (REC) [12] and upper-triangular mapping (UTM) [9]. Three
+tests are performed to each strategy; (1) the dummy kernel, (2) EDM and (3)
+Collision detection. Test (1) just writes the (i, j) coordinate into a ﬁxed memory 
+location. The purpose of the dummy kernel is to measure just the cost
+of the strategy and not the cost of the application problem. Test (2) consists
+of computing the Euclidean distance matrix (EDM) using four features, i.e.,
+(x, y, z, w) where all of the data is obtained from global memory. Test (3) consists 
+of performing collision detection of N spheres with random radius inside a
+unit box. The goal of this last test is to measure the performance of the kernels
+using a shared memory approach.
+
+The reason why these tests were chosen is because they are simple enough to
+study their performance from a GPU map perspective and use diﬀerent memory
+access paradigms such as global memory and shared memory. Based on these
+arguments, it is expected that the performance results obtained by these three
+tests can give insights on what would be the behavior for more complex problems
+that fall into one of the two memory access paradigms. Furthermore, the tests
+have been ran on three diﬀerent GPUs in order to check if the results vary
+under older or newer GPU architectures. The details on the maximum number
+of simultaneous blocks (sblocks) for each GPU used are listed in Table 1.
+
+Performance results for the dummy kernel, 4D-EDM and collision detection
+in 1D/3D are presented in Figure 5. Graphic plots the performance of all four
+
+9
+
+Table 1: Hardware used for experiments.
+
+Device
+GP U1 Geforce GTX 765M
+GP U2
+Geforce GTX 680
+Tesla K40
+GP U3
+
+Model Architecture Memory Cores
+768
+1536
+2880
+
+GK106
+GK104
+GK110
+
+2GB
+2GB
+12GB
+
+sblocks
+80
+128
+240
+
+strategies as diﬀerent dashed line colors, while the symbol type indicates which
+GPU was chosen for that result. The performance of each mapping strategy
+is given in terms of its improvement factor I with respect to the BB strategy
+(i.e., the black and solid horizontal line ﬁxed at I = 1). Values that are located
+above the horizontal line represent actual improvement, while curves that fall
+below the horizontal line represent a slowdown with respect to the BB strategy.
+For the dummy kernel test the plots shows that the RB strategy is the fastest
+
+Dummy Kernel
+
+EDM 4D
+
+ 1.6
+
+ 1.4
+
+ 1.2
+
+ 1
+
+I
+
+ 0.8
+
+ 0.6
+
+ 0.4
+
+ 0.2
+
+ 2.2
+
+ 2
+
+ 1.8
+
+ 1.6
+
+ 1.4
+
+I
+
+ 1.2
+
+ 1
+
+ 0.8
+
+ 0.6
+
+ 0.4
+
+ 0.2
+
+ 0
+
+UTM-GTX765M
+REC-GTX765M
+λ-GTX765M
+RB-GTX765M
+
+UTM-GTX680
+REC-GTX680
+λ-GTX680
+RB-GTX680
+
+UTM-TeslaK40
+REC-TeslaK40
+λ-TeslaK40
+RB-TeslaK40
+
+ 5
+
+ 10
+
+ 15
+
+ 20
+
+ 25
+
+ 30
+
+N (2
+
+1
+0)
+
+3D Collision Detection
+
+UTM-GTX765M
+REC-GTX765M
+λ-GTX765M
+RB-GTX765M
+
+UTM-GTX680
+REC-GTX680
+λ-GTX680
+RB-GTX680
+
+UTM-TeslaK40
+REC-TeslaK40
+λ-TeslaK40
+RB-TeslaK40
+
+ 1.3
+
+ 1.2
+
+ 1.1
+
+ 1
+
+I
+
+ 0.9
+
+ 0.8
+
+ 0.7
+
+ 0.6
+
+ 0.5
+
+ 0.4
+
+ 2.2
+
+ 2
+
+ 1.8
+
+ 1.6
+
+ 1.4
+
+ 1.2
+
+ 1
+
+ 0.8
+
+ 0.6
+
+ 0.4
+
+ 0.2
+
+I
+
+UTM-GTX765M
+REC-GTX765M
+λ-GTX765M
+RB-GTX765M
+
+UTM-GTX680
+REC-GTX680
+λ-GTX680
+RB-GTX680
+
+UTM-TeslaK40
+REC-TeslaK40
+λ-TeslaK40
+RB-TeslaK40
+
+ 5
+
+ 10
+
+ 15
+
+ 20
+
+ 25
+
+ 30
+
+N (2
+
+1
+0)
+
+1D Collision Detection
+
+UTM-GTX765M
+REC-GTX765M
+λ-GTX765M
+RB-GTX765M
+
+UTM-GTX680
+REC-GTX680
+λ-GTX680
+RB-GTX680
+
+UTM-TeslaK40
+REC-TeslaK40
+λ-TeslaK40
+RB-TeslaK40
+
+ 5
+
+ 10
+
+ 15
+
+ 20
+
+ 25
+
+ 30
+
+N (210)
+
+ 5
+
+ 10
+
+ 15
+N (210)
+
+ 20
+
+ 25
+
+ 30
+
+Figure 5: Improvement factors for the dummy kernel, Euclidean distance matrix and collision
+detection.
+
+one achieving up to 33% of improvement with respect to BB when running
+on the GTX 765M. Map λ(ω) comes in the second place, achieving a stable
+improvement of up to 18% when running on the GTX 680. The REC and UTM
+strategies performed slower than BB for the whole range of N . We note that this
+test running on the Tesla K40 does not show any clear performance diﬀerence
+
+10
+
+among the mapping strategies once N > 15000, as they all converge to a 7% of
+improvement with respect to BB.
+
+For the EDM test, RB is again the fastest map achieving an improvement of
+up to 28% with respect to BB when running on the Tesla K40 GPU. In second
+place comes λ(ω) with a stable improvement of 18% and third the REC map with
+an improvement that reaches up to 12% for the largest n. The performance of
+the UTM strategy was lower than BB and unstable for all GPUs. It is important
+to consider that UTM was designed to work in the range n ∈ [0, 3000], where
+it actually does perform better than BB oﬀering up to 4% of improvement over
+BB. For this test, performance diﬀerences among the strategies did manifest for
+all GPUs, including the Tesla K40.
+
+For the 3D collision detection test only λ(ω) manages to perform better than
+BB, oﬀering an improvement of up to 7%. Indeed, the performance scenario
+changes drastically in the presence of a diﬀerent memory access pattern such
+as shared memory; the RB strategy, which was the best in global memory, now
+performs slower than BB. The case is similar with the REC map which now
+performs much slower than BB. It is important to mention that the UTM map
+is the only strategy that cannot use a 2D shared memory pattern because the
+mapping works in linear thread space. At low n, UTM achieves a 100% of
+improvement because of the diﬀerent memory approach used, thus it cannot be
+taken as a practical improvement. Furthermore, as n grows, its performance is
+over passed by the rest of the strategies that use shared memory. For the case
+of 1D collision detection, results are not so beneﬁcial for the mapping strategies
+and in the case of λ(ω) it is in the limit of being an improvement. The 1D
+results show that in low dimensions the beneﬁts of a mapping strategy can be
+not as good as in higher ones.
+
+6. Extension to 3D Tetrahedrons
+
+In this section, the potential beneﬁt of λ(ω) is considered for 3D cases as
+an extension of the 2D approach. The three-dimensional analog of the 2D
+triangle corresponds to the 3D discrete tetrahedron, which may be deﬁned by
+n triangular structures stacked and aligned at their right angle, where the r-th
+trianglular layer contains T 2D
+r = r(r + 1)/2 elements. The total number of
+elements for the full structure can be expressed in terms of the n layers:
+
+Tn =
+
+n
+
+Xr=1
+
+T 2D
+r =
+
+n
+
+Xr=1
+
+r(r + 1)
+
+2
+
+(10)
+
+The sequence corresponds to the tetrahedral numbers, which can be deﬁned by
+
+Tn = (cid:18)n + 2
+
+3 (cid:19) =
+
+n
+
+Xr=1
+
+T 2D
+r =
+
+n(n + 1)(n + 2)
+
+6
+
+(11)
+
+Similar to the 2D case, a canonical map f (x) = x with a box-shaped parallel
+space leads to an inneﬃciency as the number of unnecessary threads is in the
+order of O(n3) as illustrated by Figure 6.
+
+11
+
+Figure 6: A bounding-box approach produces O(n3) unnecessary threads.
+
+A more eﬃcient approach can be formulated by considering how block indices
+can map onto the tetrahedron. More precisely, it is possible to redeﬁne λ as
+a map λ(ω) : N → N3 that works on the tetrahedral structure without loss of
+parallelism (see Figure 7).
+
+Figure 7: Blocks of threads can use an extended version of λ(ω) to map from parallel space
+(left) onto the tetrahedral structure (right).
+
+The approach takes advantage of the fact that when using a linear enumeration 
+of blocks on the tetrahedron, the ω index of the ﬁrst element of a 2D
+triangular layer corresponds to a tetrahedral number Tx. Similar to the previous 
+two-dimensional row analysis, now that data elements that reside in the
+same layer obey the following property
+
+k
+
+Xr=1
+
+r(r + 1)/2 < ω =
+
+x
+
+Xr=1
+
+r(r + 1)/2 <
+
+k+1
+
+Xr=1
+
+r(r + 1)/2.
+
+(12)
+
+When expressing ω as the tetrahedral number
+
+ω =
+
+x
+
+Xr=1
+
+r(r + 1)/2 =
+
+x(x + 1)(x + 2)
+
+6
+
+.
+
+(13)
+
+the k component of the (i, j, k) coordinate of block ω can be obtained by solving
+
+12
+
+the third order equation
+
+and extracting the integer part of the root
+
+x3 + 3x2 + 2x − 6ω = 0
+
+x =
+
+3p√729ω
+
+2
+
+− 3 + 27ω
+
+32/3
+
++
+
+1
+3√3 3p√729ω
+
+2
+
+− 3 + 27ω − 1
+
+Once the value k = ⌊x⌋ is computed, the ω2D linear coordinate
+
+ω2D = ω − Tk
+
+(14)
+
+(15)
+
+(16)
+
+can be obtained as well, where Tk = k(k + 1)(k + 2)/6 is the tetrahedral number
+for the recently computed k value. With ω2D computed, the i and j values of the
+block can be computed using the two-dimensional version of λ(ω). Combining
+all three sub-results, the tetrahedral map λ(ω) becomes
+
+λ(ω) 7→ (i, j, k) = (cid:16)ω2D − T 2D
+
+y
+
+,jr 1
+
+4
+
++ 2ω2D −
+
+1
+
+2k,⌊v⌋(cid:17)
+
+(17)
+
+.
+
+The blocks in parallel space can be organized on a cubic grid of side ⌈ 3√Tn⌉
+in order to balance the number of elements on each dimension, producing n2ρ3 ∈
+o(n) unnecessary threads. The potential improvement factor of the block-space
+map with respect to the bounding box is
+
+I =
+
+αn3/ρ3
+γTn/ρ3 =
+
+6αn3
+
+γ(n3 + 3n2 + 2n)
+
+(18)
+
+where α is the cost of computing the block coordinate using the box approach,
+while γ is the cost of mapping blocks onto the tetrahedral map. In the inﬁnite
+limit of n, the potential improvement becomes
+
+In→∞ ∼
+
+6α
+γ
+
+(19)
+
+and tells that in theory the tetrahedral map could be close to 6× more eﬃcient
+for large n. However, such improvement can only be possible if γ ∼ α, i.e., if the
+square and cubic roots can be computed fast enough to be comparable to the
+cost of the bounding-box approach, which is very unlikely to happen in practice.
+Nevertheless, there still can be valuable improvement as long as γ < 6α.
+
+7. Conclusions
+
+The mapping technique studied in this work may be a useful optimization
+for GPU solutions of parallelizable problems that have a triangular or tetrahedral 
+domain. The map proposed in this work, namely λ(ω), proved to be the
+fastest strategy (with 7% of improvement over the bounding-box ) when dealing
+
+13
+
+with shared memory scenarios that require locality, which is a computational
+pattern often found in scientiﬁc and engineering problems where information of
+nearest neighbors is accessed. Since the map is performed in block-space, thread
+locality is not compromised allowing to integrate the optimization with other
+optimization techniques such as block-level data re-organization or coalesced
+data sharing among threads. The implementation of λ(ω) is short in code and
+totally detached from the problem, making it easy to adopt it as a self-contained
+function with no side eﬀects.
+
+The performance of the map varies depending on which GPU is used and
+on the way the map computations are performed. It is of high interest to study
+even more optimized square root routines as they have a great impact on the
+performance of λ(ω).
+
+Extensions to the 3D tetrahedron are worth inspecting in more detail as they
+have the potential of being up to 6× more eﬃcient regarding parallel space. This
+improvement can traduce to a performance increase only if the cost of cubic and
+square root computations is low enough to the same order of the bounding box
+approach. Although tetrahedral domain problems are less frequently found, they
+are still important in science when solving triplet-interaction n-body problems.
+An interesting approach for the implementation of the 3D map would be to
+reconsider relaxing the condition of allowing extra data and introduce a type of
+succint lookup table of o(Tn) combined with coordinate computations in order
+to balance and overlap the use of numerical and memory operations.
+
+Acknowledgment
+
+This work was supported by the FONDECYT project No 3160182 and the
+
+Nvidia GPU Research Center from University of Chile.
+
+[1] J. Owens, M. Houston, D. Luebke, S. Green, J. Stone, J. Phillips,
+Gpu computing, Proceedings of the IEEE 96 (5) (2008) 879–899.
+doi:10.1109/JPROC.2008.917757.
+
+[2] J. Nickolls, W. J. Dally, The gpu computing era, IEEE Micro 30 (2) (2010)
+
+56–69.
+
+[3] C. A. Navarro, N. Hitschfeld-Kahler, L. Mateu, A survey on parallel computing 
+and its applications in data-parallel problems using GPU architectures,
+ Commun. Comput. Phys. 15 (2014) 285–329.
+
+[4] Nvidia-Corporation, Nvidia CUDA C Programming Guide (2016).
+
+[5] Khronos OpenCL Working Group, The OpenCL Speciﬁcation, version
+
+1.0.29 (8 December 2008).
+
+[6] D. Man, K. Uda, H. Ueyama, Y. Ito, K. Nakano, Implementations of parallel 
+computation of euclidean distance map in multicore processors and
+gpus, in: Networking and Computing (ICNC), 2010 First International
+Conference on, 2010, pp. 120–127. doi:10.1109/IC-NC.2010.55.
+
+14
+
+[7] Q. Li, V. Kecman, R. Salman, A chunking method for euclidean distance
+matrix calculation on large dataset using multi-gpu, in: Proceedings of the
+2010 Ninth International Conference on Machine Learning and Applications,
+ ICMLA ’10, IEEE Computer Society, Washington, DC, USA, 2010,
+pp. 208–213.
+
+[8] D. Man, K. Uda, Y. Ito, K. Nakano, A gpu implementation of computing
+euclidean distance map with eﬃcient memory access, in: Proceedings of
+the 2011 Second International Conference on Networking and Computing,
+ICNC ’11, IEEE Computer Society, Washington, DC, USA, 2011, pp. 68–
+76.
+
+[9] Q. Avril, V. Gouranton, B. Arnaldi, Fast collision culling in large-scale
+environments using gpu mapping function, in: EGPGV, 2012, pp. 71–80.
+
+[10] J. Kepner, J. Gilbert, Graph Algorithms in the Language of Linear Algebra,
+
+Software, Environments, Tools, Society for Industrial and Applied Mathematics,
+ 2011.
+URL http://books.google.com.hk/books?id=BnezR_6PnxMC
+
+[11] M. Gardner, The fantastic combinations of John Conway’s new solitaire
+
+game “life”, Scientiﬁc American 223 (1970) 120–123.
+
+[12] F. Ries, T. De Marco, M. Zivieri, R. Guerrieri, Triangular matrix inversion
+on graphics processing unit, in: Proceedings of the Conference on High
+Performance Computing Networking, Storage and Analysis, SC ’09, ACM,
+New York, NY, USA, 2009, pp. 9:1–9:10.
+
+[13] F. Gustavson, New generalized data structures for matrices lead to a variety 
+of high performance algorithms, in: R. Wyrzykowski, J. Dongarra,
+M. Paprzycki, J. Wasniewski (Eds.), Parallel Processing and Applied Mathematics,
+ Vol. 2328 of Lecture Notes in Computer Science, Springer Berlin
+/ Heidelberg, 2006, pp. 418–436.
+
+[14] R. Yokota, L. A. Barba, Fast n-body simulations on GPUs, CoRR
+
+abs/1108.5815.
+
+[15] J.
+
+B´edorf,
+
+E.
+
+Gaburov,
+
+S.
+
+Portegies
+
+Zwart,
+
+Comput.
+
+A sparse octree gravitational n-body code that runs entirely on the GPU processor,
+J.
+doi:10.1016/j.jcp.2011.12.024.
+URL http://dx.doi.org/10.1016/j.jcp.2011.12.024
+
+2825–2839.
+
+(2012)
+
+Phys.
+
+231
+
+(7)
+
+[16] L. Ivanov, The n-body problem throughout the computer science curriculum,
+
+J. Comput. Sci. Coll. 22 (6) (2007) 43–52.
+URL http://dl.acm.org/citation.cfm?id=1231091.1231100
+
+[17] Z. Ying, X. Lin, S. C.-W. See, M. Li, Gpu-accelerated dna distance matrix
+computation, in: Proceedings of the 2011 Sixth Annual ChinaGrid Conference,
+ CHINAGRID ’11, IEEE Computer Society, Washington, DC, USA,
+2011, pp. 42–47.
+
+15
+
+[18] J. H. Jung, D. P. OLeary, Exploiting structure of symmetric or triangular
+
+matrices on a gpu, Tech. rep., University of Maryland (2008).
+
+[19] H. A. Peelle, To teach Newton’s square root algorithm, SIGAPL APL
+
+Quote Quad 5 (4) (1974) 48–50.
+
+[20] T. J. Ypma, Historical development of the Newton-Raphson method, SIAM
+
+Rev. 37 (4) (1995) 531–551.
+
+[21] C. A. Navarro, N. Hitschfeld, GPU maps for the space of computation in triangular domain problems,
+
+in: 2014 IEEE International Conference on High Performance Computing
+and Communications, 6th IEEE International Symposium on Cyberspace
+Safety and Security, 11th IEEE International Conference on Embedded
+Software and Systems, HPCC/CSS/ICESS 2014, Paris, France, August
+20-22, 2014, 2014, pp. 375–382. doi:10.1109/HPCC.2014.64.
+URL http://dx.doi.org/10.1109/HPCC.2014.64
+
+[22] L. Nyland, M. Harris, J. Prins, Fast N-Body Simulation with CUDA, in:
+H. Nguyen (Ed.), GPU Gems 3, Addison Wesley Professional, 2007, Ch. 31,
+pp. 677–795.
+
+16
+
+

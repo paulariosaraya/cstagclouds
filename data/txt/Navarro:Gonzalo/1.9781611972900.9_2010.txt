@@ -1,0 +1,2887 @@
+Succinct Trees in Practice
+
+Diego Arroyuelo∗
+
+Rodrigo C´anovas†
+
+Gonzalo Navarro†
+
+Kunihiko Sadakane‡
+
+Abstract
+We implement and compare the major current techniques for
+representing general trees in succinct form. This is important 
+because a general tree of n nodes is usually represented
+in pointer form, requiring O(n log n) bits, whereas the succinct 
+representations we study require just 2n + o(n) bits
+and carry out many sophisticated operations in constant
+time. Yet, there is no exhaustive study in the literature
+comparing the practical magnitudes of the o(n)-space and
+the O(1)-time terms. The techniques can be classiﬁed into
+three broad trends: those based on BP (balanced parentheses 
+in preorder), those based on DFUDS (depth-ﬁrst unary
+degree sequence), and those based on LOUDS (level-ordered
+unary degree sequence). BP and DFUDS require a balanced
+parentheses representation that supports the core operations
+ﬁndopen, ﬁndclose, and enclose, for which we implement and
+compare three major algorithmic proposals. All the tree representations 
+require also core operations rank and select on
+bitmaps, which are already well studied in the literature.
+We show how to predict the time and space performance
+of most variants via combining these core operations, and
+also study some tree operations for which specialized implementations 
+exist. This is especially relevant for a recent
+proposal (K. Sadakane and G. Navarro, SODA’10) which,
+although belonging to class BP, deviates from the main techniques 
+in some cases in order to achieve constant time for
+the widest range of operations. We experiment over various 
+types of real-life trees and of traversals, and conclude
+that the latter technique stands out as an excellent practical 
+combination of space occupancy, time performance, and
+functionality, whereas others, particularly LOUDS, are still
+interesting in some limited-functionality niches.
+
+1 Introduction.
+
+Trees are, on one hand, the paradigmatic data structure
+in Computer Science, probably rivalled in popularity
+only by arrays and linked lists; and on the other hand,
+one of the most striking examples of the success of
+succinct data structures. A classical representation of
+a general tree of n nodes requires O(nw) bits of space,
+where w ≥ log2 n is the bit length of a machine pointer
+(we will use log for log2 henceforth). The associated
+constant is at least 2, and typically only operations such
+as moving to the ﬁrst child and to the next sibling, or
+
+∗Yahoo!
+
+Research
+
+Latin
+
+America,
+
+Chile.
+
+darroyue@dcc.uchile.cl.
+
+†Department of Computer Science, University of Chile.
+{rcanovas|gnavarro}@dcc.uchile.cl. Supported in part by Millennium 
+Institute for Cell Dynamics and Biotechnology (ICDB),
+Grant ICM P05-001-F, Mideplan, Chile.
+
+‡National
+
+Institute
+
+of
+
+Japan.
+sada@nii.ac.jp.
+Supported in part by a Grant-in-Aid of
+the Ministry of Education, Science, Sports and Culture of Japan.
+
+Informatics
+
+(NII),
+
+to the i-th child, are supported. By further increasing
+the constant, some other simple operations are easily
+supported, such as moving to the parent, knowing
+the subtree size, or the depth. Much research was
+needed (and further increase of the constant) to support
+sophisticated operations such as level-ancestor [3] and
+lowest common ancestor [2] queries. While the constanttime 
+complexities achieved for the sophisticated queries
+are remarkable, the Ω(n log n)-bit space complexity is
+not justiﬁed in terms of Information Theory: there are
+only Cn ∼ 4n/n3/2 diﬀerent general trees of n nodes,
+and thus log Cn = 2n − Θ(log n) bits are suﬃcient to
+distinguish any one of them. This huge space gap has
+motivated a large body of research [16, 19, 20, 21, 11,
+4, 10, 7, 15, 12, 25, 17, 18, 8, 27] achieving 2n + o(n)
+bits of space and constant time for an impressive set
+of operations. Table 1 lists those we consider in this
+paper. There are several others, yet most are solved
+analogously to those in this set. Note we consider also
+labeled trees, where each child of a node is associated
+to a distinct label in a range [1, σ]. In this case, n log σ
+additional bits are needed to represent the labels.
+
+The existing proposals diﬀer in their functionality,
+ranging from those that support basically child/parent
+navigation [16, 7] to those supporting a full range of
+operations [4, 17, 8, 27];
+in the nature of the o(n)
+space overhead, ranging from O(n/(log log n)2) [18]
+to O(n/polylog(n)) [27]; and in some rare cases on
+their capability to take less space when the tree is
+compressible in some sense [17]. In theoretical terms,
+the problem can be considered basically solved, at least
+in the static scenario.
+
+In practice, however, the situation is much less satisfactory.
+ Implementations of the theoretical proposals
+are scarce and far from trivial, even for those striving
+for simplicity [10, 7, 27]. Verbatim implementations of
+the theoretical proposals are usually disastrous, as already 
+noted in previous work [22], and much empirical
+experience must be combined with the theoretical ideas
+in order to obtain theoretically and practically sound
+solutions. There are few practical comparisons among
+techniques, none of which is suﬃciently exhaustive to
+give a broad idea of their performance. In practice, the
+O(1)-time and the o(n)-space terms in the asymptotic
+analyses give little clues as to how the structures actu84Copyright 
+© by SIAM. Unauthorized reproduction of this article is prohibited.Downloaded 07/22/18 to 200.9.97.193. Redistribution subject to SIAM license or copyright; see http://www.siam.org/journals/ojsa.phpparentheses operation
+ﬁndclose(i)/ﬁndopen(i)
+enclose(i)
+rank((i)/rank)(i)
+select((i)/select)(i)
+tree operation
+pre rank (x)
+pre select(x)
+isleaf (x)
+ancestor (x, y)
+depth(x)
+parent(x)
+ﬁrst child(x)
+next sibling(x)
+subtree size(x)
+degree(x)
+child(x, i)
+child rank(x)
+level ancestor(x, d)
+lca(x, y)
+labeled tree operation
+labeled child(x, s)
+child label(x)
+
+description
+position of parenthesis matching P [i]
+position of tightest opening parenthesis enclosing node i
+number of opening/closing parentheses in P [1, i]
+position of i-th open/close parenthesis
+description
+preorder rank of node x
+the node with preorder x
+whether node x is a leaf
+whether x is an ancestor of y
+depth of node x
+parent of node x
+ﬁrst child of node x
+next sibling of node x
+number of nodes in the subtree of node x
+number of children of node x
+i-th child of node x
+number of siblings to the left of node x
+ancestor y of x such that depth(y) = depth(x) − d
+the lowest common ancestor of two nodes x, y
+description
+child of node x labeled by symbol s
+label of edge between node x and its parent
+
+Table 1: Operations on parentheses and trees considered in this paper. The ﬁrst group are core operations on a
+parentheses sequence P , and is used to implement many of the others.
+
+ally perform.
+
+In this paper, we carefully implement the theoretical 
+proposals we consider most promising in practice,
+and compare them for various real-life trees and typical 
+tree traversals. Tree representations can be broadly
+classiﬁed into the following tracks:
+BP: The balanced parentheses representation of a tree,
+ﬁrst advocated as a succinct data structure by Jacobson 
+[16], and later achieving constant times [19],
+is built from a depth-ﬁrst preorder traversal of the
+tree, writing an opening parenthesis when arriving
+to a node for the ﬁrst time, and a closing parenthesis 
+when going up (after traversing the subtree
+of the node).
+In this way, we get a sequence of
+2n balanced parentheses. Each node is represented
+by a matching pair parentheses ’(’ and ’)’, and we
+identify the node with its opening parenthesis. The
+subtree of x contains those nodes (parentheses) enclosed 
+between its representing opening and closing
+parentheses. The core operations (see Table 1) on
+this sequence are suﬃcient to implement most of
+the functionality.
+
+DFUDS: Depth-ﬁrst unary degree sequence [4].
+
+It
+is built by the same traversal, except that, upon
+arriving at each node, we append i opening and one
+
+closing parentheses, being i the number of children
+of the node. The node is represented by the
+position where its i parentheses start. The resulting
+sequence turns out to be balanced (if one prepends
+an extra opening parenthesis at the beginning)
+and the same core operations on parentheses are
+used to support the same functionality of BP in a
+diﬀerent way (except for depth, which requires extra
+structures [17]) plus others, most notably child, in
+constant time.
+
+LOUDS: Level-ordered unary degree sequence [16, 4].
+Nodes are processed and represented as in DFUDS,
+but they are traversed level-wise,
+instead of in
+depth-ﬁrst order. It turns out that just rank(/rank)
+and select(/select) are suﬃcient to support a few
+key operations such as parent and child in constant
+time, yet most other operations are not supported.
+
+FF: The recent so-called fully-functional succinct tree
+representation [27] is based on a BP representation.
+It includes a novel data structure to handle the core
+operations, called a range min-max tree. With little
+extra data, this same structure is able of solving in
+constant time many other sophisticated operations
+that are not usually handled by other BP represen85Copyright 
+© by SIAM. Unauthorized reproduction of this article is prohibited.Downloaded 07/22/18 to 200.9.97.193. Redistribution subject to SIAM license or copyright; see http://www.siam.org/journals/ojsa.phptations, such as child, lca, and level ancestor.
+
+We omit an extra track based on tree covering
+[11, 15, 8], of which we do not know of practical
+implementations (we thank Arash Farzan and Meng He
+for conﬁrming this).
+
+We ﬁrst study diﬀerent alternatives to represent a
+sequence of balanced parentheses while supporting the
+core operations. These include a hash-based heuristic
+implementation developed for a compressed text index
+[22], Geary et al.’s recursive pioneer-based representation 
+[10], and the range min-max trees [27]. We exhaustively 
+compare these operations over real-life trees
+coming from (a) LZ78 parsings of text collections, (b)
+suﬃx trees of text collections, (c) the tag structure of
+XML collections. We emulate typical root-to-leaf (and
+vice versa) traversals coming from exact search, LZ78
+decompression, and other very common navigation operations,
+ as well as traversals where in addition every
+other child of the current node is visited with a given
+probability. These are meant to emulate traversals typical 
+of backtracking, range or proximity searches, and
+XPath queries.
+
+We brieﬂy survey the way BP, DFUDS, and LOUDS
+build on these core operations, and show how to predict 
+the performance of most operations in terms of the
+core ones. We also study some tree operations individually,
+ when the prediction from the performance of
+core operations is less direct. Overall, our work provides 
+implementations (all by ourselves) of the most
+promising techniques to represent succinct trees, the
+ﬁrst exhaustive empirical comparison among them, and
+recommendations on which structures to use depending 
+on the case. It turns out that the recent FF proposal 
+[27] stands out as an excellent combination of wide
+functionality, little space usage, and good time performance.
+ Other approaches are still relevant for certain
+niches. In particular, we show that LOUDS, which had
+received comparatively little attention, is an extremely
+simple and eﬃcient alternative when only the simpler
+operataions are needed. LOUDS excells when descending 
+to an arbitrary ordinal or labeled child. For this
+latter operation, the DFUDS variant also shows to be a
+reasonable compromise if a wide functionality must be
+retained.
+
+2 Balanced Parentheses.
+
+Let P [1, 2n] be a sequence of n pairs of balanced
+parentheses (represented with bits 0,1). We describe
+the three major representations we will consider, which
+support the core parenthesis operations described in
+Table 1.
+
+Let us deﬁne the key function excess(i) = rank((i)−
+rank)(i). Then it holds that ﬁndclose(i) is the smallest
+
+j > i such that excess(j) = excess(i − 1) (ﬁndopen(i) is
+analogous). Also, enclose(i) is the greatest j < i such
+that excess(j) = excess(i) − 1.
+
+2.1 Hash-Based Heuristic (HB).
+
+Instead of storing all the possible answers to ﬁndclose
+(which would require O(n log n) bits of space), this
+representation [22] divides the parentheses into three
+groups. Let b = log n and s = b log n. Let close
+parentheses be those whose matching parentheses are
+at distance at most b; near, between b + 1 and s; and
+far, farther than s positions away. Only the answers for
+near and far parentheses are explicitly stored, in hash
+tables. The table for far parentheses uses O(log n) bits
+per value stored, while that for near parentheses uses
+just log s bits (because the distance from the argument
+is stored, rather than the absolute answer).
+
+To compute ﬁndclose(i), we ﬁrst scan the next b
+positions, looking for the ﬁrst parenthesis with the same
+excess(i − 1). If the answer is not found in this way, the
+hash table for near parentheses is queried. Since the
+search key is not stored in this table, we consider all
+colliding answers:
+if more than one candidate answer
+is found with the correct excess, the closest one is the
+correct answer (because the sequence is balanced [22]).
+Finally, if the answer is still not found, the hash table for
+far parentheses is queried. A similar approach is used
+for operations ﬁndopen and enclose, requiring their own
+hash tables.
+
+The search for close parentheses is implemented as
+a scan by chunks of k bits. Hence, for every diﬀerent
+k-bit stream, we precompute its excess and, for every
+j = 1, . . . , k, the ﬁrst position of the k-bit stream where
+the excess becomes −j, if any. To solve ﬁndclose(i),
+we check wether the excess −1 is reached in the ﬁrst
+chunk after position i. If it is, the position where this
+happens is ﬁndclose(i). Otherwise, we consider the
+second chunk, looking for excess −1 − e1, where e1 is
+the total excess of the ﬁrst chunk, and so on. If the b
+bits are exhausted without a solution, then the answer
+is not close. Scanning for ﬁndopen(i) and enclose(i) is
+analogous.
+
+c
+
+The parenthesis operations are thus supported in
+O(b/k) time, plus two searches on hash tables, which
+are O(1) on average. If we set k = log n
+, for constant
+c > 1, the average time is O(c). The precomputed
+table for close parentheses requires 2k(2k + 1) log k =
+O(n1/c log n log log n) = o(n) bits. Furthermore, we
+need log s = O(log log n) bits per near parenthesis and
+O(log n) per far parenthesis. However, there is no
+theoretical bounds on these types of parentheses (e.g.,
+on a tree formed by n nodes with one child, almost all of
+them are far). Fortunately, these worst-case sequences
+
+86Copyright © by SIAM. Unauthorized reproduction of this article is prohibited.Downloaded 07/22/18 to 200.9.97.193. Redistribution subject to SIAM license or copyright; see http://www.siam.org/journals/ojsa.phpare not common in practice.
+
+Implementation notes. We choose k = 8 so as to
+handle bytes, hence the table requires just 4.25 KB and
+admits good caching. The hash tables are implemented
+by a closed hashing scheme, with load factor 1.8 for
+enclose and 1.6 for ﬁndclose and ﬁndopen, which gave
+us the best space/time tradeoﬀ (recall that we do not
+store the keys in the hash table for near parentheses, so
+we pay a noticeable cost per collision, and the cost is
+proportional to that of an unsuccessful search). See [22,
+Sect. 6] for more implementation details.
+
+For operation excess, a lightweight rank/select data
+structure is used [13], which supports rank in O(1) and
+select in O(log n) time, while requiring 5% extra space
+over that of P [1, 2n]. The idea is to store rank values,
+in 32 bits, every s = 20 · 32 = 640 bits, and then scan
+byte-wise these 640 bits = 80 bytes using a precomputed
+table. For select we binary search the sampled values
+and ﬁnish with a sequential scan as well.
+
+2.2 Recursive Pioneer-Based Representation
+(RP).
+
+The representation by Geary et al. [10] divides P into
+blocks of size b = log n
+2 . A parenthesis at position
+i is said to be close if
+its matching pair belongs
+to the same block, otherwise the pair is called far.
+Computing ﬁndclose for a close parenthesis is done by
+using precomputed tables, as in Section 2.1, requiring
+o(n) bits of space. An opening far parenthesis at
+position i is said to be a pioneer if the previous opening
+far parenthesis has its matching closing parenthesis in
+a block diﬀerent to that of the closing parenthesis for
+i. Both parentheses forming the matching pair are
+called pioneers. The total number of pioneers is O(n/b)
+[16, 10]. Thanks to the pioneer properties, ﬁndclose(i) is
+reduced to (a) ﬁnding the previous pioneer i′ ≤ i (which
+could be i itself), (b) ﬁnd j ′ = ﬁndclose(i′), (c) scan the
+block of j ′ backwards until ﬁnding j = ﬁndclose(i) using
+the excess property (again by means of precomputed
+tables).
+
+To solve ﬁndclose for pioneers, we form the reduced
+sequence of the pioneers, and apply the solution recursively 
+once more. The second time the reduced sequence
+is of length O(n/b2) and thus we can store all the answers 
+in O(n log(n)/b) = o(n) bits.
+
+The remaining piece is a bitmap B[1, 2n] marking
+the pioneers. With rank1 and select1 on this sequence
+we ﬁnd the previous pioneer, map it to the reduced
+sequence, and map the answer to ﬁndclose back to
+the original sequence. As B has O(n/b) 1s, it can be
+represented using O(n log b/b) = o(n) bits of space [24].
+The solution to enclose(i) is similar. After checking
+within the same block of i, we look for the ﬁrst pioneer
+
+If it is a closing parenthesis, then p =
+c following i.
+ﬁndopen(c), otherwise p is the pioneer most tightly
+enclosing c (i.e., its parent in the sequence of pioneers).
+Now let q be the ﬁrst pioneer following p.
+If q is
+in the same block as p, then our answer is the ﬁrst
+far parenthesis to the left of q; else the answer is the
+rightmost far parenthesis in the block of p. Both require
+just within-block scans. See the original article [10] for
+more details.
+
+Implementation notes. For compressed bitmaps
+[24] we use a recent implementation [6] which requires
+27% extra space on top of the entropy of the bitmap, and
+implements rank in constant time and select in O(log n)
+time. The block size b is a space/time tradeoﬀ parameter.
+ Because the second-level bitmap B is signiﬁcantly
+smaller and not too compressible, we represent it in uncompressed 
+form. All uncompressed RP bitmaps are
+implemented as those in Section 2.1.
+
+2.3 Range Min-Max-Tree Based Representation 
+(RMM).
+
+The basic tool of this technique [27] is the range minmax 
+tree. This is built over the (virtual) array of
+excess(i) values. The sequence P is cut into blocks
+of b = w
+2 parentheses, and we store the minimum
+and maximum (local) excess within each block. We
+then group k blocks into a superblock, and store the
+minimum and maximum excess per superblock. We
+then group k superblocks, and so on until building
+up a complete k-ary hierarchy. The total space is
+O(n log(b)/b) = o(n) bits. The range min-max tree
+permits solving the following kernel operations. Let us
+overload excess(i, j) = excess(j) − excess(i − 1).
+fwd search(i, d): gives the minimum j > i such that
+
+excess(i, j) = d
+
+bwd search(i, d): gives the maximum j < i such that
+
+excess(j, i) = d
+With the kernel operations, we easily implement the
+basic parentheses operations, and also some sophisticated 
+tree operations:
+
+ﬁndclose(x) ≡ fwd search(x, 0)
+ﬁndopen(x) ≡ bwd search(x, 0)
+enclose(x) ≡ bwd search(x, 2)
+
+level ancestor(x, d) ≡ bwd search(x, d + 1)
+
+To solve fwd search(i, d) we ﬁrst scan the block of i
+in constant time using precomputed tables as before. If
+unsuccessful, we climb up the range min-max tree until
+we ﬁnd a min/max excess range that, translated into
+absolute, contains excess(i − 1) + d: At each node, we
+scan the values to the right of the ancestor of i. Once
+the proper range min-max tree node is found, we go
+
+87Copyright © by SIAM. Unauthorized reproduction of this article is prohibited.Downloaded 07/22/18 to 200.9.97.193. Redistribution subject to SIAM license or copyright; see http://www.siam.org/journals/ojsa.phpdown ﬁnding the ﬁrst child that contains the desired
+excess, until reaching the leaf block, which is scanned
+to ﬁnd the exact j value. The process is analogous for
+bwd search.
+
+If n = polylog(w) and k = Θ(w/ log w), then
+there are O(1) levels and the scanning per node can
+be done in constant time using universal tables of
+size o(2w). A constant-time solution for large trees
+using 2n + O(n/polylog(n)) bits is signiﬁcantly more
+complex [27], so we use range min-max trees for all
+cases. As a result, the complexity becomes O(log n) for
+all operations, yet the structure is extremely eﬃcient
+anyway.
+
+Implementation notes. For each block i, we
+store its local minimum m[i] and maximum M [i] excess
+values. Thus −b ≤ m[i] ≤ 1 and −1 ≤ M [i] ≤ b holds
+and they can be stored in ⌈log(b + 2)⌉ bits. Therefore
+the maximum value of b is 254 (216 − 2) if we use one
+byte (two bytes) to store each value. For example, with
+b = 512 the space overhead is 2 × 16 · (2n)/b = 6.25%.
+A superblock consists of k blocks, and we build a
+range min-max tree on superblocks, yet thereafter we
+use a branching factor 2, forming a complete binary
+tree. Storing 32-bit numbers and using, say, k = 32
+and b = 512, the space is 2 × 2 · 32 · (2n)/(bk) ≈ 0.78%
+overhead.
+
+Just as for the other solutions, sequence P is
+scanned by bytes when looking for some target excess
+value. Local excesses are converted into global by
+adding excess at the beginning of blocks/superblocks.
+Since excess(i) = rank((i) − rank)(i) = 2 · rank((i) − i, all
+we need is a particularly eﬃcient rank( at the beginning
+of superblocks. Thus we adapt a rank/select scheme
+similar to the one used for the other representations [23],
+so that the rank structures use blocks aligned with b and
+the scheme requires little space. We store 4-byte global
+sums of big blocks of size 216, 2-byte local sums of blocks
+of size b, and 1-byte sums of blocks of 255 bits. For b =
+512 this is 32·(2n)/216+16·(2n)/b+8·(2n)/255 ≈ 6.31%
+overhead.
+
+3 Succinct Tree Representations.
+3.1 Preorder Balanced Parentheses (BP).
+
+Table 2 shows the way many operations in BP representation 
+are expressed in terms of basic parenthesis operations 
+(we assume the operations can be applied, otherwise 
+an easy check is necessary). Operation child(x, i)
+can be computed in O(i) time by applying ﬁrst child
+and then, repeatedly, next sibling. Operations degree(x)
+and child rank(x) are solved similarly. Similarly, we implement 
+level ancestor(x, d) in O(d) time by successive
+parent operations. There are constant-time theoretical
+
+solutions for these operations [21, 18], but they have not
+been implemented.
+
+lca(x, y) = enclose(rmq(x, y) + 1)
+
+A complex operation that has a practical solution 
+is
+[25].
+Operation rmq(x, y) gives the minimum excess in
+P [x, y], and is implemented in constant time using
+O(n(log log n)2/ log n) = o(n) bits of space on top of
+the excess array [2, 25] (we simulate this excess array
+with operation excess).
+
+Implementation notes. The most practical implementation 
+we know of for rmq [9] requires 62.5% extra 
+space on top of P [1, 2n], and this would put the
+representation out of competition in terms of space requirement.
+ A theoretical, not implemented, alternative
+solution to lca(x, y) is given by operation double-enclose
+[19]. We opt, therefore, by taking parent on the less
+deep node until it becomes an ancestor of the deeper
+one, then this is the lca.
+
+Labeled trees. The labels are stored in preorder 
+in a sequence L[1, n], so that child label(x) =
+L[pre rank (x)] and labeled child(x, s) is solved by a linear 
+scan, just like child(x, i).
+
+3.2 Depth-First Unary Degree
+(DFUDS).
+
+Sequence
+
+Table 2 also shows how to translate many operations
+in DFUDS representation to those on balanced parentheses.
+ We have introduced shorthands prev)(x) ≡
+select)(rank)(x)) and next)(x) ≡ select)(rank)(x) + 1). If
+x is within a sequence of opening parentheses, these operations 
+ﬁnd the preceding and following closing parenthesis,
+ respectively.
+
+There is a theoretical proposal for implementing
+depth and level ancestor in constant time [17], but this
+has not been implemented as far as we know. Again,
+lca(x, y) = parent(rmq(x, y − 1) + 1) can be eﬃciently
+implemented in DFUDS [17], where rmq works over the
+excesses of the DFUDS parentheses sequence.
+(The
+formula needs an easy ﬁx if ancestor (x, y).)
+
+Implementation notes. For the same practical
+reasons related to rmq and the non-implemented theoretical 
+proposals, we implement lca, level ancestor, and
+depth by brute force. For lca this means that we have
+to trace the full path from both nodes towards the root
+using parent, and then ﬁnd the lowest common node.
+
+We solve prev) and next) by directly scanning P
+computer-word-wise, which is preferable to the verbatim
+solution unless the tree has extremely large arities.
+
+Labeled trees. The labels are written in a separate 
+sequence L[1, n] by traversing the tree in prethe 
+symbols by
+order and writing, at each node,
+which its children descend.
+In a labeled tree one
+can assume the children are ordered by their sym88Copyright 
+© by SIAM. Unauthorized reproduction of this article is prohibited.Downloaded 07/22/18 to 200.9.97.193. Redistribution subject to SIAM license or copyright; see http://www.siam.org/journals/ojsa.phpOperation
+pre rank (x)
+pre select(p)
+isleaf (x)
+ancestor (x, y)
+depth(x)
+parent(x)
+ﬁrst child(x)
+next sibling(x)
+subtree size(x)
+degree(x)
+child(x, i)
+child rank(x)
+
+BP
+
+rank((x)
+select((p)
+
+P [x + 1] =′)′
+
+DFUDS
+
+rank)(x − 1) + 1
+select)(p − 1) + 1
+
+P [x] =′)′
+
+x ≤ y ≤ ﬁndclose(x)
+
+x ≤ y ≤ ﬁndclose(enclose(x))
+
+LOUDS
+
+P [x] =′)′
+
+excess(x)
+enclose(x)
+
+x + 1
+
+prev)(ﬁndopen(x − 1)) + 1
+
+prev)(select((rank)(x − 1))) + 1
+
+child(x, 1)
+
+child(x, 1)
+
+ﬁndclose(x) + 1
+
+(ﬁndclose(x)−x+1)/2
+
+ﬁndclose(ﬁndopen(x−1)−1)+1
+(ﬁndclose(enclose(x))−x)/2+1
+
+select)(select((rank)(x−1))+1)+1)
+
+next)(x) − x
+
+next)(x) − x
+
+ﬁndclose(next)(x) − i) + 1
+
+select)(rank((x) + i − 1) + 1
+
+next)(y)−y; y = ﬁndopen(x − 1)
+
+y −prev)(y); y = select((rank)(x−1))
+
+Table 2: Constant-time reduction of tree operations in BP and DFUDS, to operations on balanced parentheses.
+
+bol. Thus to carry out labeled child(x, s) we binary
+search L[rank((x), rank((x) + degree(x) − 1] and ﬁnish 
+with a child(x, i) operation. Also child label(x) =
+L[rank((parent(x)) + child rank(x) − 1]. By sorting
+the children labels of each parent in reverse order we
+save some prev)/next) operations. There is a constanttime 
+theoretical proposal for labeled child [4], not implemented 
+as far as we know.
+
+3.3 Level-Ordered Unary Degree Sequence
+(LOUDS).
+
+The ﬁnal column of Table 2 shows how some operations
+can be solved under LOUDS representation. We assume
+that, just as for DFUDS, a tree node corresponds to the
+ﬁrst position of P where we write its arity in unary. The
+formulas diﬀer slightly from the original version [16],
+but not signiﬁcantly in terms of performance. Again,
+ﬁrst child and next sibling can be expressed in terms of
+the others.
+
+Other operations are not immediately supported.
+We discuss, however, some practical alternatives. To
+begin, rank)/select) provide a usually suﬃcient alternative 
+to pre rank /pre select, as they map the tree nodes
+to consecutive numbers in [1, n]. In most cases the preorder 
+primitives are used not because preorder is particularly 
+relevant, but just for the sake of storing satellite
+information associated to the node identiﬁers in [1, n].
+For this purpose, level-wise numbering is as good as
+preorder.
+
+Although ancestor (x, y) is not supported, there
+is a property of LOUDS that simpliﬁes a brute-force
+implementation:
+if y is deeper than x, then y > x.
+Then, while y > x, we take y ← parent(y). At the
+end, either x = y (in which case the answer is yes) or
+y < x (in which case the answer is no).
+
+This same property permits a lightweight bruteAnother
+
+
+operation
+
+lacks
+
+force implementation of lca(x, y):
+If y > x do y ←
+parent(y); else if x > y do x ← parent(x). Continue
+until x = y, which is the answer.
+that
+
+is
+subtree size(x).
+Since the nodes belonging to the
+subtree of x are contiguous at each level, this can be
+implemented by carrying an interval [y, z] along the levels 
+and counting the number of nodes at each level (with
+rank)(z) − rank)(y − 1) + 1).
+Initially [y, z] ← [x, x].
+For each next level we update y ← child(y, 1) and
+z ← child(z, degree(z)), until z < y.
+
+LOUDS
+
+The other operations, level ancestor and depth, are
+implemented by brute force using parent without any
+special improvements.
+
+Implementation notes. We use the rank/select
+solution requiring 5% of extra space [13]. Several special
+cases are avoided by prepending ’()’ at the beginning of
+P .
+In a previous practical study on LOUDS [7] they
+choose diﬀerently the bit that represents a tree node.
+We found that they require more operations than us and
+than Jacobson [16] (except that they get next sibling
+almost for free) and their space overhead is too high
+(50%-100%).
+
+Labeled trees. These are solved just as for DFUDS
+
+(reversing the order of children is not necessary).
+
+3.4 A Fully-Functional Representation (FF).
+
+The operations in Table 2 are solved as for BP, since the
+parentheses are set in BP order. Furthermore, we have
+shown how to implement operation level ancestor using
+the same primitives fwd search and bwd search, as well
+as several others not considered here [27].
+
+The range min-max tree also solves easily operation
+rmq(x, y), and thus lca(x, y): The area P [x, y] is covered
+by O(k logk(n/b)) (super)blocks, which can be scanned
+in constant time for the minimum excess value. By
+
+89Copyright © by SIAM. Unauthorized reproduction of this article is prohibited.Downloaded 07/22/18 to 200.9.97.193. Redistribution subject to SIAM license or copyright; see http://www.siam.org/journals/ojsa.phpstoring also the number of minima, we can in a similar
+way compute degree(x) (which is the number of excess
+minima in P [x + 1, ﬁndclose(x) − 1]), child(x, i) (which
+is the i-th excess minimum in P [x + 1, ﬁndclose(x) − 1]),
+and child rank(x) (which is the number of excess minima
+in P [parent(x), x − 1]).
+
+Implementation notes. The number of minima
+in each (super)block is stored as described for m[i]
+and M [i], thus using other ≈ 3.52% overhead. Other
+small-space structures can be added to support further
+operations [27].
+
+Labeled trees. We use L[1, n] as for BP. Yet,
+both binary (using child(x, i)) and sequential search are
+possible with the RMM. We test both.
+
+4 Experimental Comparison.
+
+text collections, and (c)
+
+We performed our experiments on trees coming
+from (a) LZ78 parsings of text collections, (b) suﬃx
+the tag structrees 
+of
+ture of XML collections.
+For cases (a) and (b)
+we used 200 MB and 50 MB (respectively) preﬁxes 
+of the the DNA, protein and XML texts from
+the Pizza&Chili corpus
+(http://pizzachili.dcc.
+uchile.cl).
+The resulting trees have 16,373,737,
+30,080,186, and 11,775,736 nodes respectively for case
+(a), whereas for (b) they have 75,095,011, 72,396,959
+and 70,723,755 nodes. For case (c), we used an XMark
+[28] document of about 558 MB, a Medline document
+(ftp://ftp.cogsi.ed.ac.uk/pub/disp/OHSXML.tar.
+gz) of about 380 MB, and the XML text form
+Pizza&Chili, of 200 MB. The resulting DOM tree
+structures have 14, 238, 042, 3, 966, 917, and 9,560,024
+nodes, respectively.
+
+We tested the performance of the tree operations by
+emulating random root-to-leaf traversals of trees (root
+itself excluded), where in addition every other child of
+the current node in the path is visited with a given
+probability p. We retain the order in which such nodes
+are visited, so p = 0.0 corresponds to a pure random
+root-to-leaf traversal, 0 < p < 1 simulates rangeor
+
+approximate-search traversals, and p = 1 simulates a
+full traversal of the tree. The general behavior is quite
+similar within each class of trees (a), (b) and (c), so for
+LZ78 we only show the case of DNA text (and later,
+once, proteins), while for suﬃx trees we only show the
+case of proteins, and for XML the XMark document.
+Table 3 gives some of their characteristics.
+
+In general, as p grows, a higher proportion of small
+and nearby subtrees are visited. This translates into
+more close matching parentheses and more cache hits
+in BP and DFUDS. As closer parentheses are found
+faster in both schemes, such structures become faster
+as p grows. LOUDS, instead, is generally insensitive to
+
+LZ78
+DNA
+
+LZ78
+
+Protein
+
+S. tree
+Protein
+
+XML
+XMark
+
+16, 373, 737 30, 080, 186 72, 396, 959 14, 238, 042
+
+64
+
+14.21
+
+16
+2.01
+
+126
+7.79
+
+25
+2.63
+
+173
+11.15
+
+26
+2.90
+
+14
+7.76
+
+127,500
+
+2.11
+
+Size
+Height
+Avg. leaf
+depth
+Max.arity
+Avg.arity
+
+Table 3: Basic characteristics of the trees tested.
+
+the subtree sizes, as it proceeds levelwise (indeed, it is
+slightly slower on deeper levels, as the parent/children
+are farther away).
+
+The computer used features an Intel(R) Core(TM)2
+Duo processor at 3.16 GHz, with 8 GB of main memory
+and 6 MB of cache, running version 2.6.24-24 of Linux
+kernel.
+
+We ﬁrst measure the times of the core operations,
+which allow predicting the performance of many operations 
+in Table 2. Some speciﬁc tree operations are
+studied later.
+
+4.1 Core Operations.
+
+Figure 1 shows the space/time tradeoﬀs achieved for
+the core parenthesis and bitmap operations, for the
+cases p = 0.0 and p = 0.2. The times are averaged
+over at least 20,000 nodes (for p = 0.0), and up to
+20 million for larger p values. We show the times for
+ﬁndclose and enclose. For the RP representation we
+use block sizes b = 32, 64, 128, 256, 512. For HB we use
+block sizes b = 128, 256, 512, 1024, 2048. For the RMM
+representation we set b = 512 and k = 8, 16, 32, 64, 128
+(other values of b did not yield better results). These
+combinations yield the observed space/time tradeoﬀs.
+
+Modiﬁer “DFUDS” means that the parentheses
+sequence used is that of DFUDS rather than BP. RPDFUDS 
+was very close to RP, which is clearly the worst
+performer as we comment soon, so we omitted it to
+lighten the plots. On XMark, BP-DFUDS needs more
+than 9 bits per node and thus it does not appear in the
+XML plots. We also omitted RMM-DFUDS from all
+these plots as it was indistinguishable from RMM.
+
+We also show the time for rank and select, which
+oﬀers its own space/time tradeoﬀ (with the same space
+one solves both) and prev)/next), which is drawn as a
+line because it uses brute force and hence does not need
+any extra space. Operations prev)/next) were tested
+over the nodes traversed in the DFUDS sequence (which
+is equivalent to having chosen LOUDS), as these are the
+representations where such operations are applied.
+
+The times for ﬁndopen are similar to those for
+ﬁndclose on BP. On DFUDS, instead, they are asym-
+metric: ﬁndclose(x) is usually faster as it returns a typ90Copyright 
+© by SIAM. Unauthorized reproduction of this article is prohibited.Downloaded 07/22/18 to 200.9.97.193. Redistribution subject to SIAM license or copyright; see http://www.siam.org/journals/ojsa.php)
+s
+d
+n
+o
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+n
+o
+
+i
+t
+
+a
+r
+e
+p
+o
+
+ 
+r
+e
+p
+
+ 
+
+e
+m
+T
+
+i
+
+)
+s
+d
+n
+o
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+n
+o
+
+i
+t
+
+a
+r
+e
+p
+o
+
+ 
+
+ 
+r
+e
+p
+e
+m
+T
+
+i
+
+LZ78 parsing, DNA, p=0.0
+
+LZ78 parsing, DNA, p=0.2
+
+findclose RMM
+findclose HB
+findclose HB-DFUDS
+findclose RP
+enclose RMM
+enclose HB
+enclose HB-DFUDS
+enclose RP
+rank
+select
+prev)/next)
+
+ 4
+
+ 3.5
+
+ 3
+
+ 2.5
+
+ 2
+
+ 1.5
+
+ 1
+
+ 0.5
+
+findclose RMM
+findclose HB
+findclose HB-DFUDS
+findclose RP
+enclose RMM
+enclose HB
+enclose HB-DFUDS
+enclose RP
+rank
+select
+prev)/next)
+
+ 4
+
+ 3.5
+
+ 3
+
+ 2.5
+
+ 2
+
+ 1.5
+
+ 1
+
+ 0.5
+
+)
+s
+d
+n
+o
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+n
+o
+
+i
+t
+
+a
+r
+e
+p
+o
+
+ 
+r
+e
+p
+
+ 
+
+e
+m
+T
+
+i
+
+ 0
+
+ 2
+
+ 2.5
+
+ 3
+
+ 3.5
+
+Bits per node
+
+Suffix tree, protein, p=0.0
+
+ 4
+
+ 4.5
+
+ 0
+
+ 2
+
+ 2.5
+
+ 3
+
+ 3.5
+
+Bits per node
+
+Suffix tree, protein, p=0.2
+
+ 4
+
+ 4.5
+
+findclose RMM
+findclose HB
+findclose HB-DFUDS
+findclose RP
+enclose RMM
+enclose HB
+enclose HB-DFUDS
+enclose RP
+rank
+select
+prev)/next)
+
+ 4
+
+ 3.5
+
+ 3
+
+ 2.5
+
+ 2
+
+ 1.5
+
+ 1
+
+ 0.5
+
+findclose RMM
+findclose HB
+findclose HB-DFUDS
+findclose RP
+enclose RMM
+enclose HB
+enclose HB-DFUDS
+enclose RP
+rank
+select
+prev)/next)
+
+ 4
+
+ 3.5
+
+ 3
+
+ 2.5
+
+ 2
+
+ 1.5
+
+ 1
+
+ 0.5
+
+)
+s
+d
+n
+o
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+n
+o
+
+i
+t
+
+a
+r
+e
+p
+o
+
+ 
+
+ 
+r
+e
+p
+e
+m
+T
+
+i
+
+ 0
+
+ 2
+
+ 2.5
+
+ 3
+
+ 3.5
+
+Bits per node
+
+XML tree, XMark, p=0.0
+
+ 4
+
+ 4.5
+
+ 0
+
+ 2
+
+ 2.5
+
+ 3
+
+ 3.5
+
+Bits per node
+
+XML tree, XMark, p=0.2
+
+ 4
+
+ 4.5
+
+)
+s
+d
+n
+o
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+n
+o
+
+i
+t
+
+a
+r
+e
+p
+o
+
+ 
+r
+e
+p
+
+ 
+
+e
+m
+T
+
+i
+
+findclose RMM
+findclose HB
+findclose HB-DFUDS
+findclose RP
+enclose RMM
+enclose HB
+enclose HB-DFUDS
+enclose RP
+rank
+select
+prev)/next)
+
+ 4
+
+ 3.5
+
+ 3
+
+ 2.5
+
+ 2
+
+ 1.5
+
+ 1
+
+ 0.5
+
+findclose RMM
+findclose HB
+findclose HB-DFUDS
+findclose RP
+enclose RMM
+enclose HB
+enclose HB-DFUDS
+enclose RP
+rank
+select
+prev)/next)
+
+ 4
+
+ 3.5
+
+ 3
+
+ 2.5
+
+ 2
+
+ 1.5
+
+ 1
+
+ 0.5
+
+)
+s
+d
+n
+o
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+n
+o
+
+i
+t
+
+a
+r
+e
+p
+o
+
+ 
+r
+e
+p
+
+ 
+
+e
+m
+T
+
+i
+
+ 0
+
+ 2
+
+ 2.5
+
+ 3
+
+ 3.5
+
+Bits per node
+
+ 4
+
+ 4.5
+
+ 0
+
+ 2
+
+ 2.5
+
+ 3
+
+ 3.5
+
+Bits per node
+
+ 4
+
+ 4.5
+
+Figure 1: Space/time for the core operations on parenthesis structures, for p = 0.0 (left) and p = 0.2 (right).
+
+91Copyright © by SIAM. Unauthorized reproduction of this article is prohibited.Downloaded 07/22/18 to 200.9.97.193. Redistribution subject to SIAM license or copyright; see http://www.siam.org/journals/ojsa.phpically closer node. Yet, the operations ﬁndopen(x − 1)
+of Table 2 have a cost very similar to enclose(x) (which
+usually returns ﬁndopen(x − 1) − 1).
+
+Clearly RMM (and RMM-DFUDS) is in general
+the best performer, both in space and time. HB is
+generally able of approaching its time, yet the space
+required by HB varies widely depending on the tree
+shape. On DNA, where the arity is low, HB can improve
+upon RMM in space, while being competitive in time
+(at least for ﬁndclose).
+In proteins, where the arity
+is larger, many parentheses become far (especially for
+enclose) and the space of HB cannot anymore reach
+that of RMM. The eﬀect is dramatic on XMark, where
+the arity is much higher and HB is unable of operating
+with less than 100% space overhead over the 2n bits.
+In the DFUDS variants of HB the parentheses tend
+to be farther than on BP, thus HB-DFUDS requires
+more space than HB(-BP). In XMark, HB-DFUDS has
+a space overhead of more than 450%.
+
+This shows that the lack of space guarantees of HB
+is indeed a problem in practice, and emphasizes the
+importance of oﬀering such guarantees in fundamental
+data structures, where one can hardly predict the type
+of instances that will be faced.
+
+The time performance of RP is clearly the worst.
+RP is aﬀected by the operations on the compressed
+bitmap, which in practice pose a signiﬁcant time overhead,
+ as well as space redundancy over the entropy. This
+is illustrated, in particular, by the fact that, on ﬁndclose
+for p > 0, where many small subtrees are handled, RP in
+many cases worsens in time when using more space. The
+reason is that, when the answer is not too far away, it is
+better to ﬁnd it sequentially through sparser blocks than
+to use the heavy machinery of the compressed bitmaps.
+Finally, note that the extra space for rank/select
+is the only one required by LOUDS, and that it works
+well within just 2% of extra space. This means that,
+within the small set of operations it supports, LOUDS
+is competitive in time and better in space than RMM.
+Note in particular that select may worsen when using
+more space. This is because the binary search is done
+over a denser (and larger) set of samples, whose impact
+on the locality is not recovered by scanning a shorter
+segment of the bitmap (as this scan is cache-friendly).
+Figure 2 shows the extreme case of p = 1.0, which
+simulates a full tree traversal. Here most of the extra
+structures are useless, as the majority of the operations
+are carried out on very small trees, where they are
+easily solved by brute force.
+In this case LOUDS
+representation (that is, rank/select) is not that fast
+compared to the others, as this kind of locality does
+not show up in its levelwise traversal.
+
+LZ78 parsing, DNA, p=1.0
+
+findclose RMM
+findclose HB
+findclose HB-DFUDS
+findclose RP
+enclose RMM
+enclose HB
+enclose HB-DFUDS
+enclose RP
+rank
+select
+prev)/next)
+
+ 2.5
+
+ 3
+
+ 3.5
+
+Bits per node
+
+Suffix tree, protein, p=1.0
+
+ 4
+
+ 4.5
+
+findclose RMM
+findclose HB
+findclose HB-DFUDS
+findclose RP
+enclose RMM
+enclose HB
+enclose HB-DFUDS
+enclose RP
+rank
+select
+prev)/next)
+
+ 1
+
+ 0.8
+
+ 0.6
+
+ 0.4
+
+ 0.2
+
+ 0
+
+ 2
+
+ 2
+
+ 1.5
+
+ 1
+
+ 0.5
+
+)
+s
+d
+n
+o
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+n
+o
+
+i
+t
+
+a
+r
+e
+p
+o
+
+ 
+r
+e
+p
+
+ 
+
+e
+m
+T
+
+i
+
+)
+s
+d
+n
+o
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+n
+o
+
+i
+t
+
+a
+r
+e
+p
+o
+
+ 
+
+ 
+r
+e
+p
+e
+m
+T
+
+i
+
+ 0
+
+ 2
+
+ 2.5
+
+ 3
+
+ 3.5
+
+Bits per node
+
+XML tree, XMark, p=1.0
+
+ 4
+
+ 4.5
+
+findclose RMM
+findclose HB
+findclose HB-DFUDS
+findclose RP
+enclose RMM
+enclose HB
+enclose HB-DFUDS
+enclose RP
+rank
+select
+prev)/next)
+
+ 1
+
+ 0.8
+
+ 0.6
+
+ 0.4
+
+ 0.2
+
+)
+s
+d
+n
+o
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+n
+o
+
+i
+t
+
+a
+r
+e
+p
+o
+
+ 
+r
+e
+p
+
+ 
+
+e
+m
+T
+
+i
+
+ 0
+
+ 2
+
+ 2.5
+
+ 3
+
+ 3.5
+
+Bits per node
+
+ 4
+
+ 4.5
+
+Figure 2: Space/time for the core operations on parenthesis 
+structures, for p = 1.0.
+
+92Copyright © by SIAM. Unauthorized reproduction of this article is prohibited.Downloaded 07/22/18 to 200.9.97.193. Redistribution subject to SIAM license or copyright; see http://www.siam.org/journals/ojsa.phpRepres.
+
+Params. LZ78
+
+LZ78
+
+DNA Protein
+2.37
+
+2.37
+
+S. tree
+Protein XMark
+
+XML
+
+2.38
+
+2.37
+
+FF-BP and
+FF-DFUDS
+HB-BP
+HB-DFUDS
+RP-BP
+LOUDS
+
+b = 512,
+k = 32
+b = 512
+b = 512
+b = 64
+s = 640
+
+2.58
+3.35
+3.45
+2.10
+
+2.75
+4.17
+3.33
+2.10
+
+3.22
+4.84
+3.36
+2.10
+
+3.97
+9.52
+3.29
+2.10
+
+Table 4: Default space usage for the representations in
+Section 4.2.
+
+4.2 Tree Operations.
+
+labeled child(x, s),
+
+We tested several operations, a few to show that their
+times can be predicted with those of the core operations,
+and most because they are harder to predict: parent(x),
+child(x, i),
+level ancestor(x, d), and
+lca(x, y). We choose one representative tree for each
+operation, as the conclusions are roughly the same for
+the others. Except for lca(x, y), we chose one reasonable
+space/time point per structure. These choices are given
+in Table 4 (recall that FF-* corresponds to RMM).
+
+Figure 3 gives the times for operation parent(x) on
+the suﬃx tree for proteins. We use the same sampling
+method (i.e., via tree traversals) of the core operations,
+with varying p. As in these, we average the times
+over at least 20,000 nodes. FF-BP outperforms the
+other alternatives except for p = 0.0, where LOUDS
+is faster. For higher p (where more smaller subtrees
+are chosen) LOUDS does not beneﬁt from locality, as
+explained. The diﬀerence between HB-DFUDS and HBBP 
+is small, and can be attributed to the extra prev)
+operation. The diﬀerence between FF-DFUDS and FFBP 
+is larger.
+
+)
+s
+d
+n
+o
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+n
+o
+
+i
+t
+a
+r
+e
+p
+o
+ 
+r
+e
+p
+ 
+e
+m
+T
+
+i
+
+ 3.5
+
+ 3
+
+ 2.5
+
+ 2
+
+ 1.5
+
+ 1
+
+ 0.5
+
+ 0
+
+ 0
+
+Suffix tree, protein, Parent
+
+FF-BP
+HB-BP
+RP-BP
+FF-DFUDS
+HB-DFUDS
+LOUDS
+
+ 0.2
+
+ 0.4
+
+ 0.6
+
+ 0.8
+
+ 1
+
+Probability p
+
+Figure 3: Performance for operation parent(x) as a
+function of p.
+
+Figure 4 shows the times for operation child(x, i)
+
+on the suﬃx tree of proteins, for 1 ≤ i ≤ 5. We
+choose nodes from the same traversal done for p = 0.0
+on the core operations, keeping all nodes with degree
+at least 5. This gives us a sampling of 14,000 nodes
+to average over. This time we have also included the
+times over a pointer-based uncompressed tree, which
+will be discussed in Section 4.4. That time is essentially
+that of a single memory access, and is close to the time
+of ﬁrst child(x) = child(x, 1) on BP representations.
+For larger i, as HB-BP and RP-BP operate by brute
+force, they are essentially O(i), though with diﬀerent
+constants (related to their time to carry out ﬁndclose).
+LOUDS is clearly O(1) for this operation, and faster
+than all the others except for the trivial case i = 1
+(which, on the other hand, is the dominant case on
+various common traversals). HB-DFUDS is also O(1)
+in theory (as it always needs one ﬁndclose operation),
+yet it is faster for smaller i values because the answer
+is closer in those cases. The time of FF-DFUDS is in
+practice logarithmic on the distance of the answer, as
+it climbs the range-min-max tree. FF-BP uses its own
+algorithm for child, and its time is also logarithmic on
+the distance of the answer (and thus very similar to
+FF-DFUDS). This explains the slow growth of these
+alternatives. All the three also get closer to LOUDS for
+larger p (this plot is for p = 0.0, as explained), ﬁnally
+surpassing it around p = 0.6.
+
+)
+s
+d
+n
+o
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+n
+o
+
+i
+t
+
+a
+r
+e
+p
+o
+
+ 
+
+ 
+r
+e
+p
+e
+m
+T
+
+i
+
+ 5
+
+ 4.5
+
+ 4
+
+ 3.5
+
+ 3
+
+ 2.5
+
+ 2
+
+ 1.5
+
+ 1
+
+ 0.5
+
+ 0
+
+ 1
+
+Suffix tree, protein, Child(i)
+
+FF-BP
+HB-BP
+RP-BP
+FF-DFUDS
+HB-DFUDS
+LOUDS
+Uncompressed Tree
+
+ 2
+
+ 3
+
+parameter i
+
+ 4
+
+ 5
+
+Figure 4: Performance for operation child(x, i) as a
+function of i.
+
+Figure 5 illustrates the performance for operation
+labeled child(x, s) on the LZ78 parsing of proteins. We
+use exactly the same method of sampling nodes of
+child(x, i), and also plot the times as a function of i,
+so this time the argument s is the one resulting in
+descending to the i-th child. This is an operation where
+LOUDS excells, DFUDS does well, and FF-BP falls far
+
+93Copyright © by SIAM. Unauthorized reproduction of this article is prohibited.Downloaded 07/22/18 to 200.9.97.193. Redistribution subject to SIAM license or copyright; see http://www.siam.org/journals/ojsa.phpbehind. The binary search of LOUDS and DFUDS is
+done directly over a range in L, which makes them
+very fast, much faster than the linear searches of BP
+alternatives (still DFUDS and LOUDS need to ﬁnish
+with one child(x, i) operation after ﬁnding i). The time
+diﬀerences among LOUDS and DFUDS alternatives are
+lower than for child(x, i) because all must carry out
+the same binary search. On the other hand, the linear
+times of the BP alternatives are slightly costlier than
+for child(x, i) because, although they probe the same
+nodes, they must carry out one further rank operation
+per node to ﬁnd the letter in L. They are only faster
+in the lucky case of s labeling the ﬁrst child. Finally,
+FF-BP is surprisingly slow. Although it carries out
+a binary search, this search is not local and requires
+various child(x, i) operations, which renders it slower
+than some linear searches in practice. Indeed, it is much
+better to linearly scan for the i-th child using ﬁndclose,
+as illustrated by FF-Seq-BP, which is the fastest among
+the O(i) methods.
+
+LZ78 parsing, protein, labeled child
+
+)
+s
+d
+n
+o
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+n
+o
+
+i
+t
+
+a
+r
+e
+p
+o
+
+ 
+
+ 
+r
+e
+p
+e
+m
+T
+
+i
+
+FF-BP
+FF-Seq-BP
+HB-BP
+RP-BP
+FF-DFUDS
+HB-DFUDS
+LOUDS
+
+ 6
+
+ 5
+
+ 4
+
+ 3
+
+ 2
+
+ 1
+
+ 0
+
+ 1
+
+ 2
+
+ 3
+
+ 4
+
+ 5
+
+position of the labeled child
+
+Figure 5: Performance for operation labeled child(x, s)
+as a function of i, the position of the resulting child.
+
+Figure 6 compares the performance for operation
+level ancestor(x, d) on the LZ78 tree of DNA, for 1 ≤
+d ≤ 5. We choose all the nodes from the sampling of
+core operations corresponding to p = 0.0, and keep the
+nodes with depth at least 5. This leaves us 2,000 nodes
+to average over. Here all the techniques except FF-BP
+use brute force (note FF-DFUDS cannot beneﬁt from
+the FF-BP algorithm, as excesses do not correspond
+to depths in DFUDS). The times, consequently, are
+basically linear, except for FF-BP, whose algorithm
+based on operation bwd search is logarithmic in the
+distance to the answer. This dominates all the other
+costs and shows its practicality. Note the times are
+about 50% faster than the corresponding to parent(x)
+
+on the suﬃx tree of proteins, as these nodes have fewer
+children and hence their parents are closer.
+
+LZ78 parsing, DNA, Level Ancestor(d)
+
+)
+s
+d
+n
+o
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+n
+o
+
+i
+t
+
+a
+r
+e
+p
+o
+ 
+r
+e
+p
+
+ 
+
+e
+m
+T
+
+i
+
+ 10
+
+ 9
+
+ 8
+
+ 7
+
+ 6
+
+ 5
+
+ 4
+
+ 3
+
+ 2
+
+ 1
+
+ 0
+
+FF-BP
+HB-BP
+RP-BP
+FF-DFUDS
+HB-DFUDS
+LOUDS
+
+ 1
+
+ 2
+
+ 3
+
+parameter d
+
+ 4
+
+ 5
+
+Figure 6: Performance for operation level ancestor(x, d)
+as a function of d.
+
+Finally, Figure 7 shows operation lca(x, y) on
+XMark, for diﬀerent memory usage of the structures.
+This time we simply chose 100,000 pairs of tree nodes at
+random. This operation is implemented by brute force
+on all representations except FF-BP and FF-DFUDS,
+which provide a native solution to lca. It can be seen
+that FF and LOUDS (with its lightweight brute-force
+algorithm) sharply dominate the space/time tradeoﬀ.
+FF-DFUDS is slightly slower than FF-BP because it
+needs an extra check that invokes an ancestor query.
+Using the RMQ-based solution for the other alternatives 
+would achieve competitive times (0.9 microseconds
+according to a simple experiment we carried out), yet it
+would require including the extra constant-time RMQ
+structure [9], which adds 6.12n bits to the already large
+HB and RP representations.
+
+4.3 Asymptotics.
+
+Our experiments have considered ﬁxed trees. While all
+the operations are in theory constant-time, in practice
+the implementation of select is O(log n), as well as
+our FF operations1. Furthermore, cache eﬀects can
+signiﬁcantly aﬀect the performance. Thus, one may
+wonder how the tree size n aﬀects the results given.
+
+Figure 8 shows the times for operations ﬁndclose
+and enclose as a function of the tree size n. For this sake,
+we created random binary trees of increasing size, from
+50 to 350 million nodes, and tried the BP alternatives
+
+1While the theoretical article [27] achieves constant time, our
+FF implementation builds solely on the RMM, which seems much
+more practical but requires time logarithmic on the tree size.
+
+94Copyright © by SIAM. Unauthorized reproduction of this article is prohibited.Downloaded 07/22/18 to 200.9.97.193. Redistribution subject to SIAM license or copyright; see http://www.siam.org/journals/ojsa.php)
+s
+d
+n
+o
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+n
+o
+
+i
+t
+
+a
+r
+e
+p
+o
+ 
+r
+e
+p
+
+ 
+
+e
+m
+T
+
+i
+
+ 35
+
+ 30
+
+ 25
+
+ 20
+
+ 15
+
+ 10
+
+ 5
+
+ 0
+
+XML tree - XMark, Lca
+
+FF-BP
+HB-BP
+RP-BP
+FF-DFUDS
+HB-DFUDS
+LOUDS
+
+ 2
+
+ 3
+
+ 4
+
+ 5
+
+ 6
+ 7
+Bit per node
+
+ 8
+
+ 9
+
+ 10
+
+ 11
+
+Figure 7: Performance for operation lca(x, y) as a
+function of the space usage.
+
+on them. We maintained the space usage parameters
+of Table 4, obtaining 2.37–2.38 bits per node for RMM,
+2.62–2.99 for HB, and 3.68–3.74 for RP. The nodes to
+operate are collected over 100,000 random root-to-leaf
+traversals (akin to p = 0.0 above).
+
+)
+s
+d
+n
+o
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+n
+o
+
+i
+t
+
+a
+r
+e
+p
+o
+
+ 
+
+ 
+r
+e
+p
+e
+m
+T
+
+i
+
+ 4
+
+ 3.5
+
+ 3
+
+ 2.5
+
+ 2
+
+ 1.5
+
+ 1
+
+ 0.5
+
+ 0
+
+ 50
+
+Random Binary Tree
+
+findclose RMM
+findclose HB
+findclose RP
+enclose RMM
+enclose HB
+enclose RP
+
+ 100
+
+ 150
+
+ 200
+
+ 250
+
+ 300
+
+ 350
+
+number of nodes (millions)
+
+Figure 8: Performance as a function of the tree size, for
+random binary trees.
+
+As it can be seen, apart from some oscillations,
+there is no any clear increase in the time as we handle
+larger trees. This is due in part to the fact that many
+operations (most clearly those of RMM) depend not on
+the total tree size, but on the distance between the query
+and the answer node, and this average distance varies
+very mildly on n even for the traversal with p = 0.0.
+
+This result conﬁrms the scalability of the solutions
+and the stability of our results on larger trees. Note in
+passing that ﬁndclose(x) is slower than enclose(x) on
+
+binary trees, as half the times the answer of the latter
+is simply x − 1.
+
+4.4 Non-Succinct Tree Representations.
+
+A natural question is how the times we have shown
+(usually below the microsecond per operation, for the
+best performing structures) compare to a plain pointerbased 
+tree representation. For this sake, we set up such
+a tree, where each node has a pointer to an array of
+its children. This allows one to implement child(x, i)
+using just one memory access. This takes around 18–
+31 nanoseconds in our machine and is illustrated in
+Figure 4.
+
+This means that an uncompressed tree, in the cases
+where it can actually ﬁt in main memory,
+is about
+12–20 times faster than LOUDS, our best compressed
+representation for this operation. If we consider all the
+operations, and take FF-BP as the alternative (as it
+gives the widest support), we have that in most cases
+the time of FF-BP is within half a microsecond (30
+times slower than the single memory access needed by
+the uncompressed representation) and for some complex
+operations, up to 2 microseconds (120 times slower).
+
+Still, it is important to illustrate in numeric terms
+what it means to be succinct or plain, especially when
+we need more functionality than moving to a child. A
+plain representation on a 32-bit machine spends 32 bits
+per node (that is, 13 times more than FF-BP and 15
+more than LOUDS), if we arrange the tree in levelwise
+order on an array, and the cell of each node points to
+the cell of its ﬁrst child. This arrangement supports
+eﬃciently the most basic navigation:
+child, degree,
+isleaf , ﬁrst child, and next sibling. However, each other
+operation we wish to support eﬃciently requires another
+integer: parent, depth, subtree size, pre rank , etc. Thus,
+just supporting these four operations we would require
+160 bits per node. The more functionality we wish to
+support, the less likely is that the pointer-based tree will
+ﬁt in main memory, in applications managing massive
+trees. In contrast, the powerful FF-BP representation
+supports all those operations within the same space (less
+than 2.4 bits per node).
+
+The more sophisticated operations,
+
+like lca and
+level ancestor, deserve a special mention. They can be
+solved within O(n)-word space and O(1) time, but they
+require several (not just 1) further integers per node.
+Worse than that, they require several memory accesses.
+For example, the classical lca algorithm [2] requires 7
+extra integers (224 bits) per node and 12 non-local
+memory accesses. Thus its expected time is around 0.2–
+0.4 microseconds, whereas FF-BP solves lca within the
+microsecond (just up to 5 times slower) and the same
+2.4 bits per node.
+
+95Copyright © by SIAM. Unauthorized reproduction of this article is prohibited.Downloaded 07/22/18 to 200.9.97.193. Redistribution subject to SIAM license or copyright; see http://www.siam.org/journals/ojsa.phpRepres.
+
+gaps
+γ-code
+real γ
+
+LZ78
+
+LZ78
+DNA Protein
+1.62
+2.24
+3.43
+
+1.46
+1.92
+2.72
+
+S. tree
+XML
+Protein XMark
+
+1.36
+1.72
+2.44
+
+1.59
+2.18
+2.90
+
+Table 5: Space usage for the larger representations with
+minimum functionality. Only the last column is a real
+encoding scheme.
+
+On the other hand, there are intermediate tree
+representations [16, 5, 14] which, although do not
+guarantee 2n + o(n) bits of space usage (only O(n)
+bits in general), oﬀer a relevant tradeoﬀ in practice.
+Translated into a general tree representation, they
+usually boil down to a scheme as follows: Arrange the
+nodes of the tree on an array T [1, n] by performing a
+preorder traversal. The cell of each node stores where
+is its next sibling. Unlike our previous uncompressed
+scheme, akin to a LOUDS layout, this resembles more
+BP: we immediately have ﬁrst child(i) = i + 1 and
+next sibling(i) = T [i] (yet, as before, we lack most of
+the other operations unless we pay for the space of
+storing the answers explicitly). By storing the pointers
+in relative form and using a variable-length encoding,
+compression is possible since most of the subtrees are
+small. The value of the relative pointer from node x to
+its next sibling will be just subtree size(x).
+
+To measure the practical performance of this idea,
+we computed Px∈T ⌈log(subtree size(x) + 1)⌉ on our
+trees, which gives a lower bound to the size that can be
+achieved by this technique. It is shown in the ﬁrst line
+of Table 5. It is a lower bound because (i) storing the
+exact number of bits the number needs is not possible (a
+representation like, say, γ-encoding, is necessary); and
+(ii) since a variable-length code is used, the pointers
+must point to bit oﬀsets, not to cell numbers of T .
+
+The second row of Table 5 addresses problem 
+(i) using γ-codes, which gave us good results.
+
+It shows the value Px∈T |γ(subtree size(x))| =
+Px∈T (2⌈log(subtree size(x) + 1)⌉ − 1). The last line of
+the table addresses problem (ii), only now reaching a
+real solution to the problem. It γ-encodes not the subtree 
+size of x, but the length of the representation of
+the subtree of x (which recursively uses γ-codes, a leaf
+using |γ(1)| = 1 bit). One adds this value to the pointer
+to x and reaches the bit-oﬀset of its next sibling.
+
+As it can be seen, these representations are spaceeﬃcient 
+in practice, competing with our 2.4n-bit representations,
+ and possibly being very fast for operations
+ﬁrst child, next sibling, and isleaf , that is, for a full tree
+traversal. Yet, as we have seen in Figure 2, one can
+do pretty well with the plain 2n parentheses for such
+
+traversal. Still, assuming that next sibling will be signiﬁcantly 
+faster by decoding a γ-code, the representation 
+oﬀers a rather limited repertoire of operations. By
+somehow mixing ﬁxedand 
+varying-length representations 
+one could include child and degree, at some price
+in space. Yet, as before, each further operation to support 
+requires storing extra data that is already included
+in our 2.4n-bit representations (and many are also included 
+in our 2.1n-bit LOUDS format).
+
+This shows that the key advantage in the modern
+succinct tree representations is not their 2.x-bit space
+usage, as this is not that diﬃcult to achieve. The
+key advantage is the wide functionality these succinct
+representations support within this space.
+
+5 Conclusions.
+
+We have carried out a rather exhaustive comparison
+of the best techniques to represent general trees of n
+nodes in little space. We focused on the most succinct
+schemes, which use 2n + o(n) bits.
+It turns out that
+the recent so-called fully-functional (FF) representation
+[27] oﬀers an excellent combination of space usage,
+time performance, and functionality.
+It implements a
+large set of simple and sophisticated operations, and
+in most cases it outperforms all the other structures
+in time and space. For example, with less than 20%
+overhead over the minimum 2n bits of space, it carries
+out all the operations within the microsecond (up to
+2 microseconds for a few of them).
+Indeed, we have
+recently used FF representation successfully for an
+application managing large XML databases in main
+memory while supporting fast XPath operations [1].
+
+In some applications requiring limited functionality,
+other structures are of interest. LOUDS can implement
+a more reduced set of navigation operations using just
+5% extra space (and even 2%, at a small price in time)
+over the 2n bits. Within that little space, LOUDS is
+very competitive in time, being the fastest choice in
+several cases. This is particularly noticeably on largearity 
+trees and on random root-to-leaf traversals, while
+the other schemes tend to perform better on lower arities
+or when many nearby nodes have to be processed (in
+particular, for full traversals).
+
+A case where LOUDS excells and FF falls far behind
+is for descending to a child given its label. Here
+DFUDS is a good alternative, only somewhat slower
+than LOUDS. Although DFUDS variants are usually
+a bit slower than their BP counterparts, FF-DFUDS
+can be a reasonable compromise when this labeled-child
+operation is important and full functionality is desired.
+It requires the same space of FF(-BP).
+
+We believe in particular that LOUDS representation 
+has not been suﬃciently studied in the litera96Copyright 
+© by SIAM. Unauthorized reproduction of this article is prohibited.Downloaded 07/22/18 to 200.9.97.193. Redistribution subject to SIAM license or copyright; see http://www.siam.org/journals/ojsa.phpture because it lacks support for some sophisticated
+operations, even if it oﬀers a very attractive solution
+for the simplest (and most common) navigation operations.
+ These are already richer than the minimal set
+of downward-traversal operations that “classical” compressed 
+representations based on variable-length encoding 
+oﬀer. In this paper we have introduced novel practical 
+solutions for several sophisticated operations, which
+turn out to be surprisingly competitive (others, such as
+computing the subtree size, are still relatively too slow).
+We believe that even more could be done.
+
+An important topic of future work is to achieve
+practical succinct dynamic tree representations, where
+nodes can be added to and deleted from the tree.
+In
+this aspect even the theoretical proposals are lacking.
+The FF representation admits a simple and practical
+dynamic implementation with O(log n) time for all the
+operations, and a more complex theoretical one reaching
+the lower bound O(log n/ log log n) [26].
+
+Our implementations have been left public in Google
+Code, extending the current libcds library, to foster
+their use in diverse applications and their comparison
+to other practical proposals to come.
+
+References
+
+[1] D. Arroyuelo, F. Claude, S. Maneth, V. M¨akinen,
+G. Navarro, K. Nguy˜ˆen, J. Sir´en, and N. V¨alim¨aki.
+Fast in-memory XPath search over compressed text
+and tree indexes.
+In Proc. 26th ICDE, 2010. To
+appear.
+
+[2] M. Bender and M. Farach-Colton. The LCA problem
+revisited. In Proc. 4th LATIN, LNCS 1776, pages 88–
+94, 2000.
+
+[3] M. Bender and M. Farach-Colton. The level ancestor
+problem simpliﬁed. Theoretical Computer Science,
+321(1):5–12, 2004.
+
+[4] D. Benoit, E. Demaine, I. Munro, R. Raman, V. Raman,
+ and S. Rao. Representing trees of higher degree.
+Algorithmica, 43(4):275–292, 2005.
+
+[5] D. Blandford, G. Blelloch, and I. Kash. An experimental 
+analysis of a compact graph representation. In
+Proc. 6th ALENEX, pages 49–61, 2004.
+
+[6] F. Claude and G. Navarro. Practical rank/select
+queries over arbitrary sequences. In Proc. 15th SPIRE,
+LNCS 5280, pages 176–187, 2008.
+
+[7] O. Delpratt, N. Rahman, and R. Raman. Engineering
+the LOUDS succinct tree representation. In Proc. 5th
+WEA, pages 134–145. LNCS 4007, 2006.
+
+[8] A. Farzan and J. I. Munro. A uniform approach
+towards succinct representation of trees. In Proc. 11th
+SWAT, LNCS 5124, pages 173–184, 2008.
+
+[9] J. Fischer and V. Heun. A new succinct representation 
+of RMQ-information and improvements in the enhanced 
+suﬃx array.
+In Proc. ESCAPE, LNCS 4614,
+pages 459–470, 2007.
+
+[10] R. Geary, N. Rahman, R. Raman, and V. Raman.
+
+A simple optimal representation for balanced parentheses.
+ Theoretical Computer Science, 368(3):231–246,
+2006.
+
+[11] R. Geary, R. Raman, and V. Raman. Succinct ordinal
+trees with level-ancestor queries. In Proc. 15th SODA,
+pages 1–10, 2004.
+
+[12] A. Golynski, R. Grossi, A. Gupta, R. Raman, and
+S. Rao. On the size of succinct indices. In Proc. 15th
+ESA, pages 371–382. LNCS 4698, 2007.
+
+[13] R. Gonz´alez, Sz. Grabowski, V. M¨akinen, and
+G. Navarro. Practical implementation of rank and select 
+queries. In Proc. 4th WEA (posters), pages 27–38,
+2005.
+
+[14] A. Gupta, W.-K. Hon, R. Shah, and J. Vitter. Compressed 
+dictionaries: Space measures, data sets, and
+experiments. In Proc. 5th WEA, pages 158–169, 2006.
+[15] M. He, J. I. Munro, and S. S. Rao. Succinct ordinal
+In Proc. 34th ICALP,
+
+trees based on tree covering.
+LNCS 4596, pages 509–520, 2007.
+
+[16] G. Jacobson. Space-eﬃcient static trees and graphs.
+
+In Proc. 30th FOCS, pages 549–554, 1989.
+
+[17] J. Jansson, K. Sadakane, and W.-K. Sung. Ultrasuccinct 
+representation of ordered trees. In Proc. 18th
+SODA, pages 575–584, 2007.
+
+[18] H.-I. Lu and C.-C. Yeh. Balanced parentheses strike
+back. ACM Transactions on Algorithms (TALG),
+4(3):article 28, 2008.
+
+[19] I. Munro and V. Raman. Succinct representation of
+balanced parentheses and static trees. SIAM Journal
+on Computing, 31(3):762–776, 2001.
+
+[20] I. Munro, V. Raman, and S. Rao. Space eﬃcient suﬃx
+
+trees. Journal of Algorithms, 39(2):205–222, 2001.
+
+[21] I. Munro and S. Rao.
+
+Succinct representations of
+In Proc. 31th ICALP, LNCS 3142, pages
+
+functions.
+1006–1015, 2004.
+
+[22] G. Navarro. Implementing the LZ-index: Theory versus 
+practice. ACM Journal of Experimental Algorithmics 
+(JEA), 13(article 2), 2009. 49 pages.
+
+[23] D. Okanohara and K. Sadakane. Practical entropyIn 
+Proc. 9th
+
+compressed rank/select dictionary.
+ALENEX, 2007.
+
+[24] R. Raman, V. Raman, and S. Rao. Succinct indexable
+dictionaries with applications to encoding k-ary trees
+and multisets.
+In Proc. 13th SODA, pages 233–242,
+2002.
+
+[25] K. Sadakane. Compressed Suﬃx Trees with Full Functionality.
+ Theory of Computing Systems, 41(4):589–
+607, 2007.
+
+[26] K. Sadakane and G. Navarro. Fully-functional static
+and dynamic succinct trees. CoRR, abs/0905.0768,
+2009. http://arxiv.org/abs/0905.0768.
+
+[27] K. Sadakane and G. Navarro. Fully-functional succinct
+
+trees. In Proc. 21st SODA, 2010. To appear.
+
+[28] A. Schmidt, F. Waas, M. Kersten, M. Carey,
+I. Manolescu, and R. Busse. XMark: A benchmark for
+XML data management. In Proc. 28th VLDB, pages
+974–985, 2002.
+
+97Copyright © by SIAM. Unauthorized reproduction of this article is prohibited.Downloaded 07/22/18 to 200.9.97.193. Redistribution subject to SIAM license or copyright; see http://www.siam.org/journals/ojsa.php

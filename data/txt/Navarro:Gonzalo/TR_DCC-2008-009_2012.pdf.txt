@@ -1,0 +1,8378 @@
+Practical Approaches to Reduce the Space
+Requirement of Lempel-Ziv-Based Compressed
+Text Indices
+
+DIEGO ARROYUELO
+
+University of Chile
+
+and
+
+GONZALO NAVARRO
+
+University of Chile
+
+Given a text T [1..u] over an alphabet of size σ, the full-text search problem consists in ﬁnding the
+occ occurrences of a given pattern P [1..m] in T . The current trend in indexed text searching is that
+of compressed full-text self-indices, which replace the text with a space-eﬃcient representation of
+it, while at the same time providing indexed access to the text.
+
+The LZ-index of Navarro is a compressed full-text self-index based on the LZ78 compression
+algorithm. This index requires about 4 times the size of the compressed text, i.e. 4uHk(T ) +
+o(u log σ) bits of space, where Hk(T ) is the k-th order empirical entropy of text T . This index
+has shown to be very competitive in practice for locating pattern occurrences and extracting text
+snippets. However, the LZ-index is larger than competing schemes, and does not oﬀer space/time
+tuning options, which limits its applicability in many practical scenarios.
+
+In this paper we study several ways to reduce the space of LZ-index, from a practical point of
+view and in diﬀerent application scenarios. The main idea used to reduce the space is to regard the
+original index as a navigation scheme that allows us moving between index components. Then we
+perform an abstract optimization on this scheme, deﬁning alternative schemes that support the
+same navigation, yet reducing the original redundancy. We obtain reduced LZ-indices requiring
+3uHk(T ) + o(u log σ) and (2 + ǫ)uHk(T ) + o(u log σ) bits of space, for any 0 < ǫ < 1. Our
+LZ-indices have an average locating time of O(m2 + n
+
+σm/2 ), which is O(m2) for m > 2 logσ u.
+
+We perform extensive experimentation to show that our developments lead to reduced LZindices 
+that are competitive with the state of the art in many practical situations, providing
+interesting space/time trade-oﬀs and allowing in many cases to replace the original LZ-index with
+a smaller, yet competitive, representation. Given the space that our indices require, they are in
+most cases the best alternative for the key operations of extracting arbitrary text substrings, as
+well as searching and then displaying the contexts surrounding the pattern occurrences.
+
+Categories and Subject Descriptors:
+
+[]: ;
+
+[]: ;
+
+[]:
+
+General Terms:
+
+Additional Key Words and Phrases:
+
+1.
+
+INTRODUCTION
+
+With the rapid growing of nowadays text repositories, and the need of searching
+those texts for patterns of interest, the classical problem of text searching becomes
+fundamental in many computer applications. Given a sequence of symbols T [1..u]
+(the text) over an alphabet Σ = {1, . . . , σ}, and given another (short) sequence
+P [1..m] (the search pattern) over Σ, the full-text search problem consists in ﬁnding
+all the occ occurrences of P in T . There exist three typical kinds of queries, which
+arise in diﬀerent types of applications, namely:
+
+ACM Journal Name, Vol. V, No. N, Month 20YY, Pages 1–0??.
+
+2
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+—Existential queries: Operation exists(P ) tells us whether pattern P exists in T
+
+or not.
+
+—Cardinality queries: Operation count(P ) counts the number of occurrences of
+
+pattern P in T .
+
+—Locating queries: Operation locate(P ) reports the starting position of the occ
+
+occurrences of pattern P in T .
+
+In the case of locate queries, one can also be interested in ﬁnding only a certain
+number of pattern occurrences, such that the remaining ones are located while
+processing the ﬁrst ones, or on user demand (think for example of the 10 result pages
+shown by a Web search engine). In other cases we can just need, for example, to
+ﬁnd a ﬁxed number K of (arbitrary) occurrences. Let us think again of Web search
+engines, where the answer to a user-entered query usually consists of a ranking with
+the (hopefully) most relevant Web pages for the query, plus an arbitrary (short)
+context where the pattern occurs within every such page; this is displayed in order
+to help users decide whether a page is relevant or not for their needs. Therefore, in
+this example we must be able to quickly ﬁnd just one arbitrary pattern occurrence
+in the text and display its context. We call partial locate queries those that ask
+to locate K arbitrary occurrences.
+
+Unlike word-based text searching, which is the typical scenario in Information
+Retrieval, we wish to ﬁnd any text substring, not only whole words or phrases.
+This has applications in texts where the concept of word is not clearly deﬁned
+(e.g. Oriental languages, program code, etc.), or texts where words do not exist at
+all (e.g., DNA, protein, and MIDI pitch sequences, etc.).
+
+We assume that the text is large and known in advance to queries, and we need
+to perform several queries on it. Therefore, we can preprocess the text to construct
+an index on it, which is a data structure allowing eﬃcient access to the pattern
+occurrences, yet increasing the space requirement.
+
+Though classical full-text indices, like suﬃx trees [Apostolico 1985] and suﬃx
+arrays [Manber and Myers 1993], are very eﬃcient at search time, they have the
+problem of a high space requirement: they require O(u log u) and u log u bits respectively,
+ which in practice is about 10–20 and 4 times the text size respectively,
+apart from the text itself. Thus, we can have large texts which ﬁt into main memory,
+ but whose corresponding suﬃx tree (or array) cannot be accommodated in
+main memory. Using secondary storage for the indices is several orders of magnitude 
+slower, so one looks for ways to reduce their size, with the main motivation of
+maintaining the indices of very large texts entirely in main memory. Therefore, we
+seek to provide fast access to the text using as little space as possible. The modern
+trend is to use the compressibility of the text to reduce the space of the index. In
+recent years there has been much research on compressed text databases, focusing
+on techniques to represent the text and the index using little space, yet permitting
+eﬃcient text searching [Navarro and M¨akinen 2007].
+
+1.1 Compressed Full-Text Self-Indexing
+
+The track of compressed full-text self-indices started some years ago [Grossi and
+Vitter 2000; Ferragina and Manzini 2000; Sadakane 2000], with the aim of accommodating 
+the indices of very large texts entirely in main memory. A full-text
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+3
+
+·
+
+self-index allows one to retrieve any part of the text without storing the text itself,
+and in addition provides search capabilities on the text. A full-text compressed
+self-index is one whose space requirement is proportional to the compressed text
+size, e.g. O(uHk(T )) bits, where Hk(T ) denotes the k-th order empirical entropy
+of T [Manzini 2001], which is a standard measure of the compressibility of T (see
+Section 2.1 for more details). Then a compressed full-text self-index replaces the
+text with a more space-eﬃcient representation of it, which at the same time provides 
+indexed access to the text [Navarro and M¨akinen 2007; Ferragina and Manzini
+2005].
+
+Taking space proportional to the compressed text, replacing it, and providing
+eﬃcient indexed access to it is an unprecedented breakthrough in text indexing
+and compression. Thanks to the advances in these technologies, it is quite common
+nowadays that the indices of (very) large texts can be accommodated in the main
+memory of a desktop computer (e.g., the Human Genome, with about 3 gigabytes).
+As compressed full-text self-indices replace the text, we are also interested in
+
+operations:
+
+—display(P, ℓ), which displays a context of ℓ symbols sorrounding the occ occurrences 
+of pattern P in T , and
+
+—extract(i, j), which decompresses the substring T [i..j], for any text positions
+
+i 6 j.
+
+Thus we can see compressed self-indices as full-text indices compressing the text,
+or as compressors allowing eﬃcient text extraction and indexed full-text searching.
+
+1.1.1 Some Applications of Compressed Full-Text Self-Indexes. In the scenario
+of compressed full-text self-indices, where we replace the text with a representation
+allowing indexed-search capabilities, being able to eﬃciently extract arbitrary text
+substrings is one of the most basic and important problems that indices must solve
+eﬃciently.
+
+Despite locate queries are important in classical full-text indexing (since we have
+the text at hand to access the occurrences and their contexts, as needed by many
+applications), they are usually not enough for compressed self-indices, since we
+obtain just text positions, and no clue about the text surrounding these occurrences.
+In many applications the context surrounding an occurrence is as important as
+(and sometimes more important than) the occurrence position itself. For example,
+a user might be interested in the context surrounding the occurrences to decide
+whether the answer is interesting or not; think, for example, of the widely-used Unix
+search tool grep, which by default shows the text lines containing the occurrences.
+The relevance of this information is witnessed by the fact that most modern Web
+search engines display, along with the answers to a query, a context surrounding a
+pattern occurrence within each document. Therefore, in our scenario it is usually
+more important to obtain the contexts surrounding the pattern occurrences (i.e.,
+display queries), than just text positions (i.e., locate queries). The latter can be
+interesting in speciﬁc cases, for example if one wants to take statistics about the
+positions of the occurrences (for instance, the average diﬀerence between successive
+occurrences, e.g. for linguistic or data mining applications), but display queries
+are more frequently used in general.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+4
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+Finally, count and exists queries have much more speciﬁc applications, and
+they usually conform the internal machinery of more complex tasks. For example,
+for approximate pattern matching and text categorization (where a document is
+assigned a class or category depending on the frequency of appearance of given
+keywords). However, this is not enough for many other applications. For example,
+after categorizing the documents, an user might want to see a document, or a
+portion of it, so we have to ask the index to reproduce it, or may want to search for
+a given pattern and display the occurrence contexts in order to decide whether the
+document is of interest or not. Some pattern discovery tasks may use the frequency
+of certain strings to decide that they are important patterns. Another example is
+selective dissemination of information, where user proﬁles are formed by keywords
+of interest and the system is interested in the presence or absence of those keywords
+to send or not the document to the user.
+
+1.1.2 Families of Compressed Full-Text Self-Indices. The main families of compressed 
+self-indices [Navarro and M¨akinen 2007] are Compressed Suﬃx Arrays
+[Grossi and Vitter 2005; Sadakane 2003; Grossi et al. 2003], indices based on backward 
+search [Ferragina and Manzini 2005; M¨akinen and Navarro 2005; Ferragina
+et al. 2007] (which are alternative ways to compress suﬃx arrays, and known as
+the FM-index family), and the indices based on the Lempel-Ziv compression algorithm 
+[Ziv and Lempel 1978] (LZ-indices for short) [K¨arkk¨ainen and Ukkonen 1996;
+Navarro 2004; Ferragina and Manzini 2005; Russo and Oliveira 2008].
+
+In this paper we are interested in LZ-indices, since they have shown to be eﬀective 
+in practice for extracting text, displaying occurrence contexts, and locating the
+occurrences, outperforming other compressed indices [Navarro 2004; 2008]. What
+characterizes the particular niche of LZ-indices is the O(uHk(T )) space combined
+with O(log u) theoretical worst-case time per located occurrence. Moreover, in
+practice many pattern occurrences can be actually found in constant time per occurrence,
+ which makes the LZ-indices competitive, for example, when searching for
+short patterns.
+
+Navarro’s LZ-index [Navarro 2004; 2008] is a compressed full-text self-index based
+on the Lempel-Ziv 1978 [Ziv and Lempel 1978] (LZ78 for short) parsing of the text.
+See Section 2.2 for a description of the LZ78 compression algorithm. The LZ-index
+takes about 4 times the size of the compressed text, i.e. 4uHk(T ) + o(u log σ) bits,
+for any k = o(logσ u) [Kosaraju and Manzini 1999; Ferragina and Manzini 2005],
+and answers queries in O(m3 log σ +(m+occ) log u) worst-case time. The index also
+replaces the text (i.e., it is a self-index ): it can display a text context of length ℓ
+around an occurrence found (and in fact any sequence of LZ78 phrases) in O(ℓ log σ)
+time, or obtain the whole text in time O(u log σ). The index is built in O(u log σ)
+time.
+
+However, in practice the space requirement of LZ-index is relatively large compared 
+with competing schemes: 1.2–1.6 times the text size versus 0.6–0.7 and 0.3–
+0.8 times the text size of Compressed Suﬃx Array (CSA) [Sadakane 2003] and
+FM-index [Ferragina and Manzini 2005], respectively. In addition, the LZ-index
+does not oﬀer space/time trade-oﬀs, which limits its applicability. Yet, the LZindex 
+is faster to locate and to display the context of an occurrence. As we said
+before, fast displaying of text substrings is very important in self-indices, as the
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+5
+
+·
+
+text is not available otherwise. Thus, in this paper the challenge is to reduce the
+space requirement of LZ-index (providing space/time trade-oﬀs), while retaining
+the good features of fast locating and fast displaying of text substrings.
+
+The practical implementation and evaluation of compressed self-indices is a very
+important issue, since many indices are proposed in theory but never implemented.
+In this respect, the Pizza&Chilli Corpus [Ferragina and Navarro 2005] provides
+practical implementations of compressed indices, as well as some testbed texts.
+Following this line, in this paper we will design new compressed full-text self-indices
+from a practical point of view. Our developments are, in some extent, based on
+the theoretical ideas of [Arroyuelo et al. 2006], yet in this paper we consider much
+more practical ideas, and perform extensive experimentation.
+
+1.2 Our Contribution
+
+In this paper we study how to reduce the space requirement of Navarro’s LZ-index,
+using what we call the navigational scheme approach. This consists in regarding the
+original LZ-index data structure as a navigation scheme, which allows us moving
+among data representations. From this point of view we can study the redundancy
+introduced by the diﬀerent data structures that conform the LZ-index. We design 
+new data structures supporting the same navigation, yet reducing the original
+redundancy.
+
+We deﬁne several reduced alternatives requiring 3uHk(T ) + o(u log σ) and (2 +
+ǫ)uHk(T ) + o(u log σ) bits of space, for 0 < ǫ < 1, which is less than the space of
+the original LZ-index. Our indices cannot provide worst-case guarantees at search
+time, yet they support locate queries for patterns of length m in O( m2
+ǫσm/2 )
+average time, which is O( m2
+
+ǫ + n
+
+ǫ ) for m > 2 logσ u.
+
+We implement and test our indices in several real-life scenarios, and show that
+they oﬀer very attractive space/time trade-oﬀs in practice for the key operations
+extract and display: given the memory space our indices require, they are in
+most cases the best alternative for these operations. This is very important for
+compressed self-indices, since we are able to eﬃciently extract any text substring,
+as well as eﬃciently searching the text and obtaining the contexts surrounding the
+pattern occurrences.
+
+For locate queries we test two alternatives: partial locate queries, which retrieve 
+a ﬁxed number of (arbitrary) pattern occurrences, as well as full locate
+queries, where we retrieve all of the pattern occurrences. In the former case, we
+develop a heuristic to get fast access to the ﬁrst occurrences, avoiding as much as
+possible the navigation on the tries that compose LZ-index; this navigation becomes
+expensive if we report only a few occurrences. Our indices oﬀer an interesting alternative,
+ particularly for short patterns and small alphabets (such as DNA data).
+Though not the best in all cases, our indices also oﬀer an attractive alternative for
+full locate queries, competing against the best existing indices.
+
+We conclude also that our indices can replace the original LZ-index without
+losing competitiveness. We also demonstrate a very important aspect of our indices:
+compressed indices based on suﬃx arrays store extra non-compressible information
+to eﬃciently carry out the locate and display tasks, whereas the extra data stored
+by LZ-indices is compressible. Therefore, when the texts are highly compressible,
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+6
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+LZ-indices can be smaller and faster than alternative indices; and in other cases
+they oﬀer attractive space/time trade-oﬀs.
+
+Just as for the original LZ-index, our indices are not competitive for count
+queries, since they must basically locate the occurrences in order to count them.
+However, we show that our indices are an interesting alternative for exists queries,
+which can be supported much more eﬃciently than count queries. The trick here
+is to ﬁnd the ﬁrst occurrence as fast as possible. We use the novel heuristic deﬁned
+for partial locate queries to quickly test the existence of a pattern in the text,
+which shows to be eﬀective in practice.
+
+It is also well known that the original LZ-index is more adequate when we need
+to search for short patterns [Navarro 2008]. This is mainly because we must perform 
+O(m2) navigation operations on the tries that conform the LZ-index, which
+in case of long patterns become predominant. We implement a version of our indices 
+based on the Depth-First Unary Degree Sequence (dfuds) trie representation
+[Benoit et al. 2005]. We adapt this representation for our speciﬁc purposes, trading
+some theoretical (yet unpractical) aspects for more practical ones, obtaining very
+interesting results, especially for partial locate queries where trie navigations are
+fundamental.
+
+2. BASIC CONCEPTS
+
+2.1 Empirical Entropy
+
+Text compression is a technique to represent a text using less space, proﬁting from
+the regularities of non-random texts. A concept related to text compression is that
+of the k-th order empirical entropy of a sequence of symbols T over an alphabet of
+size σ, denoted by Hk(T ) [Manzini 2001]. The value uHk(T ) provides a lower bound
+to the number of bits needed to compress T using any compressor that encodes each
+symbol considering only the context of k symbols that precede it in T . It holds
+that 0 6 Hk(T ) 6 Hk−1(T ) 6 ··· 6 H0(T ) 6 log σ (log x means ⌈log2 x⌉ in this
+paper). Formally, we have
+
+Deﬁnition 2.1. Given a text T [1..u] over an alphabet Σ, the zero-order empirical
+
+entropy of T is deﬁned as
+
+H0(T ) = X
+
+c∈Σ
+
+nc
+u
+
+log
+
+u
+nc
+
+where nc is the number of occurrences of symbol c in T . The sum includes only
+those symbols c that occur in T , so that nc > 0.
+
+Deﬁnition 2.2. Given a text T [1..u] over an alphabet Σ, the k-th order empirical
+
+entropy of T is deﬁned as
+
+Hk(T ) = X
+s∈Σk
+
+|T s|
+u
+
+H0(T s)
+
+where T s is the subsequence of T formed by all the symbols that occur preceded
+by the context s. Again, we consider only contexts s that do occur in T .
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+1 2 3
+a l ab ar
+
+4
+
+5 6
+a
+
+7
+la
+
+9
+
+8
+a lab ard a p ara
+
+10
+
+11
+
+12
+
+14 15
+
+13
+17
+ap al abr arl a$
+
+16
+
+1.
+
+for
+
+Fig.
+example
+T =“alabar a la alabarda para apalabrarla”, and the corresponding phrase identiﬁers.
+
+decomposition
+
+running
+
+phrase
+
+LZ78
+
+the
+
+7
+
+·
+
+text
+
+2.2 Ziv-Lempel Compression
+
+The Ziv-Lempel compression algorithm of 1978 (usually named LZ78 [Ziv and Lempel 
+1978]) is based on a dictionary of phrases, in which we add every new phrase
+computed. At the beginning of the compression, the dictionary contains a single
+phrase b0 of length 0 (i.e., the empty string). The current step of the compression
+is as follows: If we assume that a preﬁx T [1..j] of T has been already compressed
+into a sequence of phrases Z = b1 . . . br, all of them in the dictionary, then we look
+for the longest preﬁx of the rest of the text T [j + 1..u] which is a phrase of the
+dictionary. Once we have found this phrase, say bs of length ℓs, we construct a new
+phrase br+1 = (s, T [j + ℓs + 1]), write the pair at the end of the compressed ﬁle Z,
+i.e. Z = b1 . . . brbr+1, and add the phrase to the dictionary.
+
+We will call Bi the string represented by phrase bi, thus Br+1 = BsT [j + ℓs + 1].
+In the rest of the paper we assume that the text T has been compressed using the
+LZ78 algorithm into n + 1 phrases, T = B0 . . . Bn, such that B0 = ε (the empty
+string). We say that i is the phrase identiﬁer corresponding to Bi, for 0 6 i 6 n.
+Property 2.3. For all 1 6 t 6 n, there exists ℓ < t and c ∈ Σ such that Bt = Bℓ·c.
+That is, every phrase Bt (except B0) is formed by a previous phrase Bℓ plus a
+symbol c at the end. This implies that the set of phrases is preﬁx closed, meaning 
+that any preﬁx of a phrase Bt is also an element of the dictionary. Therefore,
+ a natural way to represent the set of strings B0, . . . , Bn is a trie, which
+we call LZTrie. In Fig. 1 we show the LZ78 phrase decomposition for the text
+T =“alabar a la alabarda para apalabrarla”, which will be our running example.
+ We show phrase identiﬁers above the corresponding phrase in the parsing.
+In Fig. 4(a) we show the corresponding LZTrie. Inside each LZTrie node we
+
+show the corresponding phrase identiﬁer.
+
+Property 2.4. Every phrase Bi, 0 6 i < n, represents a diﬀerent text substring.
+
+This property is used in the LZ-index search algorithm (see Section 3). The only
+exception to this property is the last phrase Bn. We deal with the exception by
+appending to T a special symbol “$” 6∈ Σ, assumed to be smaller than any other
+symbol in the alphabet. The last phrase will contain this symbol and thus will be
+unique too.
+
+Deﬁnition 2.5. Let br = (r1, c1), br1 = (r2, c2), br2 = (r3, c3), and so on until
+rk = 0 be phrases of the LZ78 parsing of T . The sequence of phrase identiﬁers
+r, r1, r2, . . . is called the referencing chain starting at phrase r.
+
+The referencing chain starting at phrase r reproduces the way phrase br is formed
+from previous phrases and it is obtained by successively moving to the parent in
+the LZTrie. For example, the referencing chain of phrase 9 in Fig. 4(a) is r = 9,
+r1 = 7, r2 = 2, and r3 = 0.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+8
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+The compression algorithm is O(u) time in the worst case and eﬃcient in practice
+provided we use the LZTrie, which allows rapid searching of the new text preﬁx
+(for each symbol of T we move once in the trie). The decompression needs to build
+the same dictionary (the pair that deﬁnes the phrase r is read at the r-th step of
+the algorithm).
+
+Property 2.6 [Ziv and Lempel 1978]. It holds that √u 6 n 6 u
+
+logσ u . Thus,
+
+n log u 6 u log σ always holds.
+
+Lemma 2.7 [Kosaraju and Manzini 1999]. It holds that n log n = uHk(T ) +
+
+O(u 1+k log σ
+
+logσ u ) for any k.
+
+In our work we assume k = o(logσ u) (and hence log σ = o(log u) to allow for k > 0);
+therefore, n log n = uHk(T ) + o(u log σ).
+
+2.3 Succinct Representations of Sequences and Permutations
+
+A succinct data structure requires space close to the information-theoretic lower
+bound, while supporting the corresponding operations eﬃciently. In this section
+and the next we review some results on succinct data structures, which are necessary
+to follow our work.
+
+2.3.1 Data Structures for rank and select. Given a bit vector B[1..n], we deﬁne
+the operation rank0(B, i) (similarly rank1) as the number of 0s (1s) occurring up
+to the i-th position of B. The operation select0(B, i) (similarly select1) is deﬁned
+as the position of the i-th 0 (i-th 1) in B. We assume that select0(B, 0) always
+equals 0 (similarly for select1). These operations can be supported in constant time
+and requiring n + o(n) bits [Munro 1996], or even nH0(B) + o(n) bits (including B
+itself) [Raman et al. 2002].
+
+There exist a number of practical data structures supporting rank and select,
+like the one by Gonz´alez et al. [2005], Kim et al. [2005], Okanohara and Sadakane
+[2007], etc. Among these, the index of Gonz´alez et al. [2005] is very (perhaps the
+most) eﬃcient in practice to compute rank, requiring little space on top of the
+sequence itself. Select is implemented by binary searching the directory built for
+operation rank, and thus without requiring any extra space for that operation (yet,
+the time for select becomes O(log n) in the worst case).
+
+Given a sequence S[1..u] over an alphabet Σ, we generalize the above deﬁnition
+for rankc(S, i) and selectc(S, i) for any c ∈ Σ. If σ = O(polylog(u)), the solution
+of Ferragina et al. [2007] allows one to compute both rankc and selectc in constant
+time and requiring uH0(S)+o(u) bits of space. Otherwise the time is O( log σ
+log log u ) and
+the space is uH0(S) + o(u log σ) bits. The representation of Golynski et al. [2006]
+requires n(log σ + o(log σ)) = O(n log σ) bits of space [Barbay et al. 2007], allowing
+us to compute selectc in O(1) time, and rankc and access to S[i] in O(log log σ)
+time.
+
+2.3.2 Succinct Representation of Permutations. The problem here is to represent 
+a permutation π of {1, . . . , n}, such that we can compute both π(i) and its
+inverse π−1(j) in constant time and using as little space as possible. A natural
+representation for π is to store the values π(i), i = 1, . . . , n, in an array of n log n
+bits. The brute-force solution to the problem computes π−1(j) looking for j seACM 
+Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+9
+
+·
+
+1
+
+2
+
+17
+
+13
+
+7
+
+12
+
+3
+
+4
+
+15
+
+5
+
+14
+
+9
+
+16
+
+8
+
+10
+
+6
+
+11
+
+Fig. 2. Cycle representation of permutation ids of Fig. 3(a). Each solid arrow i → j in the diagram
+means ids(i) = j. Dashed arrows represent backward pointers.
+
+quentially in the array representing π. If j is stored at position i, i.e. π(i) = j, then
+π−1(j) = i. Although this solution does not require any extra space to compute
+π−1, it takes O(n) time in the worst case.
+
+A much more eﬃcient solution is based on the cycle notation of a permutation.
+The cycle for the i-th element of π is formed by elements i, π(i), π(π(i)), and so on
+until the value i is found again. It is important to note that every element occurs in
+one and only one cycle of π. For example, the cycle notation for permutation ids of
+Fig. 3(a) is shown in Fig. 2. So, to compute π−1(j), instead of looking sequentially
+for j in π, we only need to look for j in its cycle: π−1(j) is just the value “pointing”
+to j in the diagram of Fig. 2. To compute ids−1(13) in the previous example, we
+start at position 13, then move to position ids(13) = 7, then to position ids(7) = 12,
+then to ids(12) = 2, then to ids(2) = 17, and as ids(17) = 13 we conclude that
+ids−1(13) = 17. The only problem here is that there are no bounds for the size of
+a cycle, hence this algorithm takes also O(n) time in the worst case. However, it
+can be improved for a more eﬃcient computation of π−1(j).
+
+Given 0 < ǫ < 1, we create subcycles of size O(1/ǫ) by adding a backward pointer
+out of O(1/ǫ) elements in each cycle of π. Dashed arrows in Fig. 2 show backward
+pointers for 1/ǫ = 2. To compute ids−1(17), we ﬁrst move to ids(17) = 13; as
+13 has a backward pointer we follow it and hence we move to position 2. Then,
+as ids(2) = 17 we conclude that ids−1(17) = 2, in O(1/ǫ) worst-case time. We
+store the backward pointers compactly in an array of ǫn log n bits. We mark the
+elements having a backward pointer by using a bit vector supporting rank queries,
+which also help us to ﬁnd the backward pointer corresponding to a given element
+(see the article by Munro et al. [2003] for details). Overall, this solution requires
+(1 + ǫ)n log n + n + o(n) bits of storage.
+
+2.4 Succinct Representation of Trees
+
+Given a tree with n nodes, there exist a number of succinct representations requiring
+2n + o(n) bits, which is close to the information-theoretic lower bound of 2n −
+Θ(log n) bits. We explain the representations that we will need in our work.
+
+2.4.1 Balanced Parentheses. The problem of representing a sequence of balanced 
+parentheses is highly related to the succinct representation of trees [Munro
+and Raman 2001]. Given a sequence par of 2n balanced parentheses, we want to
+support the following operations on par:
+
+—f indclose(par, i), which given an opening parenthesis at position i, ﬁnds the
+
+position of the matching closing parenthesis;
+
+—f indopen(par, j), which given a closing parenthesis at position j, ﬁnds the position 
+of the matching opening parenthesis;
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+10
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+—excess(par, i), which yields the diﬀerence between the number of opening and
+
+closing parentheses up to position i in the parentheses sequence; and
+
+—enclose(par, i), which given a parentheses pair whose opening parenthesis is at
+position i, yields the position of the opening parenthesis corresponding to the
+closest matching parentheses pair enclosing the one at position i.
+
+Munro and Raman [2001] show how to compute all these operations in constant
+time and requiring 2n + o(n) bits of space. They also show one of the main applications 
+of maintaining a sequence of balanced parentheses: the succinct representation
+of general trees. Among the practical alternatives, we have the representation of
+Geary et al. [2006] and the one by Navarro [2004, Section 6.1]. The latter has shown
+to be very eﬀective for representing LZ-indices, and therefore we brieﬂy review it
+in which follows.
+
+Navarro’s Practical Representation of Balanced Parentheses. To support the operations 
+we could simply precompute and store all the possible answers, requiring
+O(n log n) bits overall. However, in many applications (e.g., the representation of
+trees) matching opening and closing parentheses tend to be close to each other.
+Proﬁting from this property, and for instance to support f indclose, Navarro uses
+a brute-force approach for these parentheses, sequentially looking for the closing
+parenthesis within the next few, say 32, parentheses. Actually, this search is performed 
+by using precomputed tables to avoid a bit-per-bit scan.
+
+If the answer cannot be found in this way, Navarro searches a hash table storing
+the answers for parentheses that are not so close, though not so far away from
+each other. Say, for example, matching parentheses with a diﬀerence of up to
+256 positions (parentheses). Instead of storing absolute positions, the diﬀerence
+between positions is stored, and thus we can use 8 bits to code these numbers,
+which saves space. Finally, if the answer cannot be found in the previous hash
+table, another table is searched for matching parentheses that are far away from
+each other (here full numbers are stored, but there are hopefully few entries). A
+similar approach is used to compute enclose and f indopen operations.
+
+The parentheses operations are supported in O(log log n) average time [Navarro
+2008]. However, this representation does not provide theoretical worst-case guarantees 
+in the space requirement, since in the worst case almost every opening parenthesis 
+has its matching parenthesis far away, so we have to store its information in
+the tables. Fortunately these cases are not common in practice.
+
+To compute operation excess(i), we need to support operation rank over the
+binary sequence of parentheses, since excess(i) ≡ rank((par, i) − rank)(par, i). We
+use the representation of Gonz´alez et al. [2005] to eﬃciently support rank and
+select (which will be needed later) on par, while requiring little space on top of the
+sequence.
+
+2.4.2 bp Representation of Trees. The balanced parentheses (bp) representation
+of a tree deﬁned by Munro and Raman [2001] is built from a depth-ﬁrst preorder
+traversal of the tree, writing an opening parenthesis when arriving to a node for
+the ﬁrst time, and a closing parenthesis when going up (after traversing the subtree
+of the node). In this way, we get a sequence of balanced parentheses, where each
+node is represented by a pair of opening and closing parentheses. We identify a tree
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+11
+
+·
+
+0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35
+
+par: ( ( ( ) ( ( ) ) ( ) (
+ids:
+letts:
+
+(
+5 8 13
+a p
+(a) Balanced parentheses representation of LZTrie for the running example.
+
+) ) ) ( ( ( ) ) ) ( (
+
+(
+4 12
+r a
+
+(
+6 11
+p
+
+2 7 9
+l a b
+
+3 15
+b r
+
+1 17
+a $
+
+(
+10
+d
+
+)
+
+)
+
+) ) (
+
+(
+16
+l
+
+14
+l
+
+) ) ) )
+
+0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35
+
+par: ( ( ( ( ) ( ( ( ( ( )
+ids:
+letts:
+
+1
+$ b l r
+
+a l
+
+( )
+
+)
+17 3
+r
+
+( ( ( )
+
+)
+
+)
+15 14 4
+
+a d l
+
+( )
+
+)
+
+)
+
+)
+12 10 16 6
+p
+
+)
+11 2
+a
+
+( ) ( ) ) ( ) ( )
+
+7
+b
+
+9 5
+a
+
+8
+p
+
+)
+13
+
+(b) dfuds representation of LZTrie for the running example. The phrase identiﬁers are stored
+in preorder, and the symbols labeling the arcs of the trie are stored according to dfuds.
+
+Fig. 3. Succinct representations of LZTrie for the running example.
+
+node x with its opening parenthesis in the representation. The subtree of x contains
+those nodes (parentheses) enclosed between the opening parenthesis representing x
+and its matching closing parenthesis.
+
+This representation requires 2n + o(n) bits, and supports operations parent(x)
+(which gets the parent of node x), subtreesize(x) (which gets the size of the subtree
+of node x, including x itself), depth(x) (which gets the depth of node x in the tree),
+nextsibling(x) (which gets the next sibling of node x), and ancestor(x, y) (which
+tells us whether node x is an ancestor of node y), all of them in O(1) time, in the
+following way (let par be the sequence of balanced parentheses representing the
+tree):
+
+parent(x) ≡ enclose(par, x)
+
+subtreesize(x) ≡ (f indclose(par, x) − x + 1)/2
+
+depth(x) ≡ excess(par, x)
+
+nextsibling(x) ≡ f indclose(par, x) + 1
+ancestor(x, y) ≡ x 6 y 6 f indclose(par, x)
+
+Operation child(x, i) (which gets the i-th child of node x) can be computed in O(i)
+time by repeatedly applying operation nextsibling. This takes, in the worst case,
+linear time on the maximum arity of the tree.
+
+The preorder position of a node can be computed in this representation as the
+number of opening parentheses before the one representing the node. That is,
+preorder(x) ≡ rank((par, x) − 1. Notice that in this way we assume that the
+preorder of the tree root is always 0. Given a preorder position p, the corresponding
+node is computed by selectnode(p) ≡ select((par, p + 1).
+In Fig. 3(a) we show the balanced parentheses representation for the LZTrie
+of Fig. 4(a), along with the sequence of LZ78 phrase identiﬁers sequence (ids) in
+preorder, and the sequence of symbols labeling the arcs of the trie (letts), also in
+preorder. As the identiﬁer corresponding to the LZTrie root is always 0, we do not
+store it in ids. The data associated with node x is stored at position preorder(x)
+both in ids and letts sequences. Note this information is suﬃcient to reconstruct
+LZTrie.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+12
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+2.4.3 dfuds Representation of Trees. To get this representation [Benoit et al.
+2005] we perform a preorder traversal on the tree, and for every node reached we
+write its degree in unary using parentheses. For example, a node of degree 3 reads
+‘((()’ under this representation. What we get is almost a balanced parentheses
+representation: we only need to add a ﬁctitious ‘(’ at the beginning of the sequence.
+A node of degree d is identiﬁed by the position of the ﬁrst of the d + 1 parentheses
+representing the node.
+
+This representation requires also 2n+o(n) bits, and supports operations parent(x),
+subtreesize(x), degree(x) (which gets the degree, i.e., the number of children, of
+node x), childrank(x) (which gets the rank of node x within its siblings [Jansson
+et al. 2007]), ancestor(x, y), and child(x, i), all in O(1) time in the following way,
+assuming that par represents now the dfuds sequence of the tree:
+
+parent(x) ≡ select)(par, rank)(par, f indopen(par, x − 1))) + 1
+child(x, i) ≡ f indclose(par, select)(par, rank)(par, x) + 1) − i) + 1
+
+subtreesize(x) ≡ (f indclose(par, enclose(par, x)) − x)/2 + 1
+
+degree(x) ≡ select)(par, rank)(par, x) + 1) − x
+
+childrank(x) ≡ select)(par, rank)(par, f indopen(par, x − 1)) + 1)
+
+−f indopen(par, x − 1)
+
+ancestor(x, y) ≡ x 6 y 6 f indclose(par, enclose(par, x))
+
+Operation depth(x) can be also computed in constant time on dfuds by using the
+approach of Jansson et al. [2007], requiring o(n) extra bits.
+It is important to
+note that, unlike the bp representation, dfuds needs operation f indopen on the
+parentheses in order to compute operation parent on the tree. In practice, if we
+build on Navarro’s parentheses data structure, this implies that dfuds needs more
+space than bp since we need additional hash tables to support f indopen.
+
+Given a node in this representation, say at position i, its preorder position can
+be computed by counting the number of closing parentheses before position i; in
+other words, preorder(x) ≡ rank)(par, x − 1). Given a preorder position p, the
+corresponding node is computed by selectnode(p) ≡ select)(par, p) + 1.
+
+Representing σ-ary Trees with dfuds. For cardinal trees (i.e., trees where each
+node has at most σ children, each child labeled by a symbol in the set {1, . . . , σ}) we
+use the dfuds sequence par plus an array letts[1..n] storing the labels according to
+a dfuds traversal of the tree: we traverse the tree in depth-ﬁrst preorder, and every
+time we reach a node x we write the symbols labeling the children of x. In this way,
+the labels of the children of a given node are all stored contiguously in letts, which
+will allow us to compute operation child(x, α) (which gets the child of node x with
+label α ∈ {1, . . . , σ}) eﬃciently. In Fig. 3(b) we show the dfuds representation of
+LZTrie for our running example. Notice the inverse relation between the d opening
+parentheses deﬁning x and the symbols of the children of x: the label of the i-th
+child is at position i within the symbols of the children of x, while the corresponding
+opening parenthesis is at position (d − i + 1) within the deﬁnition of x. This shall
+mean extra work when retrieving the symbol by which a given node descends from
+its parent.
+
+We support operation child(x, α) as follows. Suppose that node x has position
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+13
+
+·
+
+p within the dfuds sequence par, and let p′ = rank((par, p) − 1 be the position
+in letts for the symbol of the ﬁrst child of x. Let nα = rankα(letts, p′ − 1) be
+the number of αs up to position p′ − 1 in letts, and let i = selectα(letts, nα + 1)
+If i lies within positions p′ and
+be the position of the (nα + 1)-th α in letts.
+p′ + degree(x)− 1, then the child we are looking for is child(x, i− p′ + 1), which, as
+we said before, is computed in constant time over par; otherwise x has not a child
+labeled α. We can also retrieve the symbol by which x descends from its parent
+with letts[rank((par, parent(x))− 1 + childrank(x)− 1], where the ﬁrst term stands
+for the position in letts corresponding to the ﬁrst symbol of the parent of node x.
+The second term, childrank(x), comes from the inverse relation between symbols
+and opening parentheses representing a node.
+
+Thus, the time for operation child(x, α) depends on the representation we use
+for rankα and selectα queries. Notice that child(x, α) could be supported in a
+straightforward way by binary searching the labels of the children of x, in O(log σ)
+worst-case time and not needing any extra space on top of array letts. The access
+to letts[·] takes constant time.
+Alternatively, we can represent letts with the data structure of Ferragina et
+al. [2007], which requires n log σ + o(n log σ) bits of space, and allows us to compute
+child(x, α) in O(1 + log σ
+log log u )
+time. These times are O(1) whenever σ = O(polylog(u)) holds. On the other hand,
+we can use the data structure of Golynski et al. [2006], requiring O(n log σ) bits
+of space, yet allowing us to compute child(x, α) in O(log log σ) time, and access to
+letts[·] also in O(log log σ) time. We will prefer the representation of Ferragina et
+al., since it is able to improve its time complexity to O(1) for smaller alphabets.
+The scheme we have presented to represent letts is slightly diﬀerent to the original 
+one [Benoit et al. 2005], which achieves O(1) time for child(x, α) for any σ.
+However, ours is simpler and allows us to eﬃciently access letts[·], which will be
+very important in our indices to extract text substrings.
+
+log log u ) time. The access to letts[·] also takes O(1 + log σ
+
+3. THE LZ-INDEX DATA STRUCTURE
+
+Assume that the text T [1..u] has been compressed using the LZ78 algorithm into
+n+1 phrases T = B0 . . . Bn, as explained in Section 2.2. As we are mainly interested
+in practical performance in this paper, we describe next a practical representation
+of the LZ-index and its corresponding search algorithm [Navarro 2008, Section 9].
+Hereafter, given a string S = s1 . . . si, we will use Sr = si . . . s1 to denote its
+
+reverse. Also, Sr[i..j] will mean (S[i..j])r.
+
+3.1 Original LZ-index Components
+
+The following data structures conform the practical version of LZ-index [Navarro
+2004; 2008]:
+
+(1) LZTrie: is the trie formed by all the phrases B0, . . . , Bn. Given the properties
+of LZ78 compression, this trie has exactly n + 1 nodes, each one corresponding
+to a phrase.
+
+(2) RevTrie: is the trie formed by all the reverse strings Br
+
+n. In this trie
+there could be internal nodes not representing any phrase. We call these nodes
+“empty”. Empty unary paths are compressed.
+
+0, . . . , Br
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+14
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+1
+
+1
+
+l
+
+5
+14
+
+a
+
+r
+
+7
+12
+
+6
+
+4
+
+d
+
+a
+8
+10
+
+l
+
+10
+
+6
+
+p
+
+9
+16
+
+11
+
+11
+
+0
+
+0
+
+l
+12
+
+2
+
+a
+13
+
+7
+
+b
+14
+
+9
+
+2
+17
+
+$
+
+b
+
+3
+
+3
+
+r
+
+4
+15
+
+15
+
+16
+
+5
+
+a
+
+8
+
+p
+
+17
+
+13
+
+(a) Lempel-Ziv Trie (LZTrie) for the running example.
+
+0
+
+0
+
+1
+
+a
+1
+17
+
+3
+
+7
+
+$
+
+5
+
+8
+
+2
+
+1
+
+l
+
+r
+
+1
+
+a
+4
+12
+
+a
+
+1
+
+a
+6
+
+3
+
+l
+7
+
+9
+
+b
+
+d
+
+1
+
+r
+
+1
+
+a
+8
+10
+
+l
+9
+
+a
+
+2
+
+10
+
+14
+
+p
+
+r
+
+1
+
+a
+
+r
+
+1
+
+a
+
+1
+
+1
+
+a
+
+11
+
+16
+
+12
+
+13
+
+13
+
+11
+
+1
+
+14
+
+a
+
+4
+
+b
+
+1
+
+a
+
+15
+
+15
+
+16
+
+17
+
+5
+
+a
+
+6
+
+(b) RevTrie data structure.
+
+0
+
+5
+
+10
+
+15
+
+20
+
+par: ( ( ) ( ( ) ( ) ( ) ) ( ( ) ) ( ) ( ( ) ( ) ) ( (
+0 1
+p a
+13
+
+B: 1 1
+$
+rids: 0 17
+
+1 1
+l a
+2 14
+
+1 1
+b l
+3 9
+
+1 1
+a l
+1 7
+
+1
+r
+12
+
+1
+d
+10
+
+1
+r
+16
+
+1
+
+8
+
+rletts:
+
+25
+
+)
+
+11
+
+0 1
+r a
+4
+
+1
+b
+15
+
+1 1
+a
+5 6
+
+30
+
+35
+
+39
+
+( ) ) ( ( ) ( ) ) ( ( ) ) )
+1
+
+(c) Balanced parentheses representation of RevTrie, compressing empty unary paths. The
+bitmap B marks with a 0 the empty non-unary nodes. Notice that array rids stores phrase
+identiﬁers only for non-empty nodes.
+
+i 0 1
+
+4
+
+5
+
+6
+
+3
+
+2
+
+10 11 12 13 14 15 16 17
+Node[i] 0 1 23 4 10 29 18 24 30 25 13 19 11 31 8 5 15 2
+(d) Node data structure, assuming that the parentheses sequence 
+starts from position zero.
+
+7
+
+8
+
+9
+
+i 0 1
+
+2
+
+5
+
+4
+
+3
+
+10 11 12 13 14 15 16 17
+RNode[i] 0 3 17 11 30 35 36 4 8 12 15 26 6 24 18 32 20 1
+(e) RNode data structure, assuming that the parentheses sequence 
+starts from position zero.
+
+7 8
+
+6
+
+9
+
+Fig. 4. LZ-index components for the running example.
+
+(3) Node: is a mapping from phrase identiﬁers to their node in LZTrie.
+
+(4) RNode: is a mapping from phrase identiﬁers to their node in RevTrie.
+
+Fig. 4 shows the LZTrie, RevTrie, Node, and RNode data structures corresponding 
+to our running example. We show preorder numbers, both in LZTrie and
+RevTrie (in the latter case only counting non-empty nodes), outside each trie node.
+In the case of RevTrie, empty nodes are shown in light gray.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+15
+
+·
+
+3.2 Succinct Representation of the LZ-index Components
+
+In the original work [Navarro 2004; 2008], each of the four structures described
+requires n log n + o(u log σ) bits of space if they are represented succinctly.
+
+—LZTrie is represented using the balanced parentheses representation [Munro and
+Raman 2001] requiring 2n + o(n) bits; plus the sequence letts of symbols labeling
+each trie edge, requiring n log σ bits; and the sequence ids of n log n bits storing
+the LZ78 phrase identiﬁers. Both letts and ids are stored in preorder, so we use
+preorder(x) to index them. See Fig. 3(a) for an illustration.
+
+—For RevTrie, balanced parentheses are also used to represent the Patricia tree
+[Morrison 1968] structure of the trie, compressing empty unary nodes and so
+ensuring n′ 6 2n nodes. This requires at most 4n + o(n) bits. The RevTriepreorder 
+sequence of identiﬁers (rids) is stored in n log n bits (i.e., we only store
+the identiﬁers for non-empty nodes). Non-empty nodes are marked with bit
+vector B[1..n′], such that B[j] = 0 iﬀ node x with preorder j is empty. Thus,
+the phrase identiﬁer for node x is rids[rank1(B, j)]. The symbols labeling the
+arcs of the trie and the Patricia-tree skips are not stored in this representation,
+since they can be retrieved by using the connection with LZTrie. Therefore, the
+navigation on RevTrie is more expensive than that on LZTrie.
+
+—Node is just a sequence of n pointers to LZTrie nodes. As LZTrie is implemented
+using balanced parentheses, Node[i] stores the position within the sequence for
+the opening parenthesis representing the node corresponding to phrase i. As
+there are 2n such positions, we need n log 2n = n log n + n bits of storage. See
+Fig. 4(d) for an illustration.
+
+—Finally, RNode is also represented as a sequence of n pointers to RevTrie nodes.
+As RevTrie has n′ 6 2n nodes and since we use balanced parentheses for this trie,
+we need n log 4n = n log n + 2n bits of space. See Fig. 4(e) for an illustration.
+
+According to Lemma 2.7, the ﬁnal size of the LZ-index is 4uHk(T ) + o(u log σ) bits
+for k = o(logσ u) (and hence log σ = o(log u) if we want to allow for k > 0).
+
+In theory, the succinct trie representations used [Navarro 2004] implement (among
+others) operations parent(x) and child(x, α), both in O(log σ) time for LZTrie, and
+O(log σ) and O(h log σ) time respectively for RevTrie, where h is the depth of node
+x in RevTrie (the h in the cost comes from the fact that we must access LZTrie to
+get the label of a RevTrie edge). The operation ancestor(x, y) is implemented in
+O(1) time both in LZTrie and RevTrie.
+
+In practice, however, the bp representation [Munro and Raman 2001] for general
+trees is used. Despite that under this representation operation child(x, α) is implemented 
+by using operation child(x, i) in O(σ) worst-case time, this has shown to
+be very eﬀective in practice [Navarro 2004; 2008]. Operation parent is supported
+in O(1) time under this representation.
+
+3.3 LZ-index Search Algorithm
+
+Let us consider now the search algorithm for a pattern P [1..m] [Navarro 2004;
+2008]. For locate queries, pattern occurrences are originally reported in the format
+Jt, off setK, where t is the phrase where the occurrence starts, and off set is the
+distance between the beginning of the occurrence and the end of the phrase. Later,
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+16
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+in Section 5.2, we will show how to map these two values into a simple text position.
+As we deal with an implicit representation of the text (the LZTrie), and not the
+text itself, we distinguish three types of occurrences of P in T , depending on the
+phrase layout.
+
+3.3.1 Occurrences of Type 1. The occurrence lies inside a single phrase (there
+are occ1 occurrences of this type). Given the properties of LZ78, every phrase
+Bt containing P is formed by a shorter phrase Bℓ concatenated to a symbol c
+(Property 2.3). If P does not occur at the end of Bt, then Bℓ contains P as well.
+We want to ﬁnd the shortest possible phrase Bi in the LZ78 referencing chain for
+Bt that contains the occurrence of P , that is, P is a suﬃx of Bi. But then P r
+i , and it can be easily found by searching for P r in RevTrie in
+is a preﬁx of Br
+O(m2 log σ) time. Say we arrive at node vr. Any node v′
+r descending from vr in
+RevTrie (including vr itself) corresponds to a phrase terminated with P . For each
+such v′
+r, we traverse and report the subtree of the corresponding LZTrie node vlz
+(found using rids and Node). For any node v′
+lz in the subtree of vlz, we report an
+occurrence Jt, m + (depth(v′
+lz) − depth(vlz))K, where t is the phrase identiﬁer (ids)
+lz. Occurrences of type 1 are located in O(m2 log σ + occ1) time, since
+of node v′
+each occurrence takes constant time in LZTrie. For count queries we just need to
+compute the subtree size of each vlz in LZTrie.
+
+3.3.2 Occurrences of Type 2. The occurrence spans two consecutive phrases, Bt
+and Bt+1, such that a preﬁx P [1..i] matches a suﬃx of Bt and the suﬃx P [i + 1..m]
+matches a preﬁx of Bt+1 (there are occ2 occurrences of this type). P can be split
+at any position, so we have to try them all. For every possible split, we search for
+the reverse pattern preﬁx P r[1..i] in RevTrie (getting node vr) and for the pattern
+suﬃx P [i + 1 . . . m] in LZTrie (getting node vlz). The RevTrie node vr for P r[1..i]
+is stored in array Cr[i], since it shall be needed later. As in a trie all the strings
+represented in a subtree form a preorder interval, we have two preorder intervals:
+one in the space of reversed phrases (phrases ﬁnishing with P [1..i]) and one in that
+of the normal phrases (phrases starting with P [i + 1..m]), and need to ﬁnd the
+phrase pairs (t, t + 1) such that t is in the RevTrie interval and t + 1 is in the
+LZTrie interval. Then, we check each phrase t in the subtree of vr and report it
+if Node[t + 1] descends from vlz. Each such check takes constant time. Yet, if the
+subtree of vlz has fewer elements, one does the opposite: check phrases from vlz in
+vr, using RNode[t − 1]. For every pair of consecutive phrases that passes this test,
+we report an occurrence Jt, iK.
+The time to solve occurrences of type 2 is proportional to the smallest subtree size
+among vr and vlz, which can be arbitrarily larger than the number of occurrences
+reported. That is, we have no worst-case guarantees at search time1. However, the
+average search time for occurrences of type 2 is O( n
+σm/2 ) [Navarro 2004; 2008]. This
+is O(1) for long patterns, m > 2 logσ n.
+
+3.3.3 Occurrences of Type 3. The occurrence spans three or more phrases, Bt−1,
+. . . , Bℓ+1, such that P [i..j] = Bt . . . Bℓ, P [1..i − 1] matches a suﬃx of Bt−1 and
+P [j + 1..m] matches a preﬁx of Bℓ+1 (there are occ3 occurrences of this type).
+
+1The theoretical version [Navarro 2004] uses diﬀerent structures which do oﬀer such guarantees.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+17
+
+·
+
+Since the LZ78 algorithm guarantees that every phrase represents a diﬀerent string
+(Property 2.4), there is at most one phrase matching P [i..j] for each choice of i and
+j. Therefore, if we partition P into more than two consecutive substrings, there
+is at most one pattern occurrence for such partition, which severely limits occ3 to
+O(m2), the number of diﬀerent partitions of P .
+
+Let us deﬁne matrix Clz[1..m, 1..m] and arrays Ai, for 1 6 i 6 m, which store
+information about the search. We ﬁrst identify the only possible phrase matching
+each substring P [i..j] by performing a single trie search for each i and increasing j.
+We record in Clz[i, j] the LZTrie node corresponding to P [i..j], and store the pair
+(id, j) at the end of Ai, such that id is the phrase identiﬁer of the node corresponding
+to P [i..j]. Note that since we search for P [i..j] for increasing j, we get the values
+of id in increasing order, as the phrase identiﬁer of a node is always larger than
+that of the parent node. Therefore, the corresponding pairs in Ai are stored by
+increasing value of id. This process takes O(m2 log σ) time.
+
+Then we ﬁnd the O(m2) maximal concatenations of successive phrases that match
+contiguous pattern substrings. For 1 6 i 6 j 6 m, for increasing j, we try to extend
+the match of P [i..j] to the right. If id is the phrase identiﬁer for node Clz[i, j], then
+we have to search for (id + 1, r) in array Aj+1, for some r. Array Aj+1 can be
+binary searched because it is sorted.
+If we ﬁnd (id + 1, r) in Aj+1, this means
+that Bid = P [i..j] and Bid+1 = P [j + 1..r], i.e. the concatenation BidBid+1 equals
+P [i..r]. We repeat the process from j = r, and stop when the pair (id + 1, r) is
+not found in the corresponding array (this means that the current concatenation is
+maximal). As we have to perform O(m2) binary searches in arrays of size O(m),
+this procedure takes O(m2 log m) worst-case time. In practice, the binary search is
+replaced by closed hashing schemes, taking O(m2) time on average [Navarro 2004,
+Section 6.5].
+
+Once P [i..j] = Bt . . . Bℓ is a maximal concatenation, we check whether phrase
+Bℓ+1 starts with P [j + 1..m] by using operation ancestor(Clz[j + 1, m], Node[ℓ + 1]),
+in constant time per maximal concatenation. Finally we check whether phrase Bt−1
+ends with P [1..i− 1] by checking whether ancestor(Cr[i− 1], RNode[t− 1]) holds in
+RevTrie, in constant time per maximal concatenation. If all these conditions hold,
+we report an occurrence Jt − 1, i − 1K. Overall, occurrences of type 3 are located in
+O(m3 log σ) time.
+
+3.3.4 The Search Algorithm in Practice. In practice, the search algorithm proceeds 
+as follows. We ﬁrst search for every pattern substring P [i..j] in LZTrie, and
+store the corresponding node in Clz[i, j]. The search proceeds looking ﬁrst for P [1],
+then for P [1..2], then for P [1..3], and so on until we cannot ﬁnd P [1..j], for some j,
+or until j = m. Then we do the same starting from P [2], and so on. We also store
+a matrix Cid[1..m, 1..m], where Cid[i, j] is the LZ78 phrase identiﬁer for phrase
+P [i..j]; if P [i..j] does not exist as an LZ78 phrase, then we store a null value.
+
+The second step consists of searching for every preﬁx of the reversed pattern
+P r[1..j] in RevTrie. Recall that we need this for occurrences of type 1 and type 2.
+Recall also that searching in RevTrie is much slower that searching in LZTrie, so we
+try to reduce this work as much as possible. The results already obtained in Cid are
+useful. If we search for P r[1..j] in RevTrie, and P [1..j] exists as a phrase in LZTrie,
+then RN ode[Cid[1, j]] is the RevTrie node we are looking for. Otherwise, P r[1..j]
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+18
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+corresponds to an empty node in RevTrie, or to a position in a label between two
+nodes, and cannot be found with the LZTrie. Yet, we can reduce the cost as follows.
+Let i be the minimum value such that Clz[i, j] is deﬁned, i.e. P [i..j] exists as a
+phrase in LZTrie (and hence P r[i..j] exists as a reverse phrase in RevTrie). Then,
+we map to RevTrie with RN ode[Cid[i, j]], which corresponds to string P r[i..j], and
+from this node try to descend with the string P r[1..i − 1]. This ﬁnal search has
+to be done using operation child on RevTrie. The RevTrie node corresponding to
+P r[1..i] is stored in Cr[i].
+
+Then we use these results to search for occurrences of type 1, type 2, and type 3
+
+respectively.
+
+3.3.5 Displaying Occurrence Contexts. To display a context of length ℓ surrounding 
+any occurrence reported, if an occurrence starts at phrase i, then we follow 
+the upward path from Node[i] up to the LZTrie root, outputting the symbols
+labeling the upward path. Then we perform the same procedure but now starting
+from Node[i + 1] (alternatively Node[i − 1]) in LZTrie, and so on until we display
+the ℓ desired symbols, taking overall O(ℓ log σ) time, because operation parent is
+supported in O(log σ) time in theory [Navarro 2004]. In practice, and using the bp
+representation for the tries, the time is O(ℓ). Finally, we can uncompress the whole
+text T in O(u log σ) time using the same idea, starting the procedure from the ﬁrst
+LZ78 phrase (the time is O(u) in practice).
+
+4. THE LZ-INDEX AS A NAVIGATION SCHEME
+
+4.1 The Original Navigation Scheme
+
+The LZ-index structure can be regarded as a navigation scheme that permits us
+moving back and forth from trie nodes to the corresponding preorder positions, both
+in LZTrie and RevTrie. The phrase identiﬁers are common to both tries (arrays ids
+and rids) and permit moving from one trie to the other by using Node and RNode
+mappings.
+
+Fig. 5 shows the navigation scheme, where solid arrows represent the main data
+structures of the index. Dashed arrows are asymptotically “for free” in terms of
+space requirement, since they are followed by applying preorder on the corresponding 
+parentheses structure (see Section 2.4). From now on we use the subscript “lz”
+for the operations on LZTrie, and subscript “r” for RevTrie. The four solid arrows
+in the diagram are in fact the four main components in the space usage of the
+LZ-index: array of phrase identiﬁers in LZTrie (ids) and in RevTrie (rids), and
+mapping from phrase identiﬁers to tree nodes in LZTrie (Node) and in RevTrie
+(RNode). The structure is symmetric and we can move from any point to any
+other.
+
+The structure, however, is redundant in the sense that the number of arrows
+is not minimal. Given a graph with t nodes (in our case t index components), t
+arrows are suﬃcient to connect them in both directions (actually forming a ring
+structure). Since nodes and preorder positions in the tries are “connected” using
+operations preorder and selectnode over the trie representations (see Section 2.4),
+we can think that there are only three main index components to connect: LZTrie
+(either nodes or preorder positions), phrase identiﬁers, and RevTrie (either nodes
+or preorder positions). Next we deﬁne more space-eﬃcient representations for LZACM 
+Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+19
+
+·
+
+LZTrie
+
+node
+
+RevTrie
+
+node
+
+Node
+
+RNode
+
+selectnodelz
+
+preorderlz
+
+phrase
+
+identiﬁer
+
+preorderr
+
+selectnoder
+
+ids
+
+rids
+
+LZTrie
+preorder
+
+RevTrie
+preorder
+
+Fig. 5. The original LZ-index navigation structures over index components.
+
+index, trying to reduce the number of arrows in the scheme. Note that, because
+of Lemma 2.7, we are interested in reducing the number of the index components
+that require n log n = uHk(T ) + o(u log σ) bits of storage.
+
+4.2 Schemes Requiring 3uHk + o(u log σ) bits
+
+In this section we present schemes requiring only three solid arrows to connect
+the LZ-index components, thus forming a ring structure that still allows the same
+navigation as in the original LZ-index. Diﬀerent choices yield diﬀerent eﬃciencies
+depending on how often is each type of navigation used during the search.
+
+4.2.1 Scheme 1. The following data structures conform this version of LZ-index:
+
+(1) LZTrie: The Lempel-Ziv trie, which is implemented with the following data
+
+structures
+—par[0..2n − 1]: The tree shape of LZTrie represented either with balanced
+parentheses [Munro and Raman 2001] or with dfuds [Benoit et al. 2005],
+requiring in any case 2n + o(n) bits.
+
+—letts[1..n]: The array of symbols labeling the arcs of LZTrie, represented as
+
+explained in Section 2.3, depending on the representation used for par.
+
+—ids[1..n]: The array of LZ78 phrase identiﬁers in preorder. Since ids[0] = 0,
+we do not store this value. Note that ids is a permutation of {1, . . . , n}. The
+space requirement is n log n bits.
+
+(2) RevTrie: The Patricia tree [Morrison 1968] of the reversed LZ78 phrases, which
+
+is implemented with the following data structures
+—rpar[0..2n′ − 1]: The RevTrie structure, represented either with bp or with
+dfuds, compressing empty unary paths and thus ensuring n′ 6 2n nodes,
+because empty non-unary nodes still exist. Thus, the space requirement is
+2n′ + o(n′) bits.
+
+—rletts[1..n′]: the array storing the ﬁrst symbol of each edge label in RevTrie,
+
+represented as for LZTrie and requiring n′ log σ + o(n′) bits of space.
+
+—skips[1..n′]: the Patricia tree skips of the nodes in preorder, using log log u
+bits per node and inserting empty unary nodes when the skip exceeds log u.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+20
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+In this way, one out of log u empty unary nodes could be explicitly represented.
+
+In the worst case there are O(u) empty unary nodes, of which
+O(u/ log u) are explicitly represented. This adds O(u/ log u) nodes to n′,
+which translates into O((n′ + u
+log u )(3 + log σ + log log u)) = o(u log σ) bits
+overall for the RevTrie nodes, symbols, and skips.
+
+—B[1..n′]: A bit vector supporting rank and select queries, and requiring
+n′(1 + o(1)) bits of space [Munro 1996]. This bit vector marks the non-empty
+nodes: The j-th bit of B is 1 iﬀ the node with preorder position j in rpar
+is not empty, otherwise the bit is 0. Given a position i in rpar corresponding 
+to a RevTrie node, the corresponding bit in B is B[preorderr(i)]. The
+preorder of a node p counting only non-empty nodes can be computed as
+rank1(B, preorderr(i)).
+
+(3) RNode[1..n]: The mapping from phrase identiﬁers to the corresponding RevTrie 
+node. Since we represent nodes as the positions of opening parentheses,
+and since there are 2n′ 6 4n such positions in RevTrie, this mapping needs
+n log 4n = n log n + 2n bits. We only store pointers to non-empty nodes.
+
+(4) Rev [1..n]: A mapping from a RevTrie preorder position to the corresponding 
+LZTrie node, deﬁned as Rev[i] = Node[rids[i]]. Given a position i in
+rpar corresponding to a non-empty RevTrie node, the corresponding Rev value
+(i.e., LZTrie node) is Rev[rank1(B, preorderr(i))]. The space requirement is
+n log n + n bits.
+
+The resulting navigation scheme is shown in Fig. 6(a). The search algorithm
+remains the same since we can map preorder positions to nodes in the tries and
+vice versa (see Section 2.3), and also we can simulate the missing arrays rids(i) ≡
+ids[preorderlz(Rev[i])] and Node(i) ≡ Rev[rank1(B, preorderr(RNode[i]))], all of
+which take constant time.
+We have reduced the space requirement to 3n log n+3n log σ +2n log log u+11n+
+o(u) = 3n log n + o(u log σ) bits if log σ = o(log u), which according to Lemma 2.7
+is 3uHk(T ) + o(u log σ) bits, for any k = o(logσ u).
+
+The child operation on RevTrie can now be computed in O(1) time if we use
+dfuds, and because we store rletts and the skips. Compare to the O(h log σ) time
+of the original LZ-index [Navarro 2004]. Now, because RevTrie is a Patricia tree
+and the underlying strings are not readily available, it is not obvious how to traverse
+it. The next lemma addresses this issue.
+
+Lemma 4.1. Given a string s ∈ Σ∗, we can determine whether it is represented
+in RevTrie or not (ﬁnding the corresponding node in the aﬃrmative case) in O(|s|)
+time.
+
+Proof. To ﬁnd the node corresponding to string s we descend from the RevTrie
+root, using operation child(x, α) on the ﬁrst symbol of each edge label, which is
+stored in rletts, and using the skips to compute the next symbol of s to use in the
+descent. If s cannot be consumed while descending, then we determine that it is
+not represented in RevTrie in O(|s|) time. Otherwise, assume that after consuming
+string s in this way we arrive at node vr with preorder j in RevTrie (counting
+only non-empty nodes). The string labeling the root-to-vr path in RevTrie can be
+computed by accessing the node vlz = Rev[j] in LZTrie, and then extracting the
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+21
+
+·
+
+string labeling the vlz-to-root path in LZTrie. Then we compare that string against
+s to verify that the node we arrived at corresponds to s, or otherwise that s does
+not occur in RevTrie.
+
+In case node vr in RevTrie is empty, Rev[j] is undeﬁned. Notice, however, that
+there must be at least one non-empty node descending from this empty node, since
+leaves in RevTrie cannot be empty as they always correspond to an LZ78 phrase.
+Given that the string represented by every non-empty node in the subtree of node
+vr has the string s as a preﬁx, the corresponding strings in LZTrie have sr as a
+suﬃx. So we can use any Rev value within the subtree of node vr in order to map to
+the LZTrie and then extract the string it represents. We can use, for example, the
+value Rev[rank1(B, j) + 1], which corresponds to the next non-empty node within
+the subtree of node vr. We know when to stop extracting, since we know the length
+of the string we are looking for.
+
+The overall cost for the descending process is therefore O(|s|).
+Operations child and parent on LZTrie can be also computed in O(1) time if we
+use dfuds on this trie, versus the O(log σ) time (in theory) of the original LZ-index.
+Hence, occurrences of type 1 are located in O(m + occ1) time; occurrences of type
+2 are located now in O( n
+σm/2 ) average time; occurrences of type 3 are located as in
+the original LZ-index, in O(m2) average time (by using hashing to ﬁnd the maximal
+concatenations of phrases). Therefore, the occ occurrences of P can be located in
+O(m2 + n
+σm/2 ) average time. This time is O(m2) on average for m > 2 logσ u. It
+has been shown how to achieve worst-case guarantees with reduced schemes of the
+LZ-index [Arroyuelo et al. 2006]. However, we are focusing in practical performance
+here.
+
+Practical Issues. On the practical side, the access from RevTrie nodes to the
+corresponding LZTrie node is faster under this scheme, since the direct link Rev
+is faster than the composition of rids and Node of the original scheme. This is
+good, for example, for ﬁnding occurrences of type 1, which can be dominant for
+short patterns, as there is a high probability that an occurrence is contained in a
+single phrase. However, sometimes we must follow longer navigation paths in the
+search process: for example, when ﬁnding occurrences of type 2, we can choose to
+traverse the subtree in RevTrie, and for each phrase identiﬁer id in such subtree
+apply Node(id + 1) to check whether it descends from the appropriate subtree in
+LZTrie. As now we have to simulate Node, this is more expensive (in practice, even
+if not asymptotically) than in the original scheme. Even worse, since array rids
+is not stored in RevTrie, we must simulate rids(i) to get the phrase identiﬁer id.
+Therefore, the search time could be increased in practice, depending on the number
+of each type of occurrence.
+
+Let us study occurrences of type 2 in more detail, since they seem to be critical
+under this scheme. Suppose that for a given partition P [1..i] and P [i + 1..m] of
+P we get nodes vlz and vr in LZTrie and RevTrie respectively. If we choose to
+traverse the subtree of vr in RevTrie, then for each node v′
+r in this subtree we
+get the corresponding phrase identiﬁer id = ids[preorderlz(Rev[pr])], where pr is
+set initially as pr = rank1(B, preorderr(vr)), and it is incremented by one with
+each node in a preorder traversal of the subtree. We then check whether the node
+Rev[rank1(B, preorderr(RNode[id + 1]))] descends from vlz in LZTrie. If, on the
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+22
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+other hand, we choose to traverse the subtree of vlz in LZTrie, then for each node
+v′
+lz in this subtree we get the phrase identiﬁer as id = ids[plz], where plz is set
+initially as plz = preorderlz(vlz), and it is incremented by one with each node in a
+preorder traversal. We then check whether the node RNode[id − 1] descends from
+vr in RevTrie. Empirically, a check from RevTrie to LZTrie is about 3 times as
+expensive as in the opposite direction, and thus we choose to traverse the subtree
+of vr whenever its size is less than 1/3 the size of the subtree of vlz.
+
+LZTrie
+
+node
+
+Rev
+
+RNode
+
+RevTrie
+
+node
+
+preorderlz
+
+phrase
+
+identiﬁer
+
+preorderr
+
+ids
+
+(a) Scheme 1.
+
+LZTrie
+preorder
+
+LZTrie
+
+node
+
+RevTrie
+preorder
+
+RevTrie
+
+node
+
+selectnodelz
+
+preorderlz
+
+phrase
+
+identiﬁer
+
+preorderr
+
+selectnoder
+
+ids
+
+rids−1
+
+LZTrie
+preorder
+
+R
+
+(b) Scheme 2.
+
+RevTrie
+preorder
+
+Fig. 6. Reduced navigation schemes over LZ-index components, requiring 3uHk + o(u log σ) bits.
+
+4.2.2 Scheme 2. This scheme tries to reduce the space requirement while also
+
+reducing the average path length in the navigation scheme:
+
+(1) LZTrie The Lempel-Ziv trie, deﬁned just as for Scheme 1.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+23
+
+·
+
+(2) RevTrie: The Patricia tree of the reversed LZ78 phrases, deﬁned just as for
+
+Scheme 1, but now we add
+—rids−1[1..n]: The explicit representation of the inverse of permutation rids
+
+of the original LZ-index deﬁnition, requiring n log n bits.
+
+(3) R[1..n]: A mapping from RevTrie preorder positions to LZTrie preorder positions 
+deﬁned as R[i] = ids−1(rids[i]) and requiring n log n bits. Given a position 
+i in rpar corresponding to a non-empty RevTrie node, the corresponding R
+value (i.e., preorder in LZTrie) can be computed as R[rank1(B, preorderr(i))].
+
+The resulting navigation scheme is shown in Fig. 6(b). We can compute rids(i) ≡
+ids[R[i]], RNode(i) ≡ selectnoder(rids−1[i]), and Node(i) ≡ selectnodelz(R[rids−1
+[i]]), all in constant time.
+The space requirement is 3n log n + 3n log σ + 2n log log u + 8n + o(u) = 3n log n +
+o(u log σ) bits if log σ = o(log u), which according to Lemma 2.7 is 3uHk(T ) +
+o(u log σ) bits, for any k = o(logσ u).
+
+If we use dfuds to represent both LZTrie and RevTrie, then we can locate the
+σm/2 ) average time, which is O(m2) for
+
+occ occurrences of pattern P in O(m2 + n
+m > 2 logσ u.
+
+Practical Issues. It is interesting to note that the average path length of this
+scheme is shorter than that of Scheme 1, which can translate into a more eﬃcient
+navigation among index components.
+In this scheme, for occurrences of type 1
+we have direct access to a LZTrie preorder by using R, and then we have to apply 
+selectnode to get the node whose subtree contains the pattern occurrences.
+This can be slightly slower than for Scheme 1, where we have direct access to the
+corresponding node.
+
+However, for occurrences of type 2 we have to follow shorter paths than for
+Scheme 1. Suppose that for a given partition P [1..i] and P [i + 1..m] of P we get
+nodes vlz and vr in LZTrie and RevTrie respectively. If we choose to traverse the
+subtree of vr in RevTrie, for each node in this subtree we get the corresponding
+phrase identiﬁer id by using both the R mapping and then ids. Then we use
+R[rids−1[id + 1]] to get the corresponding LZTrie preorder, and then we check
+whether this preorder lies within the subtree of vlz.
+If, on the other hand, we
+choose to traverse the subtree of vlz in LZTrie, for every node in this subtree we
+get the corresponding phrase identiﬁer id using ids, and then we check whether the
+preorder rids−1[id− 1] lies within the subtree of vr in RevTrie. Thus, a check from
+RevTrie to LZTrie is twice as expensive as in the opposite direction, and thus we
+choose to traverse the subtree of vr whenever its size is less than half the size of
+the subtree of vlz.
+
+Fortunately, the checks of type 2 can be carried out directly on the preorders of
+both tries, avoiding the use of (the usually expensive) selectnode to get the corresponding 
+trie node: if we choose to traverse the subtree of vr, for example, we compute 
+the preorder interval for the subtree of vlz as [preorderlz (vlz)..preorderlz(vlz)+
+subtreesizelz(vlz) − 1] (recall that preorder is computed by means of rank), and
+then we check whether the LZTrie preorders we get from the nodes in the subtree
+of vr lie within the preorder interval of vlz. In this way, we compute just one rank
+per partition to get the interval, and then we check the LZTrie preorder of the
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+24
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+candidates by using just this interval, rather than computing selectnode for every
+possible candidate in that partition. This introduces very important savings in the
+practical search time.
+
+There are many other possible schemes that achieve 3uHk(T ) + o(u log σ) bits of
+space. We have focused on the two most promising ones. For example, consider a
+scheme where we only replace the R mapping of Scheme 2 by the Rev mapping of
+Scheme 1. We have again direct access for occurrences of type 1, but occurrences
+of type 2 now introduce the computation of rank in LZTrie for every possible
+candidate, which is expensive.
+
+4.3 Schemes Requiring (2 + ǫ)uHk + o(u log σ) bits
+
+In Section 4.2 we have used the minimal number of arrows to connect the three
+main components of LZ-index, forming a ring structure. It seems that we cannot
+reduce even more the space requirement of the index by using our navigationscheme 
+approach. However, many of the data structures of the LZ-index are just
+permutations, and so the corresponding arrows can be made bidirectional by means
+of the data structure for permutations [Munro et al. 2003] described in Section 2.3,
+using just (1 + ǫ)n log n + n + o(n) bits for both arrows. This opens several new
+possibilities.
+
+4.3.1 Scheme 3. This scheme represents the following data:
+
+(1) LZTrie: The Lempel-Ziv trie, deﬁned as for Scheme 1, except that now we
+use the representation of Munro et al. [2003] for ids such that the inverse
+permutation ids−1 can be computed in O(1/ǫ) time, requiring (1 + ǫ)n log n +
+n + o(n) bits for any 0 < ǫ < 1.
+
+(2) RevTrie: The Patricia tree of the reversed LZ78 phrases, deﬁned as in Scheme
+1, but now we add the array rids represented using [Munro et al. 2003], so as
+to be able to compute rids−1 eﬃciently.
+
+The resulting navigation scheme is shown in Fig. 7(a). We can simulate the missing 
+arrays Node(i) ≡ selectnodelz(ids−1(i)) and RNode(i) ≡ selectnoder(rids−1(i)),
+all in O(1/ǫ) time.
+The space requirement is (2 + ǫ)n log n+ 3n log σ + 2n log log u + 10n+ o(u) = (2 +
+ǫ)n log n+o(u log σ) bits, which according to Lemma 2.7 is (2+ǫ)uHk(T )+o(u log σ)
+bits, for any k = o(logσ u).
+
+Once again, if we use dfuds to represent both tries of the LZ-index, then occurrences 
+of type 1 can be located in O(m + occ1
+ǫ ) time, because we must use ids−1 to
+access to LZTrie; occurrences of type 2 are located in O( n
+ǫσm/2 ) because we must
+use inverse permutations to move between tries; occurrences of type 3 are located
+in O( m2
+ǫ ) time, since we need to use Node and RNode to check every possible candidate,
+ in O( m2
+ǫ ) time overall. Thus, the occ occurrences of P can be located in
+O( m2
+
+ǫ + n
+Practical Issues. This scheme stores the phrase identiﬁers for both tries which, as
+we have seen for the previous schemes, is very convenient for occurrences of type 2:
+recall that when traversing the RevTrie subtree we have to get the phrase identiﬁer
+
+ǫσm/2 ) average time, for 0 < ǫ < 1. This is O( m2
+
+ǫ ) for m > 2 logσ u.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+25
+
+·
+
+of each node in the subtree; if we do not store the RevTrie identiﬁers, we have to
+access LZTrie to get them (as is the case of Schemes 1 and 2) and then we have
+to access LZTrie again to perform the check. This is not the case for Scheme 3.
+However, now we have paths including inverse permutations, which introduce an
+extra time overhead in practice.
+
+Notice also that this scheme is symmetric in the sense that the checks for occurrences 
+of type 2 cost the same in any direction we choose.
+
+LZTrie
+
+node
+
+RevTrie
+
+node
+
+selectnodelz
+
+preorderlz
+
+phrase
+
+identiﬁer
+
+preorderr
+
+selectnoder
+
+ids−1
+
+ids
+
+rids−1
+
+rids
+
+LZTrie
+preorder
+
+LZTrie
+
+node
+
+(a) Scheme 3.
+
+RevTrie
+preorder
+
+RevTrie
+
+node
+
+selectnodelz
+
+preorderlz
+
+ids−1
+
+ids
+
+LZTrie
+preorder
+
+phrase
+
+identiﬁer
+
+R
+
+R−1
+
+(b) Scheme 4.
+
+preorderr
+
+selectnoder
+
+RevTrie
+preorder
+
+Fig. 7. Reduced navigation schemes over LZ-index components, requiring (2 + ǫ)uHk + o(u log σ)
+bits.
+
+4.3.2 Scheme 4. This scheme represents the following data:
+
+(1) LZTrie: The Lempel-Ziv trie, deﬁned just as in Scheme 3.
+
+(2) RevTrie: The Patricia tree of the reversed LZ78 phrases, deﬁned just as in
+
+Scheme 1.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+26
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+(3) R[1..n]: The mapping from RevTrie preorder positions to LZTrie preorder
+positions, as deﬁned in Scheme 2. This time R is implemented using the succinct
+data structure for permutations of Munro et al. [2003], requiring (1+ǫ)n log n+
+n + o(n) bits to represent R and compute R−1 in O(1/ǫ) worst-case time.
+
+In Fig. 7(b) we draw the navigation scheme. We can simulate the missing
+arrays rids(i) ≡ ids[R[i]], RN ode(i) ≡ selectnoder(R−1(ids−1(i))), and Node(i) ≡
+selectnodelz(ids−1(i)), all of which take O(1/ǫ) time.
+The space requirement is (2 + ǫ)n log n+ 3n log σ + 2n log log u + 10n+ o(u) = (2 +
+ǫ)n log n+o(u log σ) bits, which according to Lemma 2.7 is (2+ǫ)uHk(T )+o(u log σ)
+bits, for any k = o(logσ u). Just as for the previous scheme, the occ occurrences of
+P can be located in O( m2
+
+ǫσm/2 ) average time, for 0 < ǫ < 1.
+
+ǫ + n
+
+Practical Issues. This scheme has more eﬃcient access between tries than Scheme
+3, as we have to use R in the RevTrie-to-LZTrie direction, and R−1 in the opposite
+way. However, since we store the phrase identiﬁers only in LZTrie, retrieving the
+identiﬁer of a RevTrie node requires to access two arrays. For occurrences of type 2,
+the checks from RevTrie to LZTrie require to access R, then ids, and ﬁnally ids−1,
+while in the opposite way we need to use ids, then ids−1, and ﬁnally R−1. The latter
+case can be more expensive since we have to compute two inverse permutations.
+Note also that ids−1 is used in both directions for occurrences of type 2, which
+means that this inverse permutation is the most used at search time. Hence, given
+an amount of space we are able to use, we should use a denser sampling for ids−1
+than for R−1.
+
+Again, we have focused on the most promising schemes requiring (2+ǫ)uHk(T )+
+
+o(u log σ) bits, although there are many other choices.
+
+5. SOME IMPLEMENTATION DETAILS
+
+We describe in this section the most important details in the implementation of our
+indices. We followed the API interface speciﬁcation provided in the Pizza&Chili
+Corpus [Ferragina and Navarro 2005], and made the source code available at http://
+pizzachili.dcc.uchile.cl/indexes/LZ-index/.
+
+5.1 Representing the Tries
+
+We deﬁned our indices in Section 4 in such a way that we can use almost any
+suitable representation for the tries that compose the indices. We just need to deﬁne
+accordingly the preorder and selectnode operations for the chosen representation.
+Having this into account, we implement our reduced LZ-indices in two diﬀerent
+ways:
+
+(1) Using the bp representation [Munro and Raman 2001] for both LZTrie and
+
+RevTrie;
+
+(2) using the dfuds representation [Benoit et al. 2005] for LZTrie, and the bp
+
+representation for RevTrie.
+
+Note we do not use dfuds for RevTrie, as it requires more space. Moreover, just as
+for the original LZ-index, we do not store the symbols labeling the RevTrie edges
+(i.e., the ﬁrst symbol of each string labeling an edge) nor the Patricia-tree skips.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+27
+
+·
+
+This is in order to save space in practice, since these can be computed by using
+the connection with the LZTrie: previous experiments [Navarro 2004; 2008] showed
+that this is suﬃcient for RevTrie as most navigations on it are supported by using
+the LZTrie (and those that are not are usually deep in the trie, where the arity is
+very low and the attractive of dfuds vanishes). We needed to use these arrays in
+theory in order to guarantee the average-time complexity of our data structures.
+
+We describe these implementations in which follows.
+
+5.1.1 Using bp Representation. We implemented the trie operations on top of
+the data structure for balanced parentheses of Navarro [2004, Section 6.1]. The
+trie operations are supported as explained in Section 2.3. Recall that in order
+to support the operations on bp we must support operations f indclose, excess,
+and enclose on the sequence of balanced parentheses. Therefore, we do not store
+information to support f indopen, thus saving space. Moreover, we do not need
+to support operation parent on RevTrie, and thus we do not store information to
+support enclose on the parentheses representing this trie.
+
+Operation child(x, α) is supported by using child(x, i), for i = 1, 2, . . ., until
+ﬁnding the child labeled α. This is because the symbols labeling the children of
+x are scattered throughout array letts and must be found one by one using the
+operations on the parentheses. Whenever we need to support rank and select
+queries (this is, on top of the parenthesis sequences, to represent bitmap B in
+RevTrie, and for the permutation data structures), we use the data structure of
+Gonz´alez et al. [2005].
+
+5.1.2 Using dfuds Representation. The main idea of using the dfuds representation 
+for LZTrie is to reduce the time overhead for computing operation child(x, α)
+incurred by bp.
+
+As done for bp, we represent the dfuds sequence of LZTrie on top of the data
+structure for balanced parentheses of Navarro [2004]. Note that the dfuds representation 
+of a trie tends to have far matching parentheses, since every node is
+formed by a number of opening parentheses (indicating the degree of the node),
+and only a few of these parentheses have the corresponding closing parentheses
+close enough so as not to be stored in the hash tables. Thus the hash tables tend
+to require more space under dfuds. We also use the data structure of Gonz´alez et
+al. [2005] to support rank and select queries.
+
+We study the way in which the trie operations are used by the LZ-index search
+algorithm in order to make this representation more eﬃcient. For example, dfuds
+introduces a heavier use of rank and select in its operations (see Section 2.4),
+according to the original deﬁnitions [Benoit et al. 2005]. However, many of these are
+redundant in the LZ-index (sometimes they are repeated twice in a given sequence
+of operations, as we will see below), and many others can be replaced by sequential
+scans over par, since the dfuds position we are looking for should be not so far
+away from the current position. A list with the most important implementation
+details follows:
+
+Supporting Operation f indopen. Unlike the representation of LZ-index based
+exclusively in bp, with dfuds we need to provide operation f indopen over the
+parentheses sequence. This is necessary, for example, to compute operation parent
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+28
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35
+
+par: ( ( ( ( ) ( ( ( ( ( ) ) ( ) ) ) ( ( ( ) ) ) ) ( ) ) ( ) ( ) ) ( ) ( ) )
+letts:
+
+r l b $
+
+l d a
+
+a
+
+b
+
+a
+
+p
+
+l a
+
+r
+
+p
+
+Fig. 8.
+Notice that the labels of the children of a given node are stored in reverse order.
+
+Illustration of our practical representation of array letts for the dfuds representation.
+
+[Benoit et al. 2005] (recall also Section 2.4). Therefore, we need to add a second
+data structure, like the one used by Navarro [2004] (i.e., a hash table) to support
+f indopen and enclose operations. This adds extra space to dfuds.
+
+A Practical Representation of letts. Recall from Section 2.4 that the symbol
+by which a node x descends from its parent can be computed as letts[rank((par,
+parent(x)) − 1 + childrank(x) − 1], which involves computing several rank, select,
+and parentheses operations. Although these can be computed in constant time in
+theory, we look for a more practical variant in practice.
+
+This problem comes from the fact that there is an inverse relationship between
+the symbol labeling the i-th child of node x′ of degree d (this symbol is originally
+stored at position i within the labels of children of x′) and the opening parenthesis
+used to compute the dfuds position of the i-th child of x′ (recall that we use the
+(d − i + 1)-th opening parenthesis within the representation of x′).
+Therefore, we propose to represent letts by traversing the LZTrie in preorder and,
+for every node x reached, writing contiguously the symbols labeling the children of
+x, this time in reverse order. This means that the label of the last child appears in
+the ﬁrst place, the label of the ﬁrst child appears in the last place, and so on. See
+Fig. 8 for an illustration.
+
+In this way there is a direct relationship between each of the opening parentheses
+deﬁning a given node x′ (which are used to ﬁnd the children of x′) and the labels
+of the children of x′. Thus, the label by which a given node x descends from its
+parent can be computed as letts[rank((par, f indopen(par, x− 1))], avoiding the use
+of operation childrank(x) as in Section 2.3, which involves more rank and select
+operations [Jansson et al. 2007].
+
+Moreover, in many cases we can reuse the operation f indopen computed to get
+the symbol. For example, in the LZ-index, most of the times that we need to know
+the symbol of a given node, we also need to go to the parent node, as for instance
+when computing extract and display operations, and when we use the LZTrie
+to descend in RevTrie. Then, after computing the corresponding symbol, we retain
+the position given by operation f indopen in order to search for the parent of the
+current node, avoiding to repeat the same operation f indopen when computing
+operation parent.
+
+Since the labels of the children of node x are stored contiguously and sorted
+(yet in reversed order, according to our representation), array letts is stored in a
+plain way, without using any rank and select data structure, thus saving space.
+Operation child(x, α) is implemented by binary searching the list of labels of x.
+When the list is small (say, less than 10 elements) we perform a sequential scan
+on the symbols. This saves time compared with the bp representation, where we
+have to repeatedly use operation f indclose on the parentheses in order to ﬁnd the
+child we are looking for. With dfuds, on the other hand, this work is done on the
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+29
+
+·
+
+symbols, and then we map again to the dfuds sequence to ﬁnd the corresponding
+child (this involves only one f indclose operation).
+
+Avoiding Operation depth on dfuds. The original dfuds representation [Benoit
+et al. 2005] does not provide operation depth, which is latter supported by Jansson
+et al.
+[Jansson et al. 2007] in O(1) time and requiring o(n) extra bits of space.
+However, in the LZ-index we need to use depth in a very limited way, which helps
+us implement this operation simply and eﬃciently. We choose not to store any extra
+depth information, an thus we save space. The depth of a node could be computed
+by brute force, by successively going to the parent in LZTrie up to reaching the
+trie root. Therefore, we seek to avoid the computation of depth in the LZ-index
+search algorithm.
+
+In the LZ-index search algorithm, we only need to use operation depth when
+locating occurrences of type 1 (see Section 3.3.1). Recall that in order to ﬁnd
+occurrences of type 1 we must ﬁrst search for P r in RevTrie, getting node vr.
+Then, for each node in the subtree of vr we map to the corresponding node vlz
+in LZTrie, and then we traverse the subtree of vlz to report occurrences of type
+1. The problem here is how to compute the oﬀset of every occurrence within the
+corresponding phrase (in Section 3.3.1 we use operation depth to do that). However,
+note that the oﬀset for node vlz is m, since the phrase ends with P . Note also that
+the oﬀset for the children of vlz is m + 1, and in general the oﬀset of node v′
+lz within
+the subtree of vlz is m + d, where d is the diﬀerence of depths between vlz and v′
+lz.
+So, instead of computing the depth of the nodes within the subtree of vlz, which is
+expensive in our representation, we compute the oﬀset of the nodes. This problem
+can be solved in a straightforward way in bp, since we perform a preorder traversal
+from vlz, with initial oﬀset m. We then increment the oﬀset every time we enter
+a new subtree (which is indicated by ‘(’ in bp), and decrement it when leaving a
+subtree (which is marked by ‘)’ in bp). The preorder traversal is carried out by
+sequentially traversing the bp sequence and array ids, and not by using operation
+child on LZTrie. However, this is not so easy in dfuds, since, for example, there
+is no clear marker of the end of a subtree (i.e., in a sequential scan on dfuds there
+is no direct way to know whether a node is the last one in a given subtree).
+
+Therefore, in the dfuds representation we start a preorder traversal from node
+vlz, and store the degree (number of children) of vlz and its oﬀset m in an initially
+empty stack. We then continue with the next node in preorder. At every step, the
+oﬀset for the current node is computed as the oﬀset of the parent node (which is
+the one at the top of the stack) plus one. Every time the degree stored in the top
+is (or becomes) 0 (leaves are a particular case), we pop it, and then decrement the
+degree of the node in the top, indicating that a new child of this node has been
+fully processed (this can eventually produce more pops when all of the children of
+the top node have been processed). As it can be seen, we are using the stack to
+know when the subtree of a node has been completely processed. This procedure
+ends when the stack becomes empty.
+
+As in the case of bp, the preorder traversal is performed by a sequential scan on
+the dfuds sequence, and the degree of every node x is computed by counting the
+number of opening parentheses in the representation of x.
+
+This procedure could be also used to compute the depth of all nodes within the
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+30
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+subtree of vlz, by initializing the stack with the depth of vlz, instead of storing the
+initial oﬀset m. Note also we do not need to explicitly store depths or oﬀsets, as
+they correspond to the stack height plus a constant.
+
+Implementation of Operation degree. In our implementation we do not use the
+original deﬁnition for operation degree, which is based on operation select in order
+to ﬁnd the next closing parenthesis which ﬁnishes the deﬁnition of the node. This
+allows us to count the number of opening parentheses deﬁning the current node. In
+practice, in most cases this closing parenthesis is not so far away from the current
+position in dfuds, except perhaps for the trie root. This is because in practice the
+tries tend to have high degrees only in the ﬁrst levels. Thus, we explicitly store the
+degree of the root node, and for the rest of the nodes we perform a sequential scan
+on the dfuds sequence. To avoid looking at every parenthesis in the process, we
+advance by machine words (in our experiments this shall mean 32 bits), until ﬁnding
+the ﬁrst word containing a closing parenthesis. We represent opening parentheses
+with a 0, and closing ones with a 1. Thus, we advance while the corresponding
+word represents a 0, i.e. it stores only opening parentheses. However, in the case of
+very large alphabets the original deﬁnition of degree could be better, or we could
+replace the sequential search by an exponential search using the rank subdirectory.
+
+5.2 Computing Text Positions
+
+We add to our indices a data structure in order to transform pattern occurrences
+in the format Jt, off setK into real text positions. We deﬁne array T P os storing
+the absolute starting position (in the text) for the LZ78 phrases with identiﬁer
+i · b, for i > 0, for a total of n
+b log u bits. We also deﬁne array Off set, storing
+in Off set[i · b + j], for j > 0, the oﬀset (in number of text symbols) of phrase
+i · b + j with respect to phrase i · b, requiring n log M extra bits of space, where
+M is the maximum number of text positions between two consecutive sampled
+phrases. If LZTrie has height h = O(log n) (which is true in practice with high
+probability [Knessl and Szpankowski 2000]), then M = O(b log n), and thus array
+Off set requires O(n(log b + log log n)) bits. By choosing b = log u the total space
+requirement for both arrays is n + O(n log log u) = o(u log σ) bits.
+
+Given an occurrence Jt, off setK, the real text position for that occurrence can be
+computed in constant time as T P os[⌊(t + 1)/b⌋] + Off set[t + 1] − off set. In our
+experiments, we choose b = 32 (in a 32-bit machine) such that the division by b and
+taking the ﬂoor can be carried out eﬃciently by using shifts on machine words. For
+extract queries, we are given a text position from where to extract and we want to
+know the corresponding LZTrie node from where to start uncompressing the text.
+Therefore, given a text position pos we can obtain the phrase containing pos by
+ﬁrst binary searching T P os, ﬁnding the greatest phrase i · b such that its position
+T P os[i] is smaller or equal to pos. Then, we sequentially look in the corresponding
+segment of Off set[i · b..(i + 1) · b] for the greatest phrase t whose starting position
+does not exceed pos. Thus, the text position pos belongs to phrase t. The time for
+this operation is O(log u), because of the binary search on T P os and the sequential
+search in the segment of Off set.
+
+In Section 6.2 we will show the experimental space requirement of this data
+
+structure for a set of real-life texts we have used.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+31
+
+·
+
+5.3 Supporting Partial locate Queries
+
+In many applications it is quite common that we do not need to ﬁnd all of the pattern 
+occurrences, but just a few (arbitrary) of them. For this kind of applications,
+we design an algorithm to answer partial locate queries, where we are interested in
+locating just K arbitrary pattern occurrences. Our algorithm, which proﬁts from
+the properties of the LZ-index in order to support fast searches, is as follows:
+
+(1) Given a search pattern P , notice that a particular occurrence of it can be found
+by searching for P in LZTrie. In other words, P equals an LZ78 phrase, which is
+a particular case of occurrence of type 1, and can be found very fast in practice
+since this is better than using the slower RevTrie [Navarro 2008]. If P exists
+as a phrase, say corresponding to node vlz in LZTrie, then all of the nodes
+descending from vlz in the trie also correspond to occurrences of P , and can be
+used to answer the query. Thus, we traverse the subtree of vlz and report every
+node found, as done for occurrences of type 1 (see Section 3.3.1). We stop the
+procedure as soon as we ﬁnd K pattern occurrences.
+
+(2) If the previous step was not enough to answer the query, and in case that P
+exists in LZTrie, then we map to the node corresponding to P r in RevTrie
+(which exist for sure since P is an LZ78 phrase), and go on to locate the rest
+of occurrences of type 1 as usual. Otherwise, we delay occurrences of type 1
+for a further step and go to the next step.
+
+(3) In case P does not exist as an LZ78 phrase, we proceed with occurrences of
+type 2, trying to reuse as much as possible the work already done in step (1).
+We are thus delaying occurrences of type 1 for a further step. Let P [1..i] be
+the longest proper preﬁx of the pattern that exists as an LZ78 phrase. Hence,
+P r[1..i] exists as a reverse phrase in RevTrie. Because of Property 2.3, every
+preﬁx of P [1..i] also exists as a phrase in LZ78 (and the corresponding reverses
+exist in RevTrie). Then, to reuse the work already done when searching for P
+in LZTrie, we map to the RevTrie node corresponding to P r[1..i], which gives
+us node vr, and then search for P [i + 1..m] in LZTrie, to get node vlz. We
+then search for occurrences of type 2 corresponding to the partition P [1..i] and
+P [i + 1..m], using the nodes vlz and vr, in the usual way and stopping as soon
+as we ﬁnd K occurrences. Note that by choosing the longest preﬁx P [1..i] that
+exists in LZTrie, we are reducing as much as possible the length of the suﬃx
+P [i + 1..m] to be searched in LZTrie. If this was not enough to answer the
+query, we repeat the process for the occurrences of P [1..i− 1] and P [i..m], in a
+similar way, and so on.
+
+(4) We search for the remaining occurrences of type 2 (i.e., using those partitions
+
+of the pattern that were not tried in the previous step)
+
+(5) Then, we continue with occurrences of type 1, as usual and just if P does not
+
+exist in LZTrie (i.e., these were not tried before).
+
+(6) Finally we try occurrences of type 3.
+
+We call level 0 of the search to the step of searching for P in LZTrie, level 1
+the search for occurrences of type 1 (either at steps (2) and (5)), level 2 the search
+for occurrences of type 2 (either at steps (3) and (4)), and level 3 the search for
+occurrences of type 3 (step (6)). As it can be seen, we try to get fast access to
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+32
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+the pattern occurrences, avoiding as much as we can the trie navigations, which
+become more expensive if we want to locate just a few occurrences. We shall use
+this approach also to support eﬃcient exists queries (similar to K = 1).
+
+6. EXPERIMENTAL RESULTS
+
+We have now a number of practical reduced schemes for LZ-index, each one requiring 
+a diﬀerent amount of memory space. Hence given an amount of available
+storage, it is interesting to know which alternative is the best for that space. We
+hope that larger alternatives are faster in practice, whereas the smaller ones will
+still be competitive against the best existing indices.
+
+6.1 Experimental Setup
+
+For the experiments of this section we used an Intel(R) Pentium(R) 4 processor at
+3 GHz, about 4 gigabytes of main memory and 1024 kilobytes of cache, running
+version 2.6.13-gentoo of Linux kernel. We compiled our algorithms with gcc
+3.3.6 using full optimization.
+
+6.1.1 Text Collections. We test our indices in diﬀerent practical scenarios, using
+
+the texts provided in the Pizza&Chili Corpus [Ferragina and Navarro 2005]:
+
+—English Texts: although in many cases natural-language texts are searched for
+whole words or phrases, there are many other cases where a more powerful fulltext 
+search is needed. For the experiments with English text we use the ﬁle
+http://pizzachili.dcc.uchile.cl/texts/nlang/english.200MB.gz of 200
+megabytes.
+
+—DNA Sequences: nowadays, one of the main applications of full-text indexing is
+that of computational biology, in particular indexing DNA sequences. We test
+with the ﬁle http://pizzachili.dcc.uchile.cl/texts/dna/dna.200MB.gz, of
+200 megabytes.
+
+—MIDI Pitch Sequences: a very interesting application that has appeared in recent
+years is that of processing MIDI pitch sequences. In this case we test with the
+ﬁle of about 53 megabytes downloadable from http://pizzachili.dcc.uchile.
+cl/texts/music/pitches.gz.
+
+—XML Texts: since XML is becoming the standard to represent semi-structured
+text databases as well as in many other applications, there exists the need of
+managing a huge amount of texts of this kind. We test with the XML ﬁle of
+200 megabytes downloadable from http://pizzachili.dcc.uchile.cl/texts/
+xml/dblp.xml.200MB.gz.
+
+—Proteins: another interesting application of text-indexing tools in biology is that
+of indexing and searching proteins. We use the ﬁle http://pizzachili.dcc.
+uchile.cl/texts/protein/proteins.200MB.gz, of 200 megabytes.
+
+—Source Code: to test our indices in applications like software development, we use
+the source-code ﬁle http://pizzachili.dcc.uchile.cl/texts/code/sources.
+200MB.gz, of 200 megabytes.
+
+6.1.2 Comparison against Other Indices. We compare our indices against the
+
+most eﬃcient indices we are aware of, most of them available in Pizza&Chili:
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+33
+
+·
+
+Sadakane’s Compressed Suﬃx Array (CSA). This index [Sadakane 2003] is a representative 
+of the family of compressed suﬃx arrays [Grossi and Vitter 2005; Grossi
+et al. 2003; Sadakane 2003]. It requires ǫ−1uH0(T ) + O(u log log σ) bits of space, a
+counting time of O(m log u), a locating time of O(logǫ u) per occurrence reported,
+and an extracting time O(ℓ+logǫ u) for any text substring of length ℓ, where 0 < ǫ 6
+1 is any constant. We use the code provided at http://pizzachili.dcc.uchile.
+cl/indexes/Compressed Suffix Array/sada csa.tgz. We have two parameters
+to set up for this index. The ﬁrst one is the sample rate of suﬃx array positions
+(this information is used to speed up the locating and extracting operations), and
+the second one is the sample rate of the Ψ function. For exists and count queries
+we do not store any suﬃx array position, but only Ψ values. For locate queries,
+we used values of 4, 8, 16, 32, and 64 for suﬃx array positions, and the value 128
+to sample the Ψ function (as this has shown to be the most eﬃcient alternative
+[Ferragina et al. 2007]).
+
+Alphabet Friendly FM-index (AF-FMI). This index [Ferragina et al. 2007] is
+based on the backward-search concept [Ferragina and Manzini 2005]. It has a space
+requirement of uHk(T ) + o(u log σ) bits, a counting time O(m), a locating time
+O(log1+ǫ u) per occurrence reported, and an extracting time O(ℓ + log1+ǫ u), for
+σ = O(polylog(u)), any constant ǫ > 0, and any k 6 α logσ u, where 0 < α < 1 is
+any constant. We use the code provided at http://pizzachili.dcc.uchile.cl/
+indexes/Alphabet-Friendly FM-Index/af-index v2.tgz. We have only one parameter 
+to set up in the code, which is the sample rate of suﬃx array positions. We
+have used sample rates of one suﬃx array position stored out of 4, 8, 16, 32, and
+64 text positions. For exists and count queries we do not store any suﬃx array
+position.
+
+Succinct Suﬃx Array (SSA). This index [M¨akinen and Navarro 2005] is also
+based on backward search, but uses only one wavelet tree [Grossi et al. 2003],
+achieving uH0(T ) + o(u log σ) bits of space. The time complexities of this index are
+just as for the AF-FMI. We use the code provided at http://pizzachili.dcc.
+uchile.cl/indexes/Succinct Suffix Array/SSA v2.tgz. We use the same parameters 
+as for the AF-FMI.
+
+Inverted LZ-index (ILZI). This index [Russo and Oliveira 2008] is based on
+Lempel-Ziv compression, using a variant of the LZ78 parsing called maximal parsing,
+ which has many interesting properties. The ILZI requires at most (5+ǫ)uHk(T )
++ o(u log σ) bits of space, and has a locating complexity of O((m + occ) log u). We
+use the implementation by Luis Russo, which does not conform the Pizza&Chili
+API as the other indices. In particular, pattern occurrences are reported in the
+format Jt, off setK, just like for the original LZ-index. The index does not include
+the data structure to transform those occurrences into real text positions, as our
+implementations do. To be fair, we sum the space of the described data structure
+for text positions to the space of this index. We also sum the average time to
+transform occurrences into real text positions for locate queries. According to our
+experiments, this is 1.3 microseconds per occurrence. As an additional consequence,
+this index does not provide extract queries, but only display queries. So, we are
+not able to extract arbitrary text substrings.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+34
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+It is important to note also that the current implementation of the ILZI does
+not return to the invoking application an array with the pattern occurrences, as
+required by the Pizza&Chili API. This implementation just prints the number of
+phrases containing the starting position of the occurrences. We get rid of the print
+operation in the code, and thus there is no any reporting operation (we just ﬁnd
+the occurrences). In particular, we are not accounting for the overhead of managing
+the occurrence array, which grows dynamically as more occurrences are found.
+
+Russo and Oliveira [2008] deﬁne a practical variant of LZ78 parsing, the so-called
+LZ78 maximal parsing with quorum l. The idea is that for every phrase Bi = Bj · c,
+Bj is the longest preﬁx of the rest of the text that appears at least l + 1 times in
+B0 . . . Bi−1. Note that by using l = 0 we get the original LZ78 parsing. In this
+way, by using larger quorum values we can reduce the number of phrases in the
+LZ78 maximal parsing, hence reducing the number of nodes in the trie representing
+those phrases, and thus reducing the space of the index. We use quorum values
+l = 0, 1, 2, 4, 8, and 16 to get diﬀerent space/time trade-oﬀs, though this is not
+actually a trade-oﬀ parameter, but an optimization parameter, as we shall see in
+our experiments. Smaller values of l do not yielded a signiﬁcant reduction in the
+space requirement.
+
+6.2 Comparison of Space Requirement and Construction Time
+
+In Table I we show the construction time and ﬁnal space requirement for the indices
+we have tested. As it can be seen, we have reduced the space of the original LZindex,
+ and in the case of Scheme 3 we oﬀer a space/time trade-oﬀ. Note that the
+maximum space requirement of Scheme 3 is about the same as that of the original
+LZ-index, and that the minimum space requirement we achieve is in all cases around
+66% the space of the original LZ-index.
+
+In many cases, such as for XML documents and DNA data, our indices are smaller
+than the original text. This is important by itself since we are able to provide
+indexing capabilities with a representation which is smaller than the original text.
+We also conclude that our indices are much faster to build than competing
+schemes. It can be argued that construction time is not so important in indexed
+text searching, where one constructs the index once and queries it several times,
+so construction time is amortized over a number of queries. However, as we deal
+with very large (and sometimes huge) texts (because we would use a classical index
+otherwise), construction time is not irrelevant. As a comparison between LZ-based
+schemes, the ILZI (which is in most cases the slowest index to build) is built about
+9 times slower than our schemes (e.g., in the case of English text). One reason for
+this is that our indices are constructed by performing only one pass over the text,
+while the ILZI needs two passes [Russo and Oliveira 2008]. Recall that the ILZI
+does not construct any text-position data structure, which would further increase
+its construction time.
+
+In Table II we show the experimental size of the data structures described in
+Section 5.2 for reporting text positions in our LZ-indices. This space is already
+accounted for in Table I.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+35
+
+·
+
+Table I. Range of space requirement and construction time for the diﬀerent indices we have tested.
+The space is shown as a fraction of text size. Indexing time is shown in megabytes per second.
+
+Text
+
+Index
+
+Range of space req.
+(fract. of text size)
+
+Indexing speed
+(MB per second)
+
+English
+
+DNA
+
+CSA
+SSA
+AF-FMI
+ILZI
+Original LZ-index
+Scheme 1
+Scheme 2
+Scheme 3
+Scheme 4
+CSA
+SSA
+AF-FMI
+ILZI
+Original LZ-index
+Scheme 1
+Scheme 2
+Scheme 3
+Scheme 4
+
+MIDI Pitches CSA
+SSA
+AF-FMI
+ILZI
+Original LZ-index
+Scheme 1
+Scheme 2
+Scheme 3
+Scheme 4
+CSA
+SSA
+AF-FMI
+ILZI
+Original LZ-index
+Scheme 1
+Scheme 2
+Scheme 3
+Scheme 4
+CSA
+SSA
+AF-FMI
+ILZI
+Original LZ-index
+Scheme 1
+Scheme 2
+Scheme 3
+Scheme 4
+CSA
+SSA
+AF-FMI
+ILZI
+Original LZ-index
+Scheme 1
+Scheme 2
+Scheme 3
+Scheme 4
+
+Proteins
+
+XML
+
+Sources
+
+0.43 – 1.50
+0.87 – 2.87
+0.65 – 2.65
+
+1.23
+1.69
+1.39
+1.38
+
+1.13 – 1.69
+1.13 – 1.69
+0.46 – 1.53
+0.50 – 2.50
+0.48 – 2.48
+
+0.95
+1.24
+1.03
+1.01
+
+0.83 – 1.24
+0.83 – 1.24
+0.62 – 1.68
+1.04 – 3.04
+0.93 – 2.94
+
+1.86
+2.58
+2.16
+2.12
+
+1.76 – 2.58
+1.76 – 2.58
+0.29 – 1.35
+0.98 – 2.98
+0.54 – 2.54
+
+0.61
+0.93
+0.77
+0.76
+
+0.63 – 0.93
+0.63 – 0.93
+0.67 – 1.73
+0.82 – 2.82
+0.82 – 2.82
+
+1.73
+2.40
+1.99
+1.96
+
+1.62 – 2.40
+1.62 – 2.40
+0.38 – 1.44
+1.01 – 3.01
+0.73 – 2.73
+
+1.15
+1.67
+1.39
+1.37
+
+0.45 – 0.44
+0.93 – 0.90
+
+0.26
+0.15
+1.47
+1.30
+1.27
+
+0.91 – 1.33
+0.71 – 1.31
+
+0.51
+
+1.33 – 1.28
+
+0.43
+0.66
+2.35
+2.02
+1.99
+
+1.36 – 2.12
+1.03 – 2.06
+0.94 – 0.92
+1.80 – 1.71
+
+0.36
+0.24
+1.76
+1.49
+1.47
+
+0.88 – 1.58
+0.62 – 1.56
+
+0.68
+
+1.34 – 1.29
+0.44 – 0.43
+
+0.34
+2.38
+2.15
+2.15
+
+1.57 – 2.23
+1.24 – 2.17
+0.57 – 0.56
+0.97 – 0.95
+0.38 – 0.37
+
+0.24
+1.55
+1.29
+1.25
+
+0.79 – 1.35
+0.58 – 1.30
+0.76 – 0.75
+1.37 – 1.32
+
+0.30
+0.17
+1.73
+1.54
+1.51
+
+1.13 – 1.67
+1.13 – 1.67
+
+1.04 – 1.59
+0.79 – 1.54
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+36
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+Table II. Size of the data structure for reporting text positions in our LZ-indices.
+
+Text
+
+Size of text-position data structure
+
+(as a fraction of text size)
+
+English
+DNA
+MIDI Pitches
+XML
+Proteins
+Sources
+
+0.14
+0.11
+0.27
+0.09
+0.22
+0.16
+
+6.3 Comparison of Search Time
+
+Next we experimentally test whether the trade-oﬀs we provide are competitive for
+compressed text searching. In our experiments, we call S2 dfuds the version of
+Scheme 2 implemented on dfuds, and S3 dfuds the dfuds version of Scheme 3.
+We do not include Scheme 1 based on dfuds, since it is outperformed by S2 dfuds,
+both of them requiring about the same space. We no dot include Scheme 4 in our
+plots, since Scheme 3 outperforms it in most cases (though they require almost the
+same space). However, Scheme 4 is interesting by itself since it can be reduced to
+(1 + ǫ)uHk(T ) + o(u log σ) bits of space [Arroyuelo et al. 2006; 2008], which cannot
+be achieved by other schemes.
+
+6.3.1 Extract Queries. Since compressed full-text self-indices replace the text,
+the fast extraction of arbitrary text substrings is essential in most applications, and
+thus one of the most relevant problems the indices face. To test the performance
+of our indices, we extract 10,000 random snippets, each of length 100. We measure
+the time per symbol extracted, so we average over a total of 1 million extracted
+symbols.
+
+In Fig. 9 we show the experimental results. As we can see, our indices are
+very competitive in the range of space they require, in most cases outperforming
+competing schemes, which in some cases cannot compete even if using more memory
+than ours. In the particular case of DNA text, our indices are competitive against
+the SSA, which in the case of small alphabets is a very good alternative. This
+is because the corresponding wavelet tree [Grossi et al. 2003], on which the SSA
+is based, is shallow, and then each text symbol can be extracted very fast (every
+symbol is extracted in time proportional to the height of the corresponding wavelet
+tree).
+
+This shows the superiority of our LZ-indices in this important aspect. Also, we
+can see that our approach to reduce the space of the LZ-index is eﬀective in this
+case, since we are able to reduce the space while still maintaining a good extracting
+performance.
+
+6.3.2 Display Queries. In many applications displaying a context surrounding
+the occurrences is as important as (and sometimes more important than) the occurrence 
+positions themselves. This is not a problem for classical indices, since the
+text is available and hence we can get the contexts from the occurrence positions
+obtained with locate. In the case of self-indices, on the other hand, one must ask
+the index to reproduce the occurrence contexts, which is achieved with display
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+37
+
+·
+
+Extract English text
+
+Extract DNA text
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+e
+m
+
+i
+t
+ 
+
+g
+n
+
+i
+t
+c
+a
+r
+t
+x
+E
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+c
+a
+r
+t
+x
+E
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+c
+a
+r
+t
+x
+E
+
+3.0
+
+2.5
+
+2.0
+
+1.5
+
+1.0
+
+0.5
+
+0
+
+0
+
+3.0
+
+2.5
+
+2.0
+
+1.5
+
+1.0
+
+0.5
+
+0
+
+0
+
+3.0
+
+2.5
+
+2.0
+
+1.5
+
+1.0
+
+0.5
+
+0
+
+0
+
+Scheme 1
+Scheme 2
+Scheme 3
+S2 DFUDS
+S3 DFUDS
+AF-FMI
+SSA
+CSA
+LZ-index
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+2.5
+
+Extract MIDI Pitches
+
+0.5
+
+1
+
+1.5
+
+2
+
+2.5
+
+3
+
+Index size, as a fraction of text size
+
+Extract Proteins
+
+0.5
+
+1
+
+1.5
+
+2
+
+2.5
+
+3
+
+Index size, as a fraction of text size
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+e
+m
+
+i
+t
+ 
+
+g
+n
+
+i
+t
+c
+a
+r
+t
+x
+E
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+c
+a
+r
+t
+x
+E
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+c
+a
+r
+t
+x
+E
+
+3.0
+
+2.5
+
+2.0
+
+1.5
+
+1.0
+
+0.5
+
+0
+
+0
+
+3.0
+
+2.5
+
+2.0
+
+1.5
+
+1.0
+
+0.5
+
+0
+
+0
+
+3.0
+
+2.5
+
+2.0
+
+1.5
+
+1.0
+
+0.5
+
+0
+
+0
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Extract XML text
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Extract Source Code
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+2.5
+
+2.5
+
+2.5
+
+Fig. 9. Experimental extracting time, for random snippets of length ℓ = 100. Times are measured
+in microseconds per symbol extracted.
+
+queries since we do not have the text at hand. Thus, fast displaying the occurrence
+contexts is also important for a self-index.
+
+To test our indices, we search for 5 million pattern occurrences and then show a
+context of 50 symbols surrounding every occurrence, for patterns of length 10 (in
+other words, we display 110 symbols per occurrence).
+
+In most indices, display(P, ℓ) queries can be thought of as a locate(P ) query (in
+order to ﬁnd the pattern occurrences) followed by an extract(i, j) query (where
+i and j are computed by means of the positions obtained with locate and the
+context length ℓ). In our LZ-indices, however, we originally get the occurrences in
+the format Jt, off setK, to ﬁnally transform t and off set into a text position (by
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+38
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+means of the data structure described in Section 5.2). This text position must be
+transformed by extract again into an LZ78 phrase (recall that this involves binary
+searching the text-position data structures), from where we start the extraction of
+text in LZTrie. To avoid repeating this work, we do not transform the occurrences
+into text positions when performing display queries. We rather display text with
+a simpliﬁed version of extract that works on LZ78 phrases rather than on text
+positions.
+
+In Fig. 10 we show the experimental results. The current implementation of the
+ILZI shows only a context preceding the pattern occurrences, and not surrounding
+the occurrences as other schemes do. For our LZ-indices, showing a context surrounding 
+the occurrences (which is usually required) introduces the use of extra
+operations which are not needed when showing a context preceding an occurrence.
+As it can be seen, just like for extract queries, our indices are among the most competitive 
+schemes for displaying text, in many cases outperforming the competing
+ILZI.
+
+6.3.3 Locate Queries. For locate queries we search for 10,000 patterns extracted 
+at random positions from the text, with length 5, 10, and 15. For short
+patterns, we limit the total number of occurrences found to 5 million. We measure
+the time in microseconds per occurrence found.
+
+As we said before, locate queries are important in classical full-text indexing,
+where one has the text at hand in order to access the occurrences and the contexts
+surrounding them. This is somehow equivalent to display queries in the scenario
+of compressed full-text self-indices. Obtaining just text positions (and nothing else)
+can be interesting in speciﬁc cases, but display queries have broader applications.
+
+Partial locate Queries. In many applications we do not need to locate all of
+the pattern occurrences at once, but just a few of them. This is a very challenging
+problem for our LZ-indices since, for example, the indices based on suﬃx arrays are
+very eﬃcient to ﬁnd the suﬃx-array interval containing the occurrences, and hence
+they are rapidly ready to start locating the occurrences. The ILZI has also a very
+fast O(m) trie navigation before starting the locating procedure.
+
+We test here our algorithm deﬁned in Section 5.3 (recall that we divide the search
+process into four levels, level 0 up to 3). In Table III we show the percentage of
+occurrences that are found in each level of search, for K = 1 and for the diﬀerent
+text collections. Notice that the search of level 0 (i.e., searching for P as a whole
+phrase in LZTrie) is very eﬀective for patterns of length 5 to 10 (in the case of DNA,
+for example, almost 100% of the queries can be answered at level 0). Notice also that
+the percentage found at level 1 is relatively small compared to the corresponding
+percentage of level 0. Recall that with the search of level 0 we look for a particular
+case of occurrences of type 1. This means that most of the times a pattern exists
+as an occurrence of type 1, this can be found at level 0 of the search. For longer
+patterns, m = 15, there is a smaller probability of ﬁnding the occurrence contained
+in a single phrase, and thus the percentage found at level 0 is smaller.
+
+In Figs. 11 up to 14 we show the experimental result for values K = 1 and 5,
+and for m = 5 and 10. We do not show the results for m = 15 since the results are
+poorer, as predicted by the results of Table III.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+39
+
+·
+
+Display English text
+
+Display DNA text
+
+2.0
+
+1.5
+
+1.0
+
+0.5
+
+0
+
+0
+
+1.0
+
+0.8
+
+0.6
+
+0.4
+
+0.2
+
+0
+
+0
+
+1.0
+
+0.8
+
+0.6
+
+0.4
+
+0.2
+
+0
+
+0
+
+Scheme 1
+Scheme 2
+Scheme 3
+S2 DFUDS
+S3 DFUDS
+AF-FMI
+SSA
+CSA
+LZ-index
+ILZI
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Display MIDI Pitches
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Display Proteins
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+2.5
+
+2.5
+
+2.5
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+e
+m
+
+l
+
+i
+t
+ 
+y
+a
+p
+s
+D
+
+i
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+l
+
+i
+t
+ 
+y
+a
+p
+s
+D
+
+i
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+l
+
+i
+t
+ 
+y
+a
+p
+s
+D
+
+i
+
+2.5
+
+2.0
+
+1.5
+
+1.0
+
+0.5
+
+0
+
+0
+
+1.4
+
+1.2
+
+1.0
+
+0.8
+
+0.6
+
+0.4
+
+0.2
+
+0
+
+0
+
+1.4
+
+1.2
+
+1.0
+
+0.8
+
+0.6
+
+0.4
+
+0.2
+
+0
+
+0
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Display XML text
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Display Source Code
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+2.5
+
+2.5
+
+2.5
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+e
+m
+
+l
+
+i
+t
+ 
+y
+a
+p
+s
+D
+
+i
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+l
+
+i
+t
+ 
+y
+a
+p
+s
+D
+
+i
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+l
+
+i
+t
+ 
+y
+a
+p
+s
+D
+
+i
+
+Fig. 10. Experimental display time, for snippets of length ℓ = 110 around every pattern occurrence.
+Times are measured in microseconds per symbol extracted.
+
+For m = 5 and K = 1, the most interesting results are obtained in the cases of
+English text, DNA, XML, and proteins, though in the latter case our indices do
+not obtain good compression. For DNA, S3 dfuds is unbeatable since, as we have
+seen in Table III, 100% of the occurrences are found at level 0 of the search. Notice
+that for MIDI pitches our performance is not so competitive (except perhaps for
+S2 dfuds), as it was also predicted by Table III: only 73% of the occurrences are
+found at level 0, and thus we need more trie navigations.
+
+Except for MIDI pitches, in all other cases the best alternatives are the indices
+based on Lempel-Ziv compression: ours and the ILZI (the best in each case depends
+on the space usage, as it can be seen). This shows that Lempel-Ziv-based indexing is
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+40
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+Table III. Percentage of patterns found at each level of search, for partial locate queries with
+K = 1 and for diﬀerent pattern lengths. Level 0: P is found as an LZ78 phrase in LZTrie; Level
+1: P is found as occurrence of type 1, but not as a whole phrase; Level 2: P is found as occurrence
+of type 2; Level 3: P is found as occurrence of type 3.
+
+Text
+
+Level
+
+Percentage per level
+
+m = 5 m = 10 m = 15
+
+English
+
+DNA
+
+MIDI Pitches
+
+XML
+
+Proteins
+
+Sources
+
+0
+1
+2
+3
+
+0
+1
+2
+3
+
+0
+1
+2
+3
+
+0
+1
+2
+3
+
+0
+1
+2
+3
+
+0
+1
+2
+3
+
+98.64
+0.54
+0.82
+0.0
+
+100.0
+0.0
+0.0
+0.0
+
+72.28
+3.69
+23.82
+0.21
+
+95.41
+2.59
+1.99
+0.01
+
+98.96
+0.71
+0.33
+0.0
+
+94.31
+2.73
+2.94
+0.02
+
+55.86
+6.27
+34.97
+2.90
+
+99.26
+0.33
+0.41
+0.0
+
+20.01
+2.10
+42.66
+35.23
+
+65.61
+11.53
+19.55
+3.31
+
+13.29
+1.41
+63.87
+21.43
+
+48.40
+9.34
+37.15
+5.11
+
+7.80
+1.83
+63.14
+27.23
+
+11.63
+1.06
+78.74
+8.57
+
+9.69
+1.38
+19.67
+69.26
+
+37.56
+15.53
+32.13
+14.78
+
+8.51
+1.29
+11.23
+78.97
+
+21.41
+6.01
+44.11
+28.47
+
+a very competitive choice in general, despite that suﬃx-array-based indices basically
+compute the suﬃx-array interval containing the occurrences, and then we ask the
+index to obtain just one of these occurrences. As we shall see later with count
+queries, these indices are very eﬃcient to ﬁnd the suﬃx-array interval; however,
+asking them to obtain just one occurrence makes them signiﬁcantly less competitive.
+Notice also that our indices based on dfuds outperform (in most cases by far)
+our indices based on bp. This is because the fast navigation on the tries becomes a
+fundamental aspect, since we are reporting just a few occurrences. For this reason,
+and in order to make our plots clearer, we do not show the results for Scheme 1,
+Scheme 2, and the original LZ-index.
+
+As we increase the number of occurrences to locate, in principle the trie navigations 
+are amortized by reporting more occurrences. However, our indices may
+need to go on more levels of the search, which means more navigations on the
+tries. Therefore, the total cost depends on the number of occurrences found in each
+search level. In general, as K grows, it becomes more diﬃcult to compete since
+occurrences at higher levels are more expensive to obtain. Yet, we still provide
+some interesting cases for K = 5 and K = 10 (the latter case is not shown; results
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+41
+
+·
+
+Partial Locate English text, m=5, K=1
+
+Partial Locate DNA text, m=5, K=1
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+
+g
+n
+
+i
+t
+
+a
+c
+o
+L
+
+50
+45
+40
+35
+30
+25
+20
+15
+10
+5
+0
+
+0
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+140
+
+120
+
+100
+
+80
+
+60
+
+40
+
+20
+
+0
+
+0
+
+60
+
+50
+
+40
+
+30
+
+20
+
+10
+
+0
+
+0
+
+Scheme 3
+S2 DFUDS
+S3 DFUDS
+AF-FMI
+SSA
+CSA
+ILZI
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+
+g
+n
+
+i
+t
+
+a
+c
+o
+L
+
+20
+
+15
+
+10
+
+5
+
+0
+
+0
+
+2.5
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Partial Locate MIDI Pitches, m=5, K=1
+
+Partial Locate XML text, m=5, K=1
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+60
+
+50
+
+40
+
+30
+
+20
+
+10
+
+0
+
+0
+
+80
+
+70
+
+60
+
+50
+
+40
+
+30
+
+20
+
+10
+
+0
+
+0
+
+2.5
+
+2.5
+
+0.5
+
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Partial Locate Proteins, m=5, K=1
+
+0.5
+
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+0.5
+
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Partial Locate Source Code, m=5, K=1
+
+0.5
+
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+2.5
+
+2.5
+
+2.5
+
+Fig. 11. Experimental time for partial locate queries, for patterns of length m = 5 and retrieving
+just K = 1 occurrence. We measure the time in microseconds per occurrence reported.
+
+are close to those for K = 5).
+
+The trie traversals also raise when we increase the pattern length, as it can be
+
+seen for m = 10.
+
+Thus, we conclude that our technique for solving partial locate queries of Section
+5.3 is relevant, and more eﬃcient when the probability of ﬁnding the occurrences
+at level 0 of the search is high, as for example when we search for short patterns,
+the alphabet is small, or we look for very few occurrences (e.g., K = 1).
+
+Full locate Queries. We test here locate queries without limiting the number
+of occurrences. In Fig. 15 we show the experimental results for patterns of length
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Diego Arroyuelo and Gonzalo Navarro
+
+Partial Locate English text, m=5, K=5
+
+Partial Locate DNA text, m=5, K=5
+
+·
+
+42
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+
+g
+n
+
+i
+t
+
+a
+c
+o
+L
+
+20
+
+15
+
+10
+
+5
+
+0
+
+0
+
+Scheme 3
+S2 DFUDS
+S3 DFUDS
+AF-FMI
+SSA
+CSA
+ILZI
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+
+g
+n
+
+i
+t
+
+a
+c
+o
+L
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+4.0
+
+3.5
+
+3.0
+
+2.5
+
+2.0
+
+1.5
+
+1.0
+
+0.5
+
+0
+
+0
+
+30
+
+25
+
+20
+
+15
+
+10
+
+5
+
+0
+
+40
+
+35
+
+30
+
+25
+
+20
+
+15
+
+10
+
+5
+
+0
+
+0
+
+0
+
+2.5
+
+2.5
+
+2.5
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Partial Locate XML text, m=5, K=5
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Partial Locate Source Code, m=5, K=5
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+2.5
+
+2.5
+
+2.5
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+Partial Locate MIDI Pitches, m=5, K=5
+
+140
+
+120
+
+100
+
+80
+
+60
+
+40
+
+20
+
+0
+
+0
+
+40
+
+35
+
+30
+
+25
+
+20
+
+15
+
+10
+
+5
+
+0
+
+0
+
+0.5
+
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Partial Locate Proteins, m=5, K=5
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Fig. 12. Experimental time for partial locate queries, for patterns of length m = 5 and retrieving
+just K = 5 occurrences. We measure the time in microseconds per occurrence reported.
+
+m = 5. As we can see, there is no clear winner in all cases, but the performance
+depends on the available space. However, we can see some clear performance pat-
+terns: in most cases our schemes outperform all competing schemes (including the
+very competitive ILZI) as soon as we have space available to store, at least, Scheme
+2. When we reduce the space usage of the index, however, the ILZI outperforms
+Scheme 3, yet the latter is still competitive (in most cases outperforming the competitive 
+CSA). In general, for locate queries with short patterns the superiority of
+Lempel-Ziv-based indices is clear.
+
+Notice also that, in most cases, Scheme 2 outperforms Scheme 1, both requiring
+about the same space. This means that the shorter average path length of Scheme
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+43
+
+·
+
+Partial Locate English text, m=10, K=1
+
+Partial Locate DNA text, m=10, K=1
+
+Scheme 3
+S2 DFUDS
+S3 DFUDS
+AF-FMI
+SSA
+CSA
+ILZI
+
+0.5
+
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+
+g
+n
+
+i
+t
+
+a
+c
+o
+L
+
+14
+
+12
+
+10
+
+8
+
+6
+
+4
+
+2
+
+0
+
+0
+
+2.5
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Partial Locate MIDI Pitches, m=10, K=1
+
+Partial Locate XML text, m=10, K=1
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+140
+
+120
+
+100
+
+80
+
+60
+
+40
+
+20
+
+0
+
+0
+
+200
+
+150
+
+100
+
+50
+
+0
+
+0
+
+2.5
+
+2.5
+
+0.5
+
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Partial Locate Proteins, m=10, K=1
+
+0.5
+
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+0.5
+
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Partial Locate Source Code, m=10, K=1
+
+0.5
+
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+2.5
+
+2.5
+
+2.5
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+
+g
+n
+
+i
+t
+
+a
+c
+o
+L
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+140
+
+120
+
+100
+
+80
+
+60
+
+40
+
+20
+
+0
+
+0
+
+300
+
+250
+
+200
+
+150
+
+100
+
+50
+
+0
+
+0
+
+200
+
+150
+
+100
+
+50
+
+0
+
+0
+
+Fig. 13. Experimental time for partial locate queries, for patterns of length m = 10 and retrieving
+just K = 1 occurrence. We measure the time in microseconds per occurrence reported.
+
+2 is better than having direct access from RevTrie to LZTrie nodes as in Scheme
+1, which is good only for occurrences of type 1. As we said before, occurrences of
+type 2 are more costly in Scheme 1. It is also important to note that the dfuds
+versions of LZ-index have a performance which is similar to the LZ-index based on
+bp. Notice, however, that dfuds requires more space than bp, as it was predicted
+in Section 5.1.2.
+
+In the particular case of XML text, we can see a very important aspect that
+diﬀerentiate LZ-indices from indices based on suﬃx arrays. The latter need to
+store extra non-compressible information (the sampled suﬃx array positions) to
+eﬃciently carry out locate and extract queries. The extra data stored by LZACM 
+Journal Name, Vol. V, No. N, Month 20YY.
+
+44
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+Partial Locate English text, m=10, K=5
+
+Partial Locate DNA text, m=10, K=5
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+
+g
+n
+
+i
+t
+
+a
+c
+o
+L
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+140
+
+120
+
+100
+
+80
+
+60
+
+40
+
+20
+
+0
+
+0
+
+140
+
+120
+
+100
+
+80
+
+60
+
+40
+
+20
+
+0
+
+0
+
+140
+
+120
+
+100
+
+80
+
+60
+
+40
+
+20
+
+0
+
+0
+
+Scheme 3
+S2 DFUDS
+S3 DFUDS
+AF-FMI
+SSA
+CSA
+ILZI
+
+0.5
+
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+
+g
+n
+
+i
+t
+
+a
+c
+o
+L
+
+8
+
+7
+
+6
+
+5
+
+4
+
+3
+
+2
+
+1
+
+0
+
+0
+
+2.5
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Partial Locate MIDI Pitches, m=10, K=5
+
+Partial Locate XML text, m=10, K=5
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+60
+
+50
+
+40
+
+30
+
+20
+
+10
+
+0
+
+0
+
+2.5
+
+0.5
+
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+0.5
+
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Partial Locate Proteins, m=10, K=5
+
+Partial Locate Source Code, m=10, K=5
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+100
+
+80
+
+60
+
+40
+
+20
+
+0
+
+0
+
+2.5
+
+0.5
+
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+0.5
+
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+2.5
+
+2.5
+
+2.5
+
+Fig. 14. Experimental time for partial locate queries, for patterns of length m = 10 and retrieving
+just K = 5 occurrences. We measure the time in microseconds per occurrence reported.
+
+indices, on the other hand, is compressible, for example the size of the arrays for
+which we sample the inverse-permutation information depends on n, the number
+of LZ78 phrases of T . Therefore, when the texts are highly compressible, the LZindices 
+can be smaller and faster than alternative indices.
+
+For proteins, as an opposite case, our LZ-indices are larger and slower. They are
+large since the text is not as compressible as others, which can be also noted in the
+size of competing schemes. Our LZ-indices are in addition slower in this case, since
+each search retrieves on average only a few patterns, and therefore the work on the
+tries is not amortized by reporting many occurrences.
+
+We show the results for patterns of length m = 10 in Fig. 16. As we can see,
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+45
+
+·
+
+Locate English text, m=5
+
+Locate DNA text, m=5
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+
+g
+n
+
+i
+t
+
+a
+c
+o
+L
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+10
+
+8
+
+6
+
+4
+
+2
+
+0
+
+0
+
+3.0
+
+2.5
+
+2.0
+
+1.5
+
+1.0
+
+0.5
+
+0
+
+0
+
+Scheme 1
+Scheme 2
+Scheme 3
+S2 DFUDS
+S3 DFUDS
+AF-FMI
+SSA
+CSA
+LZ-index
+ILZI
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+2.5
+
+Locate MIDI Pitches, m=5
+
+0.5
+
+1
+
+1.5
+
+2
+
+2.5
+
+3
+
+Index size, as a fraction of text size
+
+Locate Proteins, m=5
+
+40
+
+35
+
+30
+
+25
+
+20
+
+15
+
+10
+
+5
+
+0
+
+0
+
+0.5
+
+1
+
+1.5
+
+2
+
+2.5
+
+3
+
+Index size, as a fraction of text size
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+
+g
+n
+
+i
+t
+
+a
+c
+o
+L
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+8
+
+7
+
+6
+
+5
+
+4
+
+3
+
+2
+
+1
+
+0
+
+0
+
+4.0
+
+3.5
+
+3.0
+
+2.5
+
+2.0
+
+1.5
+
+1.0
+
+0.5
+
+0
+
+0
+
+3.0
+
+2.5
+
+2.0
+
+1.5
+
+1.0
+
+0.5
+
+0
+
+0
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Locate XML text, m=5
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Locate Source Code, m=5
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+2.5
+
+2.5
+
+2.5
+
+Fig. 15. Experimental locating time, for patterns of length m = 5. We measure the time in
+microseconds per occurrence reported.
+
+our indices are still competitive, yet not as signiﬁcantly as in the previous case
+where m = 5. The dfuds implementation of LZ-index outperforms bp in all cases,
+except for MIDI pitches, XML text, and source code, where these have about the
+same performance. In particular for proteins and English text, where the number
+of occurrences per pattern is relatively small, the diﬀerence is greater for dfuds,
+since the cost of navigating the tries becomes predominant. It is important to note
+also that Scheme 2 (both for bp and dfuds implementations) is interesting (in
+some cases the best) alternative, for the memory space it requires. For patterns
+of length m = 15 (ﬁgure omitted), the behavior of the indices is similar to that of
+length m = 10.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+46
+
+·
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+
+g
+n
+
+i
+t
+
+a
+c
+o
+L
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+12
+
+10
+
+8
+
+6
+
+4
+
+2
+
+0
+
+0
+
+3.0
+
+2.5
+
+2.0
+
+1.5
+
+1.0
+
+0.5
+
+0
+
+0
+
+4.0
+
+3.5
+
+3.0
+
+2.5
+
+2.0
+
+1.5
+
+1.0
+
+0.5
+
+0
+
+0
+
+Diego Arroyuelo and Gonzalo Navarro
+
+Locate English text, m=10
+
+Locate DNA text, m=10
+
+Scheme 1
+Scheme 2
+Scheme 3
+S2 DFUDS
+S3 DFUDS
+AF-FMI
+SSA
+CSA
+LZ-index
+ILZI
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+2.5
+
+Locate MIDI Pitches, m=10
+
+0.5
+
+1
+
+1.5
+
+2
+
+2.5
+
+3
+
+Index size, as a fraction of text size
+
+Locate Proteins, m=10
+
+0.5
+
+1
+
+1.5
+
+2
+
+2.5
+
+3
+
+Index size, as a fraction of text size
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+
+g
+n
+
+i
+t
+
+a
+c
+o
+L
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+)
+e
+c
+n
+e
+r
+r
+u
+c
+c
+o
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+a
+c
+o
+L
+
+20
+
+15
+
+10
+
+5
+
+0
+
+0
+
+4.0
+
+3.5
+
+3.0
+
+2.5
+
+2.0
+
+1.5
+
+1.0
+
+0.5
+
+0
+
+0
+
+3.0
+
+2.5
+
+2.0
+
+1.5
+
+1.0
+
+0.5
+
+0
+
+0
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Locate XML text, m=10
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+Locate Source Code, m=10
+
+0.5
+2
+Index size, as a fraction of text size
+
+1.5
+
+1
+
+2.5
+
+2.5
+
+2.5
+
+Fig. 16. Experimental locating time, for patterns of length m = 10. We measure the time in
+microseconds per occurrence reported.
+
+Our results indicate that our LZ-indices, despite not being the best in many
+cases, are an attractive alternative for locate queries. In most cases we need at
+least the space required by Scheme 2 in order to outperform competing schemes.
+In particular, our LZ-indices are an interesting alternative for full locate when the
+total number of occurrences to report is considerable. For long patterns, the number
+of pattern occurrences becomes smaller, and therefore the time of searching for the
+O(m2) pattern substrings in the tries dominates. This problem can be somehow
+alleviated by using the dfuds implementation for the tries. We can conclude that
+the LZ-indices based on bp and on dfuds behave very similarly when reporting a
+great number of occurrences fast is an important issue (e.g., when m = 5). Yet
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+47
+
+·
+
+dfuds requires more space. On the other hand, when the navigation in the tries
+becomes more important (e.g., for larger m), the dfuds implementation oﬀers a
+more attractive alternative, which can replace the bp implementation at the cost
+of a little extra space requirement.
+
+6.3.4 Count Queries. This kind of queries has applications in much more speciﬁc
+and limited cases, generally conforming the internal machinery of more complex
+tasks.
+
+In our experiments we search for patterns of length 20 extracted at random positions 
+from the text. We measure the times per symbol of the pattern. As competing
+schemes based on suﬃx arrays do not store suﬃx-array sampling information in order 
+to count (and thus are able to support eﬃciently only count queries), to be fair
+in this case we do not store the data structure for text positions in our LZ-indices.
+Yet, note that, within this space, we are still able to support fast locate queries
+(though without reporting text positions), and display queries.
+
+The experimental results for count queries are shown in Fig. 17. As we can see,
+our schemes can implement this query, yet they cannot compete against the indices
+based on suﬃx arrays, since the counting complexity of these indices is related to
+the pattern length, and not to the number of pattern occurrences. Our schemes
+basically need to locate the pattern occurrences in order to count them. We can
+also see that the dfuds implementation of LZ-index outperforms in all cases the bp
+implementation, yet the former requires slightly more space. This is mainly because
+we are searching for long patterns, and dfuds provides more eﬃcient descent in
+the LZTrie.
+
+6.3.5 Exists Queries. In some specialized applications we just need to know
+whether pattern P exists or not in the text. Indices based on suﬃx arrays basically
+need to count the number of occurrences, since they ﬁrst search for the pattern,
+and then check whether the suﬃx-array interval they get is empty or not. Despite
+that our LZ-indices are not competitive for count queries, we show here that they
+are much more eﬃcient for ﬁnding the ﬁrst occurrence of a pattern, which is useful
+to support exists queries (indeed, this has been already shown in the experiment
+with partial locate queries). The key is that we do not necessarily need to count
+the occurrences, but just to ﬁnd the ﬁrst pattern occurrence as fast as we can. We
+test with patterns of length 5, 10, and 15, and search for 10,000 patterns that exist
+in the text. We implement existential queries in our indices using the idea of partial
+locate queries, explained in Section 5.3.
+
+In Fig. 18 we show the experimental results for exists queries, for patterns of
+length 5. Excluded plots for patterns of length m = 10 produced similar results,
+while those for patterns of length m = 15 gave worse results (this is because, as
+predicted in Table III, the heuristic of level 0 is not so eﬀective for longer patterns).
+As it can be seen, our indices are much more competitive than for count queries,
+showing that our approach of ﬁrst looking for P in LZTrie is eﬀective in practice.
+Our indices achieve the same times (though not the same space) in many cases.
+As in the case of count queries, our indices are larger than competing schemes,
+yet ours are able to support more than just count and exists queries within this
+space.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+48
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+Count English text, m=20
+
+Count DNA text, m=20
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+
+g
+n
+
+i
+t
+
+n
+u
+o
+C
+
+Scheme 1
+Scheme 2
+Scheme 3
+S2 DFUDS
+S3 DFUDS
+AF-FMI
+SSA
+CSA
+LZ-index
+ILZI
+
+120
+
+100
+
+80
+
+60
+
+40
+
+20
+
+0
+
+0
+
+0.2
+
+0.6
+
+0.4
+Index size, as a fraction of text size
+
+0.8
+
+1
+
+1.2
+
+1.4
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+
+g
+n
+
+i
+t
+
+n
+u
+o
+C
+
+100
+90
+80
+70
+60
+50
+40
+30
+20
+10
+0
+
+1.6
+
+0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+1.2
+
+1.4
+
+Index size, as a fraction of text size
+
+Count MIDI Pitches, m=20
+
+Count XML text, m=20
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+n
+u
+o
+C
+
+12
+
+10
+
+8
+
+6
+
+4
+
+2
+
+0
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+n
+u
+o
+C
+
+70
+
+60
+
+50
+
+40
+
+30
+
+20
+
+10
+
+0
+
+0
+
+0
+
+0.5
+
+1
+
+1.5
+
+2
+
+Index size, as a fraction of text size
+
+Count Proteins, m=20
+
+0.5
+
+1
+
+1.5
+
+2
+
+Index size, as a fraction of text size
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+n
+u
+o
+C
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+ 
+g
+n
+i
+t
+n
+u
+o
+C
+
+16
+
+14
+
+12
+
+10
+
+8
+
+6
+
+4
+
+2
+
+0
+
+30
+
+25
+
+20
+
+15
+
+10
+
+5
+
+0
+
+0
+
+0.2
+
+0
+
+0.2
+
+0.4
+
+1.2
+Index size, as a fraction of text size
+
+0.6
+
+0.8
+
+1
+
+Count Source Code, m=20
+
+0.6
+
+0.4
+Index size, as a fraction of text size
+
+0.8
+
+1.2
+
+1
+
+1.4
+
+1.4
+
+1.6
+
+Fig. 17. Experimental counting time, for patterns of length m = 20. We measure the time in
+microseconds per symbol of the pattern.
+
+7. CONCLUSIONS
+
+We have deﬁned a practical approach to reduce the space requirement of LZindices,
+ which we call the navigation-scheme approach. In particular, we applied
+this method on Navarro’s LZ-index [Navarro 2004; 2008]. Our approach consists
+in regarding the original LZ-index as a navigation scheme that allows us moving
+among index components. From this point of view we can study the redundancy introduced 
+by the original LZ-index components. Then, we deﬁne alternative schemes
+that allow for the same navigation, yet without the redundancy of the original one.
+Given a text T [1..u] over an alphabet of size σ, and with k-th order empirical
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+Exists English text, m=5
+
+Exists DNA text, m=5
+
+Scheme 2
+Scheme 3
+S2 DFUDS
+S3 DFUDS
+AF-FMI
+SSA
+CSA
+
+0
+
+0.2
+
+0.6
+
+0.4
+Index size, as a fraction of text size
+
+0.8
+
+1.2
+
+1
+
+1.4
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+
+25
+
+20
+
+15
+
+10
+
+5
+
+0
+
+1.6
+
+0
+
+0.2
+
+0.4
+
+1.2
+Index size, as a fraction of text size
+
+0.6
+
+0.8
+
+1
+
+Exists MIDI Pitches, m=5
+
+Exists XML text, m=5
+
+49
+
+·
+
+1.4
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+
+80
+
+70
+
+60
+
+50
+
+40
+
+30
+
+20
+
+10
+
+0
+
+450
+
+400
+
+350
+
+300
+
+250
+
+200
+
+150
+
+100
+
+50
+
+0
+
+)
+n
+r
+e
+
+t
+t
+
+a
+p
+
+ 
+r
+e
+p
+
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+
+100
+90
+80
+70
+60
+50
+40
+30
+20
+10
+0
+
+160
+
+140
+
+120
+
+100
+
+80
+
+60
+
+40
+
+20
+
+0
+
+0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+1.2
+
+1.4
+
+Index size, as a fraction of text size
+
+Exists Source Code, m=5
+
+0
+
+0.2
+
+0.6
+
+0.4
+Index size, as a fraction of text size
+
+0.8
+
+1.2
+
+1
+
+1.4
+
+1.6
+
+0
+
+0.5
+
+1
+
+1.5
+
+2
+
+Index size, as a fraction of text size
+
+Exists Proteins, m=5
+
+)
+l
+o
+b
+m
+y
+s
+ 
+r
+e
+p
+ 
+s
+c
+e
+s
+o
+r
+c
+m
+
+i
+
+(
+ 
+e
+m
+
+i
+t
+
+35
+
+30
+
+25
+
+20
+
+15
+
+10
+
+5
+
+0
+
+0
+
+0.5
+
+1
+
+1.5
+
+2
+
+Index size, as a fraction of text size
+
+Fig. 18. Experimental time for exists queries, for patterns of length m = 5. We measure the
+time in microseconds per pattern.
+
+entropy Hk(T ) [Manzini 2001], the original LZ-index of Navarro [2004] requires
+4uHk(T ) + o(u log σ) bits of space. In this paper we deﬁne several new versions of
+the LZ-index, requiring 3uHk(T ) + o(u log σ) and (2 + ǫ)uHk(T ) + o(u log σ) bits of
+space. The latter ones allow us to partially overcome one of the drawbacks of the
+original LZ-index: the lack of space/time tuning parameters. Although our schemes
+do not provide worst-case guarantees at search time, they ensure O( m2
+ǫnm/2 )
+average-case time for locating the occurrences of pattern P [1..m] in T . This is
+O( m2
+
+ǫ + n
+
+ǫ ) for m > 2 logσ u.
+
+We implemented and intensively tested our indices in many practical scenarios,
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+50
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+which cover an interesting range of applications, comparing against the best existing 
+alternatives for compressed full-text self-indexing. From those experiments
+we conclude that we can eﬀectively reduce the space requirement of the original
+LZ-index, to about 2/3. We also noted that our indices are the fastest to build,
+which is important when we deal with very large texts.
+
+When comparing the search performance, we concluded that our indices oﬀer
+an interesting alternative in practice, for a number of diﬀerent types of queries:
+our indices are very competitive (in most cases the best) alternatives for extract
+and display queries, which we argue are the most basic queries in the scenario
+of compressed full-text self-indices, where the text is not available otherwise2. For
+instance, in most cases we are able to extract about 1 to 1.5 million symbols per
+second, being about twice as fast as the most competitive alternatives. Thus, we
+can reduce the space, still maintaining the competitiveness of the original LZ-index
+in this respect.
+
+For locate queries we tested two alternatives: partial locate queries (where a
+ﬁxed number of occurrences is located) and full locate queries. Our experiments
+show that our technique for solving partial locate queries is eﬃcient in cases of
+searching for short patterns, of texts with small alphabets, or when we want to
+locate very few occurrences (e.g., only one occurrence).
+
+For full locate queries, we showed that our indices are more eﬀective when the
+search pattern is not too long, or there are many occurrences to report. In other
+cases, the O(m2)-time navigation on the tries is predominant, and thus our performance 
+degrades. For example, for short patterns of length 5, in most scenarios our
+schemes are the best alternative if we can spend at least 80% the size of the original
+LZ-index. When less memory space is available, our indices are outperformed by
+the very competitive Inverted LZ-index (ILZI) [Russo and Oliveira 2008], which
+is yet another variant of the Lempel-Ziv-based index family.
+In this case, however,
+ our indices are still competitive with all suﬃx-array-based schemes (e.g., the
+competitive Compressed Suﬃx Array of Sadakane [2003]).
+
+It is well known that the original LZ-index is more adequate for short patterns
+[Navarro 2008]. We somehow alleviated the problem of long patterns, by using a
+more eﬃcient representation, so-called dfuds [Benoit et al. 2005], for the tries that
+compose the LZ-index. From our experiments we can conclude that our dfuds
+implementation allows us for very eﬃcient search, in many cases outperforming
+the traditional balanced-parentheses representation [Munro and Raman 2001] of
+the LZ-index. However, more work is needed to compete in this respect against
+suﬃx-array-based indices. We hope to get further improvements on this line when
+working on alphabets larger than those tried in this paper, for example, if deﬁning
+an LZ-index working on words, for applications of natural-language processing.
+
+We also exhibit an important diﬀerence between LZ-indices and those based
+on suﬃx arrays: the latter need to store extra non-compressible information (the
+suﬃx-array samples) in order to carry out extract, display, and locate queries,
+whereas the information stored by our LZ-indices is compressible. Thus, when the
+
+2In the literature [Navarro and M¨akinen 2007] the count operation is taken as the most basic one,
+but this is probably biased towards suﬃx-array-based indices, more than to considering typical
+applications.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+51
+
+·
+
+text is highly compressible, we get very small LZ-indices, which are still fast. Indices
+based on suﬃx arrays, on the other hand, cannot use a denser suﬃx-array sampling
+(because otherwise they become larger), and henceforth their performance is poor.
+Thus, our indices are also a very good option for highly compressible texts.
+
+We do not consider in this paper the space-eﬃcient construction of our indices,
+which is a very important issue in practice, since many times a small index requires 
+a large amount of memory space to be build. We plan to adapt the spaceeﬃcient 
+algorithm by Arroyuelo and Navarro [2005] for the original LZ-index, so
+as to construct our LZ-index variants space-eﬃciently. Currently, our indices are
+constructed in an uncompressed way, needing about the same space used to build
+suﬃx-array-based compressed self-indices. The space-eﬃcient construction of the
+latter is still at a theoretical stage [M¨akinen and Navarro 2008], or still does not
+achieve higher-order entropy-bound space [Hon et al. 2007].
+
+We believe that our indices oﬀer an extremely relevant alternative considering
+their overall performance across the multiple tasks of interest in many real textsearch 
+applications.
+
+We made the code of our indices available in the Pizza&Chili corpus, throughout
+
+the site http://pizzachili.dcc.uchile.cl/indexes/LZ-index/.
+
+REFERENCES
+
+Apostolico, A. 1985. The myriad virtues of subword trees. In Combinatorial Algorithms on
+
+Words. NATO ISI Series. Springer-Verlag, 85–96.
+
+Arroyuelo, D. and Navarro, G. 2005. Space-eﬃcient construction of LZ-index.
+
+In Proc.
+16th Annual International Symposium on Algorithms and Computation (ISAAC). LNCS 3827.
+1143–1152.
+
+Arroyuelo, D., Navarro, G., and Sadakane, K. 2006. Reducing the space requirement of LZindex.
+ In Proc. 17th Annual Symposium on Combinatorial Pattern Matching (CPM). LNCS
+4009. 319–330.
+
+Arroyuelo, D., Navarro, G., and Sadakane, K. 2008. Stronger Lempel-Ziv based compressed
+
+text indexing. Tech. Rep. TR/DCC-2008-2, Dept. of Computer Science, University of Chile.
+
+Barbay, J., He, M., Munro, J. I., and Rao, S. S. 2007. Succinct indexes for strings, binary
+relations and multi-labeled trees. In Proc. 18th Annual ACM-SIAM Symposium on Discrete
+Algorithms (SODA). 680–689.
+
+Benoit, D., Demaine, E., Munro, I., Raman, R., Raman, V., and Rao, S. S. 2005. Representing
+
+trees of higher degree. Algorithmica 43, 4, 275–292.
+
+Ferragina,
+
+P.,
+
+Gonz´alez,
+
+R.,
+
+Navarro,
+
+G.,
+
+and
+practice!
+
+Venturini,
+
+R.
+Submitted.
+
+2007.
+http://pizzachili.dcc.uchile.cl/resources/compressed indexes in practice.pdf.
+
+indexes: From theory
+
+to
+
+Compressed
+
+text
+
+Ferragina, P. and Manzini, G. 2000. Opportunistic data structures with applications. In Proc.
+
+41st Annual Symposium on Foundations of Computer Science (FOCS). 390–398.
+
+Ferragina, P. and Manzini, G. 2005. Indexing compressed texts. Journal of the ACM 54, 4,
+
+552–581.
+
+Ferragina, P., Manzini, G., M¨akinen, V., and Navarro, G. 2007. Compressed representations
+of sequences and full-text indexes. ACM Transactions on Algorithms (TALG) 3, 2, article 20.
+Ferragina, P. and Navarro, G. 2005. Pizza&Chili Corpus — Compressed indexes and their
+
+testbeds. http://pizzachili.dcc.uchile.cl.
+
+Geary, R., Rahman, N., Raman, R., and Raman, V. 2006. A simple optimal representation for
+
+balanced parentheses. Theoretical Computer Science 368, 3, 231–246.
+
+Golynski, A., Munro, J. I., and Rao, S. S. 2006. Rank/select operations on large alphabets: A
+tool for text indexing. In Proc. 17th Annual ACM-SIAM Symposium on Discrete Algorithms
+(SODA). 368–373.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+52
+
+·
+
+Diego Arroyuelo and Gonzalo Navarro
+
+Gonz´alez, R., Grabowski, S., M¨akinen, V., and Navarro, G. 2005. Practical implementation 
+of rank and select queries. In Poster Proc. 4th International Workshop on Eﬃcient and
+Experimental Algorithms (WEA). CTI Press and Ellinika Grammata, 27–38.
+
+Grossi, R., Gupta, A., and Vitter, J. S. 2003. High-order entropy-compressed text indexes. In
+
+Proc. 14th Annual ACM-SIAM Symposium on Discrete Algorithms (SODA). 841–850.
+
+Grossi, R. and Vitter, J. S. 2000. Compressed suﬃx arrays and suﬃx trees with applications
+to text indexing and string matching. In Proc. 32nd Annual ACM Symposium on Theory of
+Computing (STOC). 397–406.
+
+Grossi, R. and Vitter, J. S. 2005. Compressed suﬃx arrays and suﬃx trees with applications
+
+to text indexing and string matching. SIAM Journal on Computing 35, 2, 378–407.
+
+Hon, W. K., Lam, T. W., Sadakane, K., Sung, W.-K., and Yiu, M. 2007. A space and time
+
+eﬃcient algorithm for constructing compressed suﬃx arrays. Algorithmica 48, 1, 23–36.
+
+Jansson, J., Sadakane, K., and Sung, W.-K. 2007. Ultra-succinct representation of ordered
+trees. In Proc. 18th Annual ACM-SIAM Symposium on Discrete Algorithms (SODA). 575–584.
+K¨arkk¨ainen, J. and Ukkonen, E. 1996. Lempel-Ziv parsing and sublinear-size index structures
+In Proc. 3rd South American Workshop on String Processing (WSP).
+
+for string matching.
+Carleton University Press, 141–155.
+
+Kim, D., Na, J., Kim, J., and Park, K. 2005. Eﬃcient implementation of rank and select
+functions for succinct representation. In Proc. 4th International Workshop on Eﬃcient and
+Experimental Algorithms (WEA). LNCS 3503, 315–327.
+
+Knessl, C. and Szpankowski, W. 2000. Height in a digital search tree and the longest phrase of
+the Lempel-Ziv scheme. In Proc. 11th Annual ACM-SIAM Symposium on Discrete Algorithms
+(SODA). 187–196.
+
+Kosaraju, R. and Manzini, G. 1999. Compression of low-entropy strings with Lempel-Ziv
+
+algorithms. SIAM Journal on Computing 29, 3, 893–911.
+
+M¨akinen, V. and Navarro, G. 2005. Succinct suﬃx arrays based on run-length encoding. Nordic
+
+Journal of Computing 12, 1, 40–66.
+
+M¨akinen, V. and Navarro, G. 2008. Dynamic entropy-compressed sequences and full-text
+
+indexes. ACM Transactions on Algorithms (TALG). To appear.
+
+Manber, U. and Myers, G. 1993. Suﬃx arrays: A new method for on-line string searches. SIAM
+
+Journal on Computing 22, 5, 935–948.
+
+Manzini, G. 2001. An analysis of the Burrows-Wheeler transform. Journal of the ACM 48, 3,
+
+407–430.
+
+Morrison, D. R. 1968. Patricia – practical algorithm to retrieve information coded in alphanumeric.
+ Journal of the ACM 15, 4, 514–534.
+
+Munro, J. I. 1996. Tables. In Proc. 16th Conference on Foundations of Software Technology
+
+and Theoretical Computer Science (FSTTCS). LNCS 1180. 37–42.
+
+Munro, J. I., Raman, R., Raman, V., and Rao, S. S. 2003. Succinct representations of permutations.
+ In Proc. 30th International Colloquium on Automata, Languages and Programming
+(ICALP). LNCS 2719. 345–356.
+
+Munro, J. I. and Raman, V. 2001. Succinct representation of balanced parentheses and static
+
+trees. SIAM Journal on Computing 31, 3, 762–776.
+
+Navarro, G. 2004.
+
+Indexing text using the Ziv-Lempel trie. Journal of Discrete Algorithms
+
+(JDA) 2, 1, 87–114.
+
+Navarro, G. 2008. Implementing the LZ-index: Theory versus practice. ACM Journal of Experimental 
+Algorithmics (JEA). To appear.
+
+Navarro, G. and M¨akinen, V. 2007. Compressed full-text indexes. ACM Computing Surveys 
+39, 1, article 2.
+
+Okanohara, D. and Sadakane, K. 2007. Practical entropy-compressed rank/select dictionary.
+
+In Proc. Workshop on Algorithm Engineering and Experiments (ALENEX). 60–70.
+
+Raman, R., Raman, V., and Rao, S. S. 2002. Succinct indexable dictionaries with applications to
+encoding k-ary trees and multisets. In Proc. 13th Annual ACM-SIAM Symposium on Discrete
+Algorithms (SODA). 233–242.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+Practical Approaches to Reduce the Space of LZ-indices
+
+53
+
+·
+
+Russo, L. and Oliveira, A. 2008. A compressed self-index using a Ziv-Lempel dictionary. Information 
+Retrieval 11, 4, 359–388.
+
+Sadakane, K. 2000. Compressed text databases with eﬃcient query algorithms based on the
+Compressed Suﬃx Array. In Proc. 11th Annual International Symposium on Algorithms and
+Computation (ISAAC). LNCS 1969. 410–421.
+
+Sadakane, K. 2003. New Text Indexing Functionalities of the Compressed Suﬃx Arrays. Journal
+
+of Algorithms 48, 2, 294–313.
+
+Ziv, J. and Lempel, A. 1978. Compression of individual sequences via variable-rate coding. IEEE
+
+Trans. Inform. Theory 24, 5, 530–536.
+
+ACM Journal Name, Vol. V, No. N, Month 20YY.
+
+

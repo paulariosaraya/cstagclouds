@@ -1,0 +1,3020 @@
+Chapter 14
+Searching and Browsing Linked Data
+with SWSE
+
+(cid:2)
+
+Andreas Harth, Aidan Hogan, J¨urgen Umbrich, Sheila Kinsella, Axel Polleres,
+and Stefan Decker
+
+14.1 Introduction
+
+Web search engines such as Google, Yahoo! MSN/Bing, and Ask are far from the
+consummate Web search solution: they do not typically produce direct answers to
+queries but instead typically recommend a selection of related documents from the
+Web. We note that in more recent years, search engines have begun to provide
+direct answers to prose queries matching certain common templates—for example,
+“population of china” or “12 euro in dollars”—but again, such functionality is
+limited to a small subset of popular user queries. Furthermore, search engines now
+provide individual and focused search interfaces over images, videos, locations,
+news articles, books, research papers, blogs, and real-time social media—although
+these tools are inarguably powerful, they are limited to their respective domains.
+
+In the general case, search engines are not suitable for complex information
+gathering tasks requiring aggregation from multiple indexed documents: for such
+tasks, users must manually aggregate tidbits of pertinent information from various
+pages. In effect, such limitations are predicated on the lack of machine-interpretable
+
+(cid:2)The present chapter is an abridged version of [76].
+A. Harth ((cid:2))
+Karlsruhe Institute of Technology, Institute AIFB, 76128 Karlsruhe, Germany
+e-mail: harth@kit.edu
+A. Hogan (cid:2) J. Umbrich (cid:2) S. Kinsella (cid:2) S. Decker
+Digital Enterprise Research Institute, National University of Ireland, Galway
+e-mail: aidan.hogan@deri.org; juergen.umbrich@deri.org; sheila.kinsella@deri.org;
+stefan.decker@deri.org
+
+A. Polleres
+Digital Enterprise Research Institute, National University of Ireland, Galway
+Siemens AG ¨Osterreich, Siemensstrasse 90, 1210 Vienna, Austria
+e-mail: axel@polleres.net
+
+R. De Virgilio et al. (eds.), Semantic Search over the Web,
+Data-Centric Systems and Applications, DOI 10.1007/978-3-642-25008-8 14,
+© Springer-Verlag Berlin Heidelberg 2012
+
+361
+
+362
+
+A. Harth et al.
+
+structure in HTML documents, which is often limited to generic markup tags
+mainly concerned with document rendering and linking. Most of the real content
+is contained in prose text which is inherently difﬁcult for machines to interpret.
+Addressing the problem of automated interpretation of HTML documents, the
+Semantic Web movement provides a stack of technologies for publishing machinereadable 
+data on the Web, the core of the stack being the Resource Description
+Framework (RDF).
+
+Using URIs to name things—and not just documents—RDF offers a standardized
+and ﬂexible framework for publishing structured data on the Web such that (1) data
+can be linked, incorporated, extended, and reused by other RDF data across the Web;
+(2) heterogeneous data from independent sources can be automatically integrated by
+software agents; and (3) the meaning of data can be well deﬁned using ontologies
+described in RDF using the RDF Schema (RDFS) and Web Ontology Language
+(OWL) standards.
+
+Thanks largely to the “Linking Open Data” project [14]—which has emphasized
+more pragmatic aspects of Semantic Web publishing—a rich lode of open RDF
+data now resides on the Web: this “Web of Data” includes content exported from,
+for example, Wikipedia, the BBC, the New York Times, Flickr, Last.fm, scientiﬁc
+publishing indexes, biomedical information, and governmental agencies. Assuming
+large-scale adoption of high-quality RDF publishing on the Web, the question
+is whether a search engine indexing RDF feasibly could improve upon current
+HTML-centric engines. Theoretically at least, such a search engine could offer
+advanced querying and browsing of structured data with search results automatically
+aggregated from multiple documents and rendered directly in a clean and consistent
+user interface, thus reducing the manual effort required of its users. Indeed, there
+has been much research devoted to this topic, with various incarnations of (mostly
+academic) RDF-centric Web search engines emerging—e.g., Swoogle, Falcons,
+Watson, Sindice—and in this chapter, we present the culmination of over 6 years
+of research on another such engine: the “Semantic Web Search Engine” (SWSE).1
+
+Indeed, the realization of SWSE has implied two major research challenges:
+
+1. The system must scale to large amounts of data.
+2. The system must be robust in the face of heterogeneous, noisy, impudent, and
+
+possibly conﬂicting data collected from a large number of sources.
+
+Semantic Web standards and methodologies are not naturally applicable in
+such an environment; in presenting the design and implementation of SWSE, we
+show how standard Semantic Web approaches can be tailored to meet these two
+challenging requirements.
+
+As such, we present the core of a system which we demonstrate to provide scale,
+and which is distributed over a cluster of commodity hardware. Throughout, we
+focus on the unique challenges of applying standard Semantic Web techniques and
+methodologies and show why the consideration of the source of data is an integral
+
+1http://swse.deri.org/
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+363
+
+part of creating a system which must be tolerant to Web data—in particular, we
+show how Linked Data principles can be exploited for such purposes. Also, there
+are many research questions still very much open with respect to the direction of the
+overall system, as well as improvements to be made in the individual components;
+we discuss these as they arise, rendering a road map of past, present, and possible
+future research in the area of Web search over RDF data.
+
+More speciﬁcally, we
+
+(cid:129) Present high-level related wo rk in RDF search engines (Sect. 14.3)
+(cid:129) Present core preliminaries required throughout the rest of the chapter (Sect. 14.4)
+(cid:129) Present the architecture and modus operandi of our system for offering search
+
+and browsing over RDF Web data (Sect. 14.5)
+
+(cid:129) Detail the high-level design of the off-line index building components, including
+crawling (Sect. 14.6), consolidation (Sect. 14.7), ranking (Sect. 14.8), reasoning
+(Sect. 14.9), and indexing (Sect. 14.10)
+
+(cid:129) Detail
+
+the high-level design of
+
+the runtime components,
+
+including our
+
+(lightweight) query processor (Sect. 14.11) and user interface (Sect. 14.12)
+
+(cid:129) Conclude with discussion of future directions (Sect. 14.13)
+
+14.2 Motivating Example
+
+To put later discussion into context, we now give a brief overview of the lightweight
+functionality of the SWSE system; please note that although our methods and
+algorithms are tailored for the speciﬁc needs of SWSE, many aspects of their
+implementation, design, and evaluation apply to more general scenarios.
+
+Unlike prevalent document-centric Web search engines, SWSE operates over
+structured data and holds an entity-centric perspective on search: in contrast to
+returning links to documents containing speciﬁed keywords [19], SWSE returns data
+representations of real-world entities. While current search engines return search
+results in different domain-speciﬁc categories (Web, images, videos, shopping, etc.),
+data on the Semantic Web is ﬂexibly typed and does not need to follow predeﬁned
+categories. Returned objects can represent people, companies, locations, proteins—
+anything people care to publish data about.
+
+In a manner familiar to traditional Web search engines, SWSE allows users to
+specify keyword queries in an input box and responds with a ranked list of result
+snippets; however, the results refer to entities not documents. A user can then click
+on an entity snippet to derive a detailed description thereof. The descriptions of
+entities are automatically aggregated from arbitrarily many sources, and users can
+cross-check the source of particular statements presented; descriptions also include
+inferred data—data that have been derived from the existing data through reasoning.
+Users can subsequently navigate to associated entities.
+
+Figure 14.1 shows a screenshot containing a list of entities returned as
+to the keyword search “bill clinton”—such results pages are
+
+a result
+
+364
+
+A. Harth et al.
+
+Fig. 14.1 Results view for keyword query bill clinton
+
+types (e.g.,
+familiar to HTML-centric engines, with the addition of result
+DisbarredAmericanLawyers, AmericanVegetarians). Results are
+aggregated from multiple sources. Figure 14.2 shows a screenshot of the focus
+(detailed) view of the Bill Clinton entity, with data aggregated from 54 documents 
+spanning six domains (bbc.co.uk, dbpedia.org, freebase.com,
+nytimes.com, rdfize.com, and soton.ac.uk), as well as novel data found
+through reasoning.
+
+14.3 State of the Art
+
+In this section, we give an overview of the state of the art, ﬁrst detailing distributed
+architectures for Web search (Sect. 14.3.1), then discussing related systems in the
+ﬁeld of “Hidden Web” and “Deep Web” (Sect. 14.3.2), and ﬁnally describing current
+systems that offer search and browsing over RDF Web data (Sect. 14.3.3)—for a
+further survey of the latter, cf. [127]. Please note that we will give further detailed
+related work in the context of each component throughout the chapter.
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+365
+
+Fig. 14.2 Focus view for entity Bill Clinton
+
+14.3.1 Distributed Web Search Architectures
+
+Distributed architectures have long been common in traditional
+information
+retrieval-based Web search engines, incorporating distributed crawling, ranking,
+indexing, and query-processing components [18, 19]. More recent publications
+relate to the MapReduce framework [31] and to the underlying BigTable [24]
+distributed database system.
+
+Similar system architectures have been deﬁned in the literature, including
+WebBase [68] which includes an incremental crawler, storage manager, indexer, and
+query processor; in particular, the authors focus on hashand 
+log-based partitioning
+for storing incrementally updated vast repositories of Web documents. The authors
+of [97] also describe a system for building a distributed inverted index (based on
+an embedded database system) over a large corpus of Web pages, for subsequent
+analysis and query processing.
+
+Much of the work presented herein is loosely inspired by such approaches
+and thus constitutes an adaptation of such works for the purposes of search over
+structured data. Since we consider replication, fault tolerance, incremental indexing,
+etc., currently out of scope, many of our techniques are more lightweight than those
+discussed.
+
+366
+
+A. Harth et al.
+
+14.3.2 Hidden Web/Deep Web Approaches
+
+So-called “Hidden Web” or “Deep Web” approaches [22] are predicated on the
+premise that a vast amount of the information available on the Web is veiled behind
+sites with heavy dynamic content, usually backed by relational databases. Such
+information is largely impervious to traditional crawling techniques since content
+is usually generated by means of bespoke ﬂexible queries; thus, traditional search
+engines can only skim the surface of such information [64]. In fact, such data-rich
+sources have lead to early speculative work on entity-centric search [29].
+
+Approaches to exploit such sources heavily rely on manually constructed,
+site-speciﬁc wrappers to extract structured data from HTML pages [22] or to
+communicate directly with the underlying database of such sites [25]. Some
+works have also looked into automatically crawling such hidden-Web sources, by
+interacting with forms found during traditional crawls [114]; however, this approach
+is “task speciﬁc” and not appropriate for general crawling.
+
+The Semantic Web may represent a future direction for bringing Deep Web
+information to the surface, leveraging RDF as a common and ﬂexible data model
+for exporting the content of such databases, leveraging RDFS and OWL as a means
+of describing the respective schemata, and thus allowing for automatic integration
+of such data by Web search engines. Efforts such as D2R(Q) [13] seem a natural ﬁt
+for enabling RDF exports of such online databases.
+
+14.3.3 RDF-Centric Search Engines
+
+Early prototypes using the concepts of ontologies and semantics on the Web
+include Ontobroker [32] and SHOE [65], which can be seen as predecessors to
+standardization efforts such as RDFS and OWL, describing how data on the Web
+can be given in structured form and subsequently crawled, stored inferenced, and
+queried over.
+
+Swoogle2 offers search over RDF documents by means of an inverted keyword 
+index and a relational database [38]. Swoogle calculates metrics that allow
+ontology designers to check the popularity of certain properties and classes. In
+contrast to SWSE, which is mainly concerned with entity search over instance
+data, Swoogle is mainly concerned with more traditional document search over
+ontologies.
+
+Watson3 also provides keyword search facilities over Semantic Web documents
+but additionally provides search over entities [30,115]. However, they do not include
+components for consolidation or reasoning and instead focus on providing APIs to
+external services.
+
+2http://swoogle.umbc.edu/
+3http://watson.kmi.open.ac.uk/WatsonWUI/
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+367
+
+Sindice4 is a registry and lookup service for RDF ﬁles based on Lucene and
+a MapReduce framework [104]. Sindice originally focused on providing an API
+for ﬁnding documents which reference a given RDF entity or given keywords—
+again, document-centric search. More recently, however, Sindice has begun to offer
+entity search in the form of Sig.ma5 [120]. However, Sig.ma maintains a one-toone 
+relationship between keyword search and results, representing a very different
+user-interaction model to that presented herein.
+
+The Falcons search engine6 offers entity-centric searching for entities (and
+concepts) over RDF data [28]. They map certain keyword phrases to query relations
+between entities and also use class hierarchies to quickly restrict initial results.
+Conceptually, this search engine most closely resembles our approach. However,
+there are signiﬁcant differences in how the individual components of SWSE and
+Falcons are designed and implemented. For example, like us, they also rank entities,
+but using a logarithm of the count of documents in which they are mentioned—we
+employ a link-based analysis of sources. Also, Falcons supports reasoning involving
+class hierarchies, whereas we apply a more general rule-based approach, applying a
+scalable subset of OWL 2 RL/RDF rules. Such differences will be discussed further
+throughout the chapter.
+
+Aside from domain-agnostic search systems, we note that other systems focus
+on exploiting RDF for the purposes of domain-speciﬁc querying; for example, the
+recent GoWeb system7 demonstrates the beneﬁt of searching structured data for the
+biomedical domain [36]. However, in catering for a speciﬁc domain, such systems
+do not target the same challenges and use cases as we do.
+
+14.4 Preliminaries
+
+Before we continue, we brieﬂy introduce some standard notation used throughout
+the chapter—relating to RDF terms (constants), triples, and quadruples—and also
+discuss Linked Data principles. Note that we will generally use boldface to refer
+to inﬁnite sets: e.g., G refers to the set of all triples; we will use calligraphy
+font to denote a subset thereof: e.g., G is a particular set of triples, where
+G (cid:2) G.
+
+14.4.1 Resource Description Framework
+
+The Resource Description Framework provides a structured means of publishing
+information describing entities through use of RDF terms and RDF triples and
+
+4http://sindice.com/
+5http://sig.ma/
+6http://iws.seu.edu.cn/services/falcons/
+7http://gopubmed.org/goweb/
+
+368
+
+A. Harth et al.
+
+constitutes the core data model for our search engine. In particular, RDF allows for
+optionally deﬁning names for entities using URIs and allows for subsequent reuse
+of URIs across the Web; using triples, RDF allows to group entities into named
+classes, allows to deﬁne named relations between entities, and allows for deﬁning
+named attributes of entities using string (literal) values. We now brieﬂy give some
+necessary notation.
+
+RDF Constant. Given a set of URI references U, a set of blank nodes B, and a set of
+literals L, the set of RDF constants is denoted by C D U [ B [ L. The set of blank
+nodes B is a set of existensially quantiﬁed variables. The set of literals is given as
+L D Lp [ Ld , where Lp is the set of plain literals and Ld is the set of typed literals.
+A typed literal is the pair l = (s,d), where s is the lexical form of the literal and d 2 U
+is a datatype URI. The sets U, B, Lp, and Lt are pairwise disjoint.
+
+Please note that we treat blank nodes as their skolem versions, that is, not as
+existential variables, but as denoting their own syntactic form. We also ensure
+correct merging of RDF graphs [63] by using blank node labels unique for a given
+source.
+
+For URIs, we use namespace preﬁxes as common in the literature—the full URIs
+can be retrieved from the convenient http://preﬁx.cc/ service. For space reasons, we
+sometimes denote owl: as the default namespace.
+RDF Triple. A triple t = (s, p, o) 2 .U [ B/ (cid:3) U (cid:3) .U [ B [ L/ is called an RDF
+triple. In a triple (s, p, o), s is called subject, p predicate, and o object.
+RDF Graph. We call a ﬁnite set of triples an RDF graph G (cid:2) G where G D
+.U [ B/ (cid:3) U (cid:3) .U [ B [ L/.
+RDF Entity. We refer to the referent of a URI or blank-node as an RDF entity, or
+commonly just entity.
+
+14.4.2 Linked Data
+
+To cope with the unique challenges of handling diverse and unveriﬁed Web data,
+many of our components and algorithms require inclusion of a notion of provenance:
+consideration of the source of RDF data found on the Web. Tightly related to such
+notions are the Linked Data best practices (here paraphrasing [9]):
+
+LDP1
+LDP2
+LDP3
+
+use URIs to name things
+use HTTP URIs so that those names can be looked up
+provide useful structured information when a lookup on a URI is made—
+
+loosely, called dereferencing
+
+LDP4
+
+include links using external URIs
+
+In particular, within SWSE, these best practices form the backbone of various
+algorithms designed to interact with and be tolerant to Web data.
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+369
+
+We must thus extend RDF triples with context to denote the source thereof [52,
+56]. We also deﬁne some relations between the identiﬁer for a data source and the
+graph it contains, including a function to represent HTTP redirects prevalently used
+in Linked Data for LDP3 [9].
+Data Source. We deﬁne the http-download function get W U ! 2G as the mapping
+from a URI to an RDF graph it may provide by means of a given HTTP lookup [46]
+which directly returns status code 200 OK and data in a suitable RDF format.8
+We deﬁne the set of data sources S (cid:2) U as the set of URIs S D fs 2 U j get.s/ ¤
+;g. We deﬁne the reference function refs W C ! 2S as the mapping from an RDF
+term to the set of data sources that mention it.
+RDF Triple in Context/RDF Quadruple. A pair (t, c) with a triple t = (s, p, o), c 2 S
+and t 2 get.c/ is called a triple in context c. We may also refer to (s, p, o, c) as an
+RDF quadruple or quad q with context c.
+HTTP Dereferencing. We deﬁne dereferencing as the function deref W U ! U
+which maps a given URI to the identiﬁer of the document returned by HTTP lookup
+operations upon that URI following redirects (for a given ﬁnite and noncyclical
+path) [46] or which maps a URI to itself in the case of failure. The function
+involves stripping the fragment identiﬁer of a URI [11]. Note that we do not distinguish 
+between the different 30x redirection schemes. All HTTP level functions
+fget; refs; derefg are set at the time of the crawl and are bounded by the knowledge
+of our crawl: for example, refs will only consider documents accessed by the crawl.
+
+14.5 System Architecture
+
+The high-level system architecture of SWSE loosely follows that of traditional
+HTML search engines [18, 19]. Figure 14.3 illustrates the pre-runtime architecture
+of our system, showing the components involved in achieving a local index
+of RDF Web data amenable for search. Similar to traditional search engines,
+SWSE contains components for crawling, ranking, and indexing data; however,
+there are also components speciﬁcally designed for handling RDF data, namely,
+the consolidation component and the reasoning component. The high-level index
+building process is as follows:
+
+(cid:129) The crawler accepts a set of seed URIs and retrieves a large set of RDF data from
+
+the Web.
+
+(cid:129) The consolidation component tries to ﬁnd synonymous (i.e., equivalent) identiﬁers 
+in the data and canonicalizes the data according to the equivalences found.
+(cid:129) The ranking component performs link-based analysis over the crawled data and
+derives scores indicating the importance of individual elements in the data (the
+
+82G refers to the power set of G.
+
+370
+
+A. Harth et al.
+
+Fig. 14.3 System architecture
+
+ranking component also considers URI redirections encountered by the crawler
+when performing the link-based analysis).
+
+(cid:129) The reasoning component materializes new data which are implied by the
+inherent semantics of the input data (the reasoning component also requires URI
+redirection information to evaluate the trustworthiness of sources of data).
+
+(cid:129) The indexing component prepares an index which supports the information
+
+retrieval tasks required by the user interface.
+
+Subsequently, the query-processing and user interface components service queries
+over the index built in the previous steps.
+
+Our methods follow the standards relating to RDF [95], RDFS [63], and
+OWL [116] and leverage the Linked Data principles [9] which state how RDF
+should be published on the Web. As such, our methods should be sound with
+respect to data correctly published according to these documents, but we note that
+oftentimes, the noise inherent in heterogenous RDF Web data may create unintended
+results. We characterize these problems as they occur, although we know of no
+method for accurately determining the amount of incorrect or unwanted results
+generated by these tasks—we note that such considerations may also be subjective
+(e.g., see [53]).
+
+In order to scale, we deploy each of our components over a distributed framework,
+ which is based on a shared nothing architecture [117] and consists of one
+master machine which orchestrates the given tasks and several slave machines which
+perform parts of the task in parallel. We note that our distribution framework resembles 
+the MapReduce framework [31]. Distribution of our algorithms is facilitated
+by the fact that the preprocessing algorithms are based on scan and sort operations.
+We omit detailed description of the distributed versions of our algorithms due to
+space constraints; see [76] for an in-depth treatment of distribution, including fullscale 
+evaluation of each component.
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+371
+
+14.6 Crawling
+
+We now begin the discussion of the ﬁrst component required for building the index,
+and thus, for retrieving the raw RDF documents from the Web, that is, the crawler.
+Our crawler starts with a set of seed URIs, retrieves the content of URIs, parses
+and writes content to disk in the form of quads, and recursively extracts new URIs
+for crawling. We leverage Linked Data principles (see Sect. 14.4.2) to discover new
+sources, where following LDP2 and LDP3, we consider all http: protocol URIs
+extracted from an RDF document as candidates for crawling.
+
+We identify the following requirements for crawling:
+
+(cid:129) Politeness: The crawler must implement politeness restrictions to avoid hammering 
+remote servers with dense HTTP GET requests and to abide by policies
+identiﬁed in the provided robots.txt ﬁles.9
+Throughput: The crawler should crawl as many URIs as possible in as little time
+as is possible within the bounds of the politeness policies.
+Scale: The crawler should employ scalable techniques and on-disk indexing as
+required.
+
+(cid:129) Quality: The crawler should prioritize crawling URIs it considers to be “high
+
+quality.”
+
+Thus, the design of our crawler is inspired by related work from traditional
+HTML crawlers. Additionally—and speciﬁc to crawling structured data—we identify 
+the following requirement:
+
+Structured Data: The crawler should retrieve a high percentage of RDF/XML
+documents and avoid wasted lookups on unwanted formats, for example, HTML
+documents.
+
+Currently, we crawl for RDF/XML syntax documents—RDF/XML is still the
+most commonly used syntax for publishing RDF on the Web, and we plan in future
+to extend the crawler to support other formats such as RDFa, N-Triples, and Turtle.
+
+14.6.1 High-Level Approach
+
+Our high-level approach is to perform breath-ﬁrst crawling, following precedent set
+by traditional Web crawlers (cf. [15, 67]): the crawl is conducted in rounds, with
+each round crawling a frontier. On a high level, Algorithm 21 represents this roundbased 
+approach applying ROUNDS number of rounds. The frontier comprises of
+seed URIs for round 0 (Algorithm 21, line 21), and thereafter with novel URIs
+extracted from documents crawled in the previous round (Algorithm 21, line 21).
+Thus, the crawl emulates a breadth-ﬁrst traversal of interlinked Web documents.
+
+9http://www.robotstxt.org/orig.html
+
+(cid:129)
+(cid:129)
+(cid:129)
+372
+
+A. Harth et al.
+
+Algorithm 21: Algorithm for crawling
+input: SEEDS, ROUNDS, MIN-DELAY
+f ront i er   SEEDS ;
+pld0:::n   new queue;
+st at s   new st at s;
+while rounds C 1 < ROUNDS do
+put f ront i er into pld0:::n;
+for i D 0 to n do
+st art   current
+for i D 0 to n do
+
+prioritise(pldi , st at s) ;
+
+time();
+
+curi = calculate cur(pldi , st at s) ;
+if curi > random([0;1]) then
+get uri from pldi ;
+urideref D deref.uri /;
+if urideref D uri then
+G D get.uri /;
+output G;
+UG   URIs in G;
+UG   prune blacklisted from UG ;
+add unseen URIs in UG to f ront i er ;
+update st at s wrt. UG;
+
+else
+
+if urideref is unseen then
+
+add urideref to f ront i er;
+update st at s for urideref;
+
+elapsed   current
+if elapsed < MIN-DELAY then
+
+time() - st art ;
+wait(MIN-DELAY (cid:3) elapsed / ;
+
+As the bottleneck for a single-threaded crawler will be the response times of remote
+servers, our implementation of the crawling algorithm is multithreaded and performs
+concurrent HTTP lookups. Note that the algorithm is further tailored according to
+requirements we will describe as the section progresses.
+
+14.6.1.1 Incorporating Politeness
+
+The crawler must be careful not to bite the hands that feed it by hammering
+the servers of data providers or breaching policies outlined in the provided
+robots.txt ﬁle [118]. We use pay-level domains [91] (PLDs; a.k.a. “root
+domains”; e.g., bbc.co.uk) to identify individual data providers, and implement
+politeness on a per-PLD basis. First, when we ﬁrst encounter a URI for a PLD,
+we cross-check the robots.txt ﬁle to ensure that we are permitted to crawl that
+site; second, we implement a “minimum PLD delay” to avoid hammering servers,
+viz., a minimum time period between subsequent requests to a given PLD (MINDELAY 
+in Algorithm 21).
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+373
+
+In order to accommodate the min-delay policy with minimal effect on performance,
+ we must reﬁne our crawling algorithm: large sites with a large internal
+branching factor (large numbers of unique intra-PLD outlinks per document) can
+result in the frontier of each round being dominated by URIs from a small selection
+of PLDs. Thus, na¨ıve breadth-ﬁrst crawling can lead to crawlers hammering such
+sites; conversely, given a politeness policy, a crawler may spend a lot of time idle
+waiting for the min-delay to pass.
+
+One solution is to reasonably restrict the branching factor [91]—the maximum
+number of URIs crawled per PLD per round—which ensures that individual PLDs
+with large internal fan-out are not hammered; thus, in each round of the crawl, we
+implement a cutoff for URIs per PLD, given by PLD-LIMIT in Algorithm 21.
+
+Second, to ensure the maximum gap between crawling successive URIs for the
+same PLD, we implement a per-PLD queue (given by pld0:::n in Algorithm 21),
+whereby each PLD is given a dedicated queue of URIs ﬁlled from the frontier, and
+during the crawl, a URI is polled from each PLD queue in a round-robin fashion.
+If all of the PLD queues have been polled before the min-delay is satisﬁed, then the
+crawler must wait: this is given by lines 21–21 in Algorithm 21. Thus, the minimum
+crawl time for a round—assuming a sufﬁciently full queue—becomes MIN-DELAY
+* PLD-LIMIT.
+
+14.6.1.2 On-Disk Queue
+
+As the crawl continues, the in-memory capacity of the machine will eventually be
+exceeded by the capacity required for storing URIs [91]. Performing a stress test, we
+observed that with 2 GB of Java heap-space, the crawler could crawl approximately
+199 k URIs (additionally storing the respective frontier URIs) before throwing an
+out-of-memory exception. To scale beyond the implied main-memory limitations of
+the crawler, we implement on-disk storage for URIs, with the additional beneﬁt of
+maintaining a persistent state for the crawl and thus offering a “continuation point”
+useful for extension of an existing crawl, or recovery from failure.
+
+We implement the on-disk storage of URIs using Berkeley DB which comprises
+of two indexes—the ﬁrst provides lookups for URI strings against their status
+(polled/unpolled); the second offers a key-sorted map which can iterate over
+unpolled URIs in decreasing order of inlink count. The inlink count reﬂects the total
+number of documents from which the URI has been extracted thus far; we deem a
+higher count to roughly equate to a higher priority URI.
+
+The on-disk index and in-memory queue are synchronized at the start of each
+
+round:
+
+1. Links and respective inlink counts extracted from the previous round (or seed
+
+URIs if the ﬁrst round) are added to the on-disk index.
+
+2. URIs polled from the previous round have their status updated on-disk.
+3. An in-memory PLD queue is ﬁlled using an iterator of on-disk URIs sorted by
+
+descending inlink count.
+
+374
+
+A. Harth et al.
+
+The above process ensures that only the URIs active (current PLD queue
+and frontier URIs) for the current round must be stored in memory. Finally, the
+in-memory PLD queue is ﬁlled with URIs sorted in order of inlink count, offering a
+cheap form of intra-PLD URI prioritization (Algorithm 21, line 21).
+
+14.6.1.3 Crawling RDF/XML
+
+Since our architecture is currently implemented to index RDF/XML, we would
+feasibly like to maximize the ratio of HTTP lookups which result in RDF/XML
+content; that is, given the total HTTP lookups as L and the total number of
+downloaded RDF/XML pages as R, we would like to maximize the useful ratio:
+ur D R=L.
+
+To reduce the amount of HTTP lookups wasted on non-RDF/XML content, we
+
+implement the following heuristics:
+
+1. First, we blacklist non-http protocol URIs.
+2. Second, we blacklist URIs with common ﬁle extensions that are highly unlikely
+to return RDF/XML (e.g., html, jpg, pdf) following arguments we previously
+laid out in [121].
+
+3. Third, we check the returned HTTP header and only retrieve the content of URIs
+
+reporting Content-type: application/rdf+xml.10
+
+4. Finally, we use a credible useful ratio when polling PLDs to indicate the
+probability that a URI from that PLD will yield RDF/XML based on past
+observations.
+
+With respect to the ﬁrst two heuristics, any form of URI can be extracted from
+an RDF/XML document in any position, so from the set of initially extracted
+URIs, we blacklist those which are non-HTTP or those with common non-RDF
+ﬁle extensions (given in line 21 of Algorithm 21). Although blacklisting URIs with
+schemes such as mailto: or urn: is optional (since no HTTP lookup will be
+performed), pruning them early on avoids the expense of putting them through the
+queueing process. Note that we do not blacklist HTTP URIs which do not have an
+explicit ﬁle extension and whose content cannot be detected a priori (e.g., those
+with trailing slashes). Thus, we employ two further heuristics to improve the ratio
+of RDF/XML.
+
+Our third heuristic involves rejecting content based on header information;
+this is perhaps arguable in that previous observations [74] indicate that 17%
+of RDF/XML documents are returned with a Content-type other than
+application/rdf+xml. Still we automatically exclude such documents from
+our crawl; however, here we put the onus on publishers to ensure correct reporting
+of Content-type.
+
+10Indeed, one advantage RDF/XML has over RDFa is an unambiguous MIME-type useful in such
+situations.
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+375
+
+With respect to the fourth heuristic, we implement an algorithm for selectively
+polling PLDs based on their observed useful ratio; since our crawler only requires
+RDF/XML, we use this score to access PLDs which offer a higher percentage of
+RDF/XML more often. Thus, we can reduce the amount of time wasted on lookups
+of HTML documents and save the resources of servers for non-RDF/XML data
+providers.
+
+The credible useful ratio for PLD i is derived from the following credibility
+
+formula:
+
+curi D rdf i C (cid:2)
+totali C (cid:2)
+
+where rdf i is the total number of RDF documents returned thus far by PLD i, totali
+is the total number of lookups performed for PLD i excluding redirects, and (cid:2) is
+a “credibility factor.” The purpose of the credibility formula is to dampen scores
+derived from few readings (where totali is small) toward the value 1 (offering the
+beneﬁt of the doubt), with the justiﬁcation that the credibility of a score with few
+readings is less than that with a greater number of readings: with a low number of
+readings (totali (cid:4) (cid:2)), the curi score is affected more by (cid:2) than actual readings for
+PLD i; as the number of readings increases (totali (cid:5) (cid:2)), the score is affected more
+by the observed readings than the (cid:2) factor. Note that we set (cid:2) to 10.11
+Example 14.1. If we observe that PLD a D deri:org has returned 1/5 RDF/XML
+documents and PLD b D w3:org has returned 1/50 RDF/XML documents, and if
+we assume (cid:2) D 10, then cura D .1 C (cid:2)/=.5 C (cid:2)/ D 0:73 and curb D .1 C (cid:2)/=
+.50 C (cid:2)/ D 0:183. We thus ensure that PLDs are not unreasonably punished for
+returning non-RDF/XML documents early on (i.e., are not immediately assigned a
+cur of 0.
+
+To implement selective polling of PLDs according to their useful ratio, we simply
+use the cur score as a probability of polling a URI from that PLD queue in that
+round (Algorithm 21, lines 21–21). Thus, PLDs which return a high percentage
+of RDF/XML documents—or indeed PLDs for which very few URIs have been
+encountered—will have a higher probability of being polled, guiding the crawler
+away from PLDs which return a high percentage of non-RDF/XML documents.
+
+14.6.1.4 PLD Starvation
+
+Please note that in our experiments, we have observed the case where there are not
+enough unique PLDs to keep all crawler threads occupied until the MIN-DELAY
+has been reached. We term the state in which crawling threads cannot download
+content in fully parallel fashion PLD starvation. Given the politeness restriction
+
+11Admittedly, a “magic number”; however, the presence of such a factor is more important than
+its actual value: without the credibility factor, if the ﬁrst document returned by a PLD was non-
+RDF/XML, then that PLD would be completely ignored for the rest of the crawl.
+
+376
+
+A. Harth et al.
+
+of, for example, 500 ms per PLD, one PLD with many URIs becomes the hard
+limit for performance independent of system architecture and crawling hardware,
+instead imposed by the nature of the Web of Data itself. Also, as a crawl progresses,
+active PLDs (PLDs with unique content still to crawl) will become less and less, and
+the performance of the multithreaded crawl will approach that of a single-threaded
+crawl. As Linked Data publishing expands and diversiﬁes, and as the number of
+servers offering RDF content increases, better performance would be observed.
+
+14.6.2 Related Work
+
+Parts of our architecture and some of our design decisions are inﬂuenced by work
+on traditional Web crawlers; e.g., the IRLBot system of Lee et al. [91] and the
+distributed crawler of Boldi et al. [15].
+
+The research ﬁeld of focused RDF crawling is still quite a young ﬁeld, with
+most of the current work based on the lessons learned from the more mature area
+of traditional Web crawling. Related work in the area of focused crawling can be
+categorized [7] roughly as follows:
+
+(cid:129) Classic focused crawling: e.g., Chakrabarti et al. [23] uses primary link structure
+and anchor texts to identify pages about a topic using various text similarity of
+link analysis algorithms.
+Semantic focused crawling: a variation of classical focused crawling but uses
+conceptual similarity between terms found in ontologies [40, 41].
+Learning focused crawling: Diligenti et al. and Pant and Srinivasan [37,108] use
+classiﬁcation algorithms to guide crawlers to relevant Web paths and pages.
+
+However, a major difference between these approaches and ours is that our
+deﬁnition of high-quality pages is not based on topics or ontologies but instead on
+the content type of documents.
+
+like us,
+
+With respect to crawling RDF, the Swoogle search engine implements a crawler
+which extracts links from Google and further crawls based on various—sometimes
+domain-speciﬁc—link extraction techniques [38];
+they also use ﬁle
+extensions to throw away non-RDF URIs. In [28], the authors provide a very
+brief description of the crawler used by the Falcons search engine for obtaining
+RDF/XML content; interestingly, they provide statistics identifying a power-law
+type distribution for the number of documents provided by each pay-level domain,
+correlating with our discussion of PLD starvation. In [115], for the purposes of
+the Watson engine, the authors use Heritrix12 to retrieve ontologies using Swoogle,
+Google, and Prot´eg´e indexes and also crawl by interpreting rdfs:seeAlso
+and owl:imports as links—they do not exploit the dereferenceability of URIs
+popularized by Linked Data. Similarly, the Sindice crawler [104] retrieves content
+
+12http://crawler.archive.org/
+
+(cid:129)
+(cid:129)
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+377
+
+based on a push model, crawling documents which pinged some central service such
+as PingTheSemanticWeb;13 they also discuss a PLD-level scheduler for ensuring
+politeness and diversity of data retrieved.
+
+14.6.3 Future Directions and Open Research Questions
+
+From a pragmatic perspective, we would prioritize extension of our crawler to
+handle arbitrary RDF formats—especially the RDFa format which is growing in
+popularity. Such an extension may mandate modiﬁcation of the current mechanisms
+for ensuring a high percentage of RDF/XML documents: for example, we could
+no longer blacklist URIs with a .html ﬁle extension, nor could we rely on the
+Content-type returned by the HTTP header (unlike RDF/XML, RDFa does not
+have a speciﬁc MIME type).
+
+Along these lines, we could perhaps also investigate extraction of structured data
+from non-RDF sources; these could include microformats, metadata embedded in
+documents such as PDFs and images, extraction of HTML metainformation, HTML
+scraping, etc. Again, such a process would require revisitation of our RDF-centric
+focused crawling techniques.
+
+The other main challenge posed in this section is that of PLD starvation; although
+we would expect PLD starvation to become less of an issue as the Semantic Web
+matures, it perhaps bears further investigation. For example, we have yet to fully
+evaluate the trade-off between small rounds with frequent updates of URIs from
+fresh PLDs and large rounds which persist with a high delay rate but require less
+coordination. Also, given the inevitability of idle time during the crawl, it may
+be practical from a performance perspective to give the crawler more tasks to do
+in order to maximize the amount of processing done on the data and minimize
+idle time.
+
+Finally, we have not discussed the possibility of incremental crawls: choosing
+URIs to recrawl may lead to interesting research avenues. Besides obvious solutions
+such as HTTP caching, URIs could be recrawled based on, e.g., detected change
+frequency of the document over time, some quality metric for the document, or how
+many times data from that document were requested in the UI. More practically,
+an incremental crawler could use PLD statistics derived from previous crawls and
+the HTTP headers for URIs—including redirections—to achieve a much higher
+ratio of lookups to RDF documents returned. Such considerations would largely
+countermand the effects of PLD starvation, by reducing the amount of lookups the
+crawler needs in each run.
+
+13http://pingthesemanticweb.com/
+
+378
+
+A. Harth et al.
+
+14.7 Entity Consolidation
+
+In theory, RDF enables excellent data integration over data sourced from arbitrarily
+many sources—as is the case for our corpora collected by our crawler. However, the
+integration is premised on the widespread sharing and reuse—across all sources—
+of URIs for speciﬁc entities. In reality, different RDF documents on the Web
+published by independent parties often speak about the same entities using different
+URIs [73];14 to make matters worse, RDF allows for the deﬁnition of anonymous
+entities—entities identiﬁed by a blank node—without a prescribed URI.
+
+As an example, in our 1.118 bn statement Linked Data corpus, we found 23
+different URIs identifying the person Tim Berners-Lee—these identiﬁers spanned
+nine different PLDs.15 Now, given a keyword query for “tim berners lee,”
+the data using each of the 23 different identiﬁers would be split over 23 different
+results, even though they all refer to the same entity.
+
+Offering search and querying over a raw RDF dataset collected from the Web
+would thus entail many duplicate results referring to the same entity, emulating the
+current situation on the HTML Web where information about different resources
+is fragmented across source documents. Given a means of identifying equivalent
+entities in RDF data—entities representing the same real-world individual but
+identiﬁed incongruously—would enable the merging of information contributions
+on an entity given by heterogeneous sources without the need for consistent URI
+naming of entities.
+
+In fact, OWL [116] provides some standard solutions to such problems. First,
+OWL deﬁnes the owl:sameAs property which is intended to relate two equivalent
+entities; the property has symmetric, transitive, and reﬂexive semantics as one
+would expect. Many sources on the Web offer owl:sameAs links between entities
+described locally and equivalent entities described remotely.
+
+Further, OWL provides some other mechanisms for discovering implicit owl:-
+sameAs relations in the absence of explicit relations: the most prominent such
+example is provision of the class owl:InverseFunctionalProperty, which
+deﬁnes a class of properties whose value uniquely identiﬁes an entity. One example
+of an inverse-functional property would be an ISBN property, where ISBN values
+uniquely identify books. If two entities share the same ISBN value, a same-as
+relation can be inferred between them. Using OWL, same-as relations can also be
+detected using owl:FunctionalProperty, owl:maxCardinality, and
+owl:cardinality (and now in OWL 2 RL using owl:maxQualifiedCardinality 
+and owl:qualifiedCardinality); however, the recall of
+inferences involving the latter OWL constructs are relatively small [75] and thus
+considered out of scope here.
+
+14In fact, Linked Data principles could be seen as encouraging this practice, where dereferenceable
+URIs must be made local.
+15These equivalent identiﬁers were found through explicit owl:sameAs relations.
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+379
+
+the prominent
+
+In [73], we provided a straightforward batch-processing technique for deriving
+owl:sameAs relations using inverse-functional properties deﬁned in the data.
+However, the precision of such inferences is questionable. As an example, in
+[73] we found 85,803 equivalent individuals to be inferable from a Web dataset
+through the “void” values 08445a31a78661b5c746feff39a9db6e4e2cc5cf and
+da39a3ee5e6b4b0d3255bfef95601890afd80709 for
+inversefunctional 
+property foaf:mbox sha1sum: the former value is the sha1-sum
+of an empty string and the latter is the sha1-sum of the “mailto:” string, both
+of which are erroneously published by online Friend-of-a-Friend (FOAF—a very
+popular vocabulary used for personal descriptions) exporters.16 Aside from obvious
+pathological cases—which can of course be blacklisted—publishers commonly do
+not respect the semantics of inverse-functional properties [74].
+More recently, in [70], we showed that we could ﬁnd 1.31(cid:3) more sets of
+equivalent identiﬁers by including reasoning over inverse-functional properties and
+functional properties, than when only considering explicit owl:sameAs. These
+sets contained 2.58(cid:3) more identiﬁers. However, we found that the additional
+equivalences found through such an approach were mainly between blank nodes
+on domains which do not use URIs to identify resources, common for older FOAF
+exporters: we found a 6% increase in URIs involved in an equivalence. We again
+observed that the equivalences given by such an approach tend to offer more noise
+than when only considering explicit owl:sameAs relations.
+
+In fact, the performance of satisfactory, high-precision, high-recall entity consolidation 
+over large-scale Linked Data corpora is still an open research question.
+At the moment, we rely on owl:sameAs relations which are directly asserted in
+the data to perform consolidation.
+
+14.7.1 High-Level Approach
+
+The overall approach involves two scans of the main body of data, with the following
+high-level steps:
+
+1. owl:sameAs statements are extracted from the data: the main body of data is
+scanned once identifying owl:sameAs triples and buffering them to a separate
+location.
+
+2. The transitive/symmetric closure of the owl:sameAs statements are computed,
+
+inferring new owl:sameAs relations.
+
+3. For each set of equivalent entities found (each equivalence class), a canonical
+
+identiﬁer is chosen to represent the set in the consolidated output.
+
+16See, for example, http://blog.livedoor.jp/nkgw/foaf.rdf
+
+380
+
+A. Harth et al.
+
+4. The main body of data is again scanned and consolidated: identiﬁers are rewritten
+to their canonical form—we do not rewrite identiﬁers in the predicate position,
+objects of rdf:type triples, or literal objects.
+
+In previous work, we have presented two approaches for performing such consolidation;
+ in [73], we stored owl:sameAs in memory, computing the transitive/
+symmetric closure in memory, and performing in-memory lookups for canonical
+identiﬁers in the second scan. In [75], we presented a batch-processing technique
+which uses on-disk sorts and scans to execute the owl:sameAs transitive/symmetric 
+closure, and the canonicalization of identiﬁers in the main body of data.
+The former approach is in fact much faster in that it reduces the amount of
+time consumed by hard-disk I/O operations; however, the latter batch-processing
+approach is not limited by the main-memory capacity of the system. Either
+approach is applicable with our consolidation component (even in the distributed
+case); however, since for the moment we only operate on asserted owl:sameAs
+statements (we found (cid:6)12 m owl:sameAs statements in our full-scale crawl,
+which we tested to be within our 4GB in-memory capacity using the ﬂyweight
+pattern), for now we apply the faster in-memory approach.
+
+Standard OWL semantics mandates duplication of data for all equivalent terms
+by the semantics of replacement (cf. Table 4, [50]), which, however, is not a practical
+option at scale. First, the amount of duplication will be quadratic with respect to the
+size of an equivalence class. Empirically, we have found equivalence classes with
+8.5 k elements from explicit owl:sameAs relations [76]. If one were to apply
+transitive, reﬂexive, and symmetric closure of equivalence over these identiﬁers, we
+would produce 8:5k2 D 72:25m owl:sameAs statements alone; further assuming
+an average of six unique quads for each identiﬁer—51 k unique quads in total—
+we would produce a further 433.5 m repetitive statements by substituting each
+equivalent identiﬁer into each quad. Second, such duplication of data would result
+in multitudinous duplicate results being presented to end users, with obvious impact
+on the usability of the system.
+
+Thus, the practical solution is to abandon standard OWL semantics and instead
+consolidate the data by choosing a canonical identiﬁer to represent the output data
+for each equivalence class. Canonical identiﬁers are chosen with preference to URIs
+over blank nodes, and thereafter we arbitrarily use a lexicographical order—the
+canonical identiﬁers are only used internally to represent the given entity.17 Along
+these lines, we also preserve all URIs used to identify the entity by outputting
+owl:sameAs relations to and from the canonical identiﬁer (please note that we
+do not preserve redundant blank-node identiﬁers which are only intended to have a
+local scope, have been assigned arbitrary labels during the crawling process, and are
+not subject to reuse), which can subsequently be used to display all URIs originally
+used to identify an entity, or to act as a “redirect” from an original identiﬁer to the
+canonical identiﬁer containing the pertinent information.
+
+17If necessary, the ranking algorithm presented in the next section could be used to choose the most
+popular identiﬁer as the canonical identiﬁer.
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+381
+
+In the in-memory map structure, each equivalence class is assigned a canonical
+identiﬁer according to the above ordering. We then perform a second scan of
+the data, rewriting terms according to canonical identiﬁers. Please note that
+according to OWL full semantics, terms in the predicate position and object
+position of rdf:type triples should be rewritten (referring to term positions
+occupied by properties and classes respectively in membership assertions;
+again, cf. Table 4, [50]). However, we do not wish to rewrite these terms:
+in OWL, equivalence between properties can instead be speciﬁed by means
+of the owl:equivalentProperty construct, and between classes as the
+owl:equivalentClass construct.18 We omit rewriting class/property terms
+in membership assertions, handling inferences involving classes/properties by
+alternate means in Sect. 14.9.
+
+Thus, in the second scan, the subject and object of non-rdf:type statements
+are rewritten according to the canonical identiﬁers stored in the in-memory map,
+with rewritten statements written to output. If no equivalent identiﬁers are found,
+the statement is buffered to the output. When the scan is complete, owl:sameAs
+relations to/from canonical URIs and their equivalent URIs are appended to the
+output. Consolidation is now complete.
+
+14.7.2 Related Work
+
+Entity consolidation has an older related stream of research relating largely to
+databases, with work under the names of record linkage, instance fusion, and
+duplicate identiﬁcation; cf. [26, 98, 103] and a survey at [42]. Due to the lack
+of formal speciﬁcation for determining equivalences, these older approaches are
+mostly concerned with probabilistic methods.
+
+With respect to RDF, Bouquet et al. [17] motivate the problem of (re)using
+common identiﬁers as one of the pillars of the Semantic Web and provide a
+framework for mapping heterogeneous identiﬁers to a centralized naming scheme
+for reuse across the Web—some would argue that such a centralized service would
+not be in tune with the architecture or philosophy of the Web.
+
+Consolidation has also been tackled in the context of applying rule-based
+reasoning for OWL, where choosing canonical (or “pivot”) identiﬁers is a common
+optimization [73, 75, 85, 88, 122]. Algorithms for building the equivalence partition
+have also been proposed by these works, where, e.g., Kolovski et al. propose a similar 
+union–ﬁnd algorithm to that presented herein. In previous works [75], we have
+presented an algorithm which iteratively connects elements in an equivalence class
+toward the common, lowest-ordered element, pruning connections to elements to
+
+18As an example of na¨ıve usage of owl:sameAs between classes and properties on the
+Web, please see: http://colab.cim3.net/ﬁle/work/SICoP/DRMITIT/DRM OWL/Categorization/
+TaxonomyReferenceModel.owl
+
+382
+
+A. Harth et al.
+
+higher orders; the result of this process is a canonical identiﬁer which connects
+directly to all elements of the equivalence class. Urbani et al. [122] propose an
+algorithm which is similar in principle, but which is implemented in a distributed
+MapReduce setting and optimized to prevent load-balancing issues. We discuss
+related rule-based reasoning approaches in more detail later in Sect. 14.9.2.
+
+The Sindice and Sig.ma search systems internally use inverse-functional properties 
+to ﬁnd equivalent identiﬁers [104, 120]—Sindice uses reasoning to identify
+a wider range of inverse-functional properties [104]. Online systems RKBExplorer 
+[49],19 <sameAs>,20 and ObjectCoref21 offer on-demand querying for
+owl:sameAs relations found for a given input URI, which they internally compute
+and store; as previously alluded to, the former publish owl:sameAs relations for
+authors and papers in the area of scientiﬁc publishing.
+
+Some more recent works have looked at hybrid approaches for consolidation,
+combining symbolic (i.e., reasoning) methods and statistical/inductive methods
+[78, 80].
+
+The authors of [124] present Silk: a framework for creating and maintaining
+interlinkage between domain-speciﬁc RDF datasets; in particular, this framework
+provides publishers with a means of discovering and creating owl:sameAs
+links between data sources using domain-speciﬁc rules and parameters. Thereafter,
+publishers can integrate discovered links into their exports, enabling better linkage
+of the data and subsequent consolidation by data consumers: this framework goes
+hand in hand with our approach, producing the owl:sameAs relations which we
+consume.
+
+In [53], the authors discuss the semantics and current usage of owl:sameAs in
+Linked Data, discussing issues relating to identity and providing four categories of
+owl:sameAs usage to relate entities which are closely related, but for which the
+semantics of owl:sameAs—particularly substitution—do not quite hold.
+
+14.7.3 Future Directions and Open Research Questions
+
+In this section, we have focused on the performance of what we require to be a
+scalable consolidation component. We have not presented analysis of the precision
+or recall of such consolidation—such evaluation is difﬁcult to achieve in practice
+given a lack of a gold standard, or suitable means of accurately verifying results.
+The analysis of the precision and recall of various scalable consolidation methods
+on current Web data would represent a signiﬁcant boon to research in the area of
+querying over Linked Data.
+
+We are currently investigating statistical consolidation methods, with particular 
+emphasis on extracting some notion of the quality or trustworthiness of
+
+19http://www.rkbexplorer.com/sameAs/
+20http://sameas.org/
+21http://ws.nju.edu.cn/objectcoref/
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+383
+
+derived equivalences [78]. Presently, we try to identify “quasi-inverse-functional”
+and “quasi-functional” properties (properties which are useful for distinguishing
+identity) using statistical analysis of the input data. We then combine shared
+property/value pairs for entities and derive a fuzzy value representing the conﬁdence
+of equivalence between said entities. However, this preliminary work needs further
+investigation—including scalability and performance testing, and integration with
+more traditional reasoning-centric approaches for consolidation—before being
+included in the SWSE pipeline.
+
+A further avenue for research in the same vein is applying “disambiguation,” or
+attempting to assert that two entities cannot (or are likely not to) be equivalent using
+statistical approaches or analysis of inconsistencies in reasoning: disambiguation
+would allow for increasing the precision of the consolidation component by quickly
+removing “obvious” false positives.
+
+Again, such approaches would likely have a signiﬁcant impact on the quality
+of data integration possible in an engine such as SWSE operating over RDF
+Web data.
+
+14.8 Ranking
+
+Ranking is an important mechanism in the search process with the function of prioritizing 
+data elements. Herein, we want to quantify the importance of consolidated
+entities in the data for use in ordering the presentation of results returned when
+users pose a keyword query (e.g., see Fig. 14.1), such that the most “important”
+results appear higher in the list. Note that we will combine these ranking scores
+with relevance scores later in Sect. 14.10.
+
+There is a signiﬁcant body of related work on link-based algorithms for the Web;
+seminal works include [86, 107]. A principal objective when ranking on the Web
+is rating popular pages higher than unpopular ones—further, ranks can be used for
+performing top-k processing, allowing the search engine to retrieve and process
+small segments of results ordered by their respective rank. Since we share similar
+goals, we wish to leverage the beneﬁts of link-based analysis, proven for the HTML
+Web, for the purposes of ranking Linked Data entities. We identify the following
+requirements for ranking Linked Data, which closely align with those of HTMLcentric 
+ranking schemes:
+
+(cid:129) The methods should be scalable and applicable in scenarios involving large
+
+corpora of RDF.
+
+(cid:129) The methods should be automatic and domain agnostic, and not inherently
+
+favoring a given domain or source of data.
+
+(cid:129) The methods should be robust in the face of spamming.
+
+With respect to ranking the entities in our corpus in a manner sympathetic with
+
+our requirements, we further note the following:
+
+384
+
+A. Harth et al.
+
+(cid:129) On the level of triples (data level), publishers can provide arbitrary information
+in arbitrary locations using arbitrary identiﬁers; thus, to discourage low-effort
+spamming, the source of information must be taken into account.
+
+(cid:129) Following traditional link-based ranking intuition, we should consider links from
+one source of information to another as a “positive vote” from the former to the
+latter.
+In the absence of sufﬁcient source-level ranking, we should infer links between
+sources based on usage of identiﬁers on the data level and some function mapping
+between data-level terms and sources.
+
+(cid:129) Data providers who reuse identiﬁers from other sources should not be penalized:
+
+their data sources should not lose any rank value.
+
+In particular, our methods are inspired by Google’s PageRank [107] algorithm,
+which interprets hyperlinks to other pages as positive votes. However, PageRank
+is generally targeted toward hypertext documents, and adaptation to Linked Data
+sources is nontrival, given that the notion of a hyperlink (interpreted as a vote for a
+particular page) is missing: Linked Data principles mandate implicit links to other
+Web sites or data sources through reuse of dereferenceable URIs. Also, the unit of
+search is no longer a document, but an entity.
+
+In previous work [59], we proposed a scalable algorithm for ranking structured
+data from an open, distributed environment, based on a concept we term naming
+authority. We reintroduce selected important discussion from [59] and extend here
+by implementing the method in a distributed way and reevaluating with respect to
+performance.
+
+14.8.1 High-Level Approach
+
+Although we wish to rank entities, our ranking algorithm must consider the source
+of information to avoid low-effort data-level spamming. Thus, we must ﬁrst have a
+means of ranking source-level identiﬁers and thereafter can propagate such ranks to
+the data level.
+
+To leverage existing link-based analysis techniques, we need to build a graph
+encoding the interlinkage of Linked Data sources. Although one could examine use
+of, for example, owl:imports or rdfs:seeAlso links, and interpret them
+directly as akin to a hyperlink, the former is used solely in the realm of OWL
+ontology descriptions and the latter is not restricted to refer to RDF documents;
+similarly, both ignore the data-level linkage that exists by means of LDP4 (include
+links using external URIs). Thus, we aim to infer source-level links through usage
+of data-level URIs in the corpus.
+
+To generalize the idea, we previously deﬁned the notion of “naming authority”
+for identiﬁers: a naming authority is a data source with the power to deﬁne identiﬁers
+of a certain structure [59]. Naming authority is an abstract term which could be
+applied to a knowable provenance of a piece of information, be that a document,
+
+(cid:129)
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+385
+
+host, person, organization, or other entity. Data items which are denoted by unique
+identiﬁers may be reused by sources other than the naming authority.
+
+Example 14.2. With respect to Linked Data principles (see Sect. 14.4.2), consider 
+for example the data-level URI http://danbri.org/foaf.rdf#danbri. Clearly the
+owner(s) of the http://www.danbri.org/foaf.rdf document (or, on a coarser level,
+the danbri.org domain) can claim some notion of “authority” for this URI:
+following LDP4, the usage of the URI on other sites can be seen as a vote for
+the respective data source. We must also support redirects as commonly used for
+LDP3—thus we can reuse the deref function given in Sect. 14.4.2 as a function
+which maps an arbitrary URI identiﬁer to the URI of its naming authority document
+(or to itself in the absence of a redirect).
+
+Please note that there is no obvious function for mapping from literals to naming
+authority, we thus omit them from our source-level ranking (one could consider
+a mapping based on datatype URIs, but we currently see no utility in such an
+approach). Also, blank nodes may only appear in one source document and are not
+subject to reuse: although one could reduce the naming authority of a blank node to
+the source they appear in, clearly only self-links can be created.
+
+Continuing, we must consider the granularity of naming authority: in [59],
+we discussed and contrasted interpretation of naming authorities on a document
+level (e.g., http://www.danbri.org/foaf.rdf) and on a PLD level (danbri.org).
+Given that the PLD-level linkage graph is signiﬁcantly smaller than the documentlevel 
+graph, the overhead for aggregating and analyzing the PLD-level graph is
+signiﬁcantly reduced, and thus, we herein perform ranking at a PLD level.
+Please note that for convenience, we will assume that PLDs are identiﬁed by
+URIs, for example, (http://danbri.org/). We also deﬁne the convenient function pld W
+U ! U which extracts the PLD identiﬁer for a URI (if the PLD cannot be parsed
+for a URI, we simply ignore the link)—we may also conveniently use the function
+plds W 2U ! 2U for sets of URIs.
+
+Thus, our ranking procedure consists of the following steps:
+
+1. Construct the PLD-level naming authority graph: for each URI u appearing in
+a triple t in the input data, create links from the PLDs of sources mentioning a
+particular URI to the PLD of that URI: plds.refs.u// ! pld.deref.u//.
+
+2. From the naming authority graph, use the PageRank algorithm to derive scores
+
+3. Using the PLD ranks, derive a rank value for terms in the data, particularly terms
+
+for each PLD.
+in U [ B which identify entities.
+
+386
+
+A. Harth et al.
+
+14.8.1.1 Extracting Source Links
+
+As a ﬁrst step, we derive the naming authority graph from the input dataset. That is,
+we construct a graph which encodes links between data source PLDs, based on the
+implicit connections created via identiﬁer reuse.
+Given PLD identiﬁers pi ; pj 2 U, we specify the naming authority matrix A as
+
+a square matrix deﬁned as:
+8
+ˆˆ<
+
+ai;j D
+
+1 if pi ¤ pj and pi uses an identiﬁer
+
+ˆˆ:
+
+with naming authority pj
+
+0 otherwise
+
+This represents an n (cid:3) n square matrix where n is the number of PLDs in the data,
+and where the element at .i; j / is set to 1 if i ¤ j and PLD i mentions a URI which
+leads to a document hosted by PLD j .
+
+As such, the naming authority matrix can be arbitrarily derived through a single
+scan over the entire dataset. Note that we optionally can omit URIs found in the
+predicate position of a triple, or the object position of an rdf:type triple, in
+the derivation of the naming authority graph, such that we do not want to overly
+inﬂate scores for PLDs hosting vocabularies: we are concerned that such PLDs
+(e.g., w3.org, xmlns.org) would receive rankings orders of magnitude higher
+than their peers, overly inﬂating the ranks of arbitrary terms appearing in that PLD;
+further, users will generally not be interested in results describing the domain of
+knowledge itself [59].
+
+14.8.1.2 Calculating Source Ranks
+
+Having constructed the naming authority matrix, we now can compute scores for
+data sources. For computing ranking scores, we perform a standard PageRank
+calculation over the naming authority graph: we calculate the dominant eigenvector
+of the naming authority graph using the Power iteration while taking into account a
+damping factor (see [107] for more details).
+
+14.8.1.3 Calculating Identiﬁer Ranks
+
+Based on the rank values for the data sources, we now calculate the ranks for
+individual identiﬁers. The rank value of a constant c 2 C is given as the summation
+of the rank values of the PLDs for the data sources in which the term occurs:
+
+idrank.c/ D X
+
+pld2plds.refs.c//
+
+sourcerank.pld/
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+387
+
+This follows the simple intuition that the more highly ranked PLDs mentioning
+a given term, the higher the rank of that term should be.22 Note again—and with
+similar justiﬁcation as for deriving the named authority graph—we do not include
+URIs found in the predicate position of a triple, or the object position of an
+rdf:type triple in the above summation for our evaluation. Also note that the
+ranking for literals may not make much sense depending on the scenario—in any
+case, we currently do not require ranks for literals.
+
+14.8.1.4 User Evaluation
+
+Herein, we summarize the details of our user evaluation, where the full details
+are available in [59]. We conducted a study asking 10–15 participants to rate the
+ordering of SWSE results given for ﬁve different input keyword queries, including
+the evaluator’s own name. We found that our method produced preferable results
+(with statistical signiﬁcance) for ranking entities than the baseline method of
+implementing PageRank on the RDF node-link graph (an approach which is similar
+to existing work such as ObjectRank [6]). Also, we found that use of the PLD-level
+graph and document-level graph as input for our PageRank calculations yielded
+roughly equivalent results for identiﬁer ranks in our user evaluation.
+
+14.8.2 Related Work
+
+There have been numerous works dedicated to comparing hypertext-centric ranking
+for varying granularity of sources. Najork et al. [101] compared results of the
+HITS [86] ranking approach when performed on the level of document, host, and
+domain granularity and found that domain granularity returned the best results:
+in some cases, PLD-level granularity may be preferable to domain or host-level
+granularity because some sites like LiveJournal (which export vast amounts of user
+proﬁle data in the Friend-of-a-Friend [FOAF] vocabulary) assign subdomains to
+each user, which would result in large tightly-knit communities if domains were
+used as naming authorities. Previous work has performed PageRank on levels other
+than the page level, for example, at the more coarse granularity of directories, hosts,
+and domains [83], and at a ﬁner granularity such as logical blocks of text [21] within
+a page.
+
+There have been several methods proposed to handle the task of ranking Semantic
+
+Web data.
+
+Swoogle ranks documents using the OntoRank method, a variation on PageRank
+which iteratively calculates ranks for documents based on references to terms
+
+22The generic algorithm can naturally be used to propagate PLD/source-level rankings to any form
+of RDF artifact, including triples, predicates, classes, etc.
+
+388
+
+A. Harth et al.
+
+(classes and properties) deﬁned in other documents. We generalize the method
+described in [39] to rank entities and perform link analysis on the PLD abstraction
+layer.
+
+ObjectRank [6] ranks a directed labeled graph using PageRank using “authority
+transfer schema graphs,” which requires manual weightings for the transfer of
+propagation through different types of links; further, the algorithm does not include
+consideration of the source of data and is perhaps better suited to domain-speciﬁc
+ranking over veriﬁed knowledge.
+
+We note that Falcons [28] also rank the importance of entities (what they call
+“objects”), but based on a logarithm of the number of documents in which the object
+is mentioned.
+
+In previous work, we introduced ReConRank [72]: an initial effort to apply
+a PageRank-type algorithm to a graph which uniﬁes data-level and source-level
+linkage. ReConRank does take data provenance into account; however, because it
+simultaneously operates on the object graph, it is more susceptible to spamming
+than the presented approach.
+
+A recent approach for ranking Linked Data called Dataset rankING (DING)
+[35]—used by Sindice—holds a similar philosophy to ours: they adopt a twolayer 
+approach consisting of an entity layer and a dataset layer. However, they also
+apply rankings of entities within a given dataset, using PageRank (or optionally
+link-counting) and unsupervised link-weighting schemes, subsequently combining
+dataset and local entity ranks to derive global entity ranks. Because of the local
+entity ranking, their approach is theoretically more expensive and less ﬂexible than
+ours, but would offer better granularity of results—less entity results with the same
+rank. However, as we will see later, we will be combining global entity ranks with
+keyword query-speciﬁc relevance scores, which mitigates the granularity problem.
+There are numerous other loosely related approaches, which we brieﬂy mention:
+SemRank [3] ranks relations and paths on Semantic Web data using informationtheoretic 
+measures; AKTiveRank [1] ranks ontologies based on how well they cover
+speciﬁed search terms; Ontocopi [2] uses a spreading activation algorithm to locate
+instances in a knowledge base which are most closely related to a target instance;
+the SemSearch system [92] also includes relevance ranks for entities according to
+how well they match a user query.
+
+14.8.3 Future Directions and Open Research Questions
+
+Ranking in Web search engines depends on a multitude of factors, ranging from
+globally computed ranks to query-dependent ranks to location, preferences, and
+history of the searcher. Factoring additional signals into the ranking procedure
+is the area for further research, especially in the face of complex database-like
+queries and results beyond the simple list of objects. For example, we have already
+seen that we exclude predicate and class identiﬁers from the ranking procedure in
+order not to adversely affect our goal of ranking entities (individuals) in the data;
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+389
+
+speciﬁc modes and display criteria of the UI may require different models of ranks,
+providing multiple contextual ranks for identiﬁers in different roles—e.g., creating
+a distinctive ranking metric for identiﬁers in the role of predicates, reﬂecting the
+expectations of users given various modes of browsing.
+
+Another possibly fruitful research topic relates to the question of ﬁnding
+appropriate mathematical representations of directed labeled graphs and appropriate
+operations on them [47, 58]. Most of the current research in ranking RDF graphs
+is based around the directed graph models borrowed from hypertext ranking
+procedures. A bespoke mathematical model for RDF (directed, labeled, and named)
+graphs may lead to a different view on possible ranking algorithms.
+
+Finally, the evaluation of link-based ranking as an indicator of trustworthiness
+would also be an interesting contribution; thus far, we have evaluated the approach
+according to user evaluation reﬂecting preference for the prioritization of entity
+results in the UI. However, given that we also consider the source of information
+in our ranking, we could see if there was a co-occurrence, for example, of poorly
+ranked PLDs and inconsistent data. Such a result would have impact for the
+reasoning component, presented next, and some discussion is provided in the
+respective future work section to follow.
+
+14.9 Reasoning
+
+Using the Web Ontology Language (OWL) and the RDF Schema language (RDFS),
+instance data (i.e., assertional data) describing individuals can be supplemented with
+structural data (i.e., terminological data) describing classes and properties, allowing
+to well deﬁne the domain of discourse and ultimately provide machines a more
+sapient understanding of the RDF data. Numerous vocabularies have been published
+on the Web of Data, encouraging reuse of terms for prescribed classes and properties
+across sources and providing formal RDFS/OWL descriptions thereof.
+
+We have already seen that OWL semantics can be used to automatically
+aggregate heterogeneous data—using owl:sameAs relations and, for example, the
+owl:InverseFunctionalProperty to derive said—where the knowledge
+is fractured by the use of discordant identiﬁers.23 However, RDFS and OWL
+descriptions in the data can be further exploited to infer new statements based on the
+terminological knowledge and provide a more complete dataset for query answering
+and to automatically translate data from one conceptual model to another (where
+appropriate mappings exist in the data).
+
+Example 14.3. In our data, we ﬁnd 43 properties whose memberships can be
+used to infer an foaf:page relationship between a resource and a Web page
+pertaining to it. These include specializations of the property within the FOAF
+
+23Note that in this chapter, we deliberately decouple consolidation and reasoning, since in future
+work we hope to view the unique challenges of ﬁnding equivalent identiﬁers as separate from those
+of inferencing according to terminological data presented here.
+
+390
+
+A. Harth et al.
+
+namespace itself, such as foaf:homepage, foaf:weblog, etc., and specializations 
+of the property outside the FOAF namespace, including mo:wikipedia,
+rail:arrivals, po:microsite, plink:rss, xfn:mePage, etc. All such
+specializations of the property are related to foaf:page (possibly indirectly)
+through the rdfs:subPropertyOf relation in their respective vocabulary.
+Similarly, inverses of foaf:page may also exist, where in our corpus we ﬁnd that
+foaf:topic relates a Web page to a resource it pertains to. Here, foaf:topic
+is related to foaf:page using the built-in OWL property owl:inverseOf.
+Thus, if we know that:
+
+ex:resource mo:wikipedia ex:wikipage .
+
+mo:wikipedia rdfs:subPropertyOf foaf:page .
+
+foaf:page owl:inverseOf foaf:topic .
+
+we can infer through reasoning that:
+
+ex:resource foaf:page ex:wikipage .
+ex:wikipage foaf:topic ex:resource .
+
+In particular, through the RDFS and OWL deﬁnitions given in the data, we
+infer a new fact about the entities ex:resource and ex:wikipage. (Note that
+reasoning can also apply over class memberships in a similar manner.)
+
+We identify the following requirements for large-scale RDFS and OWL reasoning 
+over Web data:
+
+(cid:129) Precomputation: the system should precompute inferences to avoid the runtime
+expense of backward chaining such that could negatively impact upon response
+times.
+
+(cid:129) Reduced output: the system should not produce so many inferences that it overburdens 
+the consumer application.
+Scalability: the system should scale near linearly with respect to the size of the
+Linked Data corpus.
+
+(cid:129) Web tolerant: the system should be tolerant to noisy and possibly inconsistent
+
+data on the Web.
+
+(cid:129) Domain agnostic: the system should be applicable over data from arbitrary
+than
+
+domains and consider noncore Web ontologies (ontologies other
+RDF(S)/OWL) as equals.
+
+In previous work [75], we introduced the scalable authoritative OWL reasoner
+(SAOR) system for performing large-scale materialization using a rule-based
+approach over a fragment of OWL, according to the given requirements. We
+subsequently generalized our approach, extended our fragment to a subset of OWL
+2 RL/RDF, and demonstrated distributed execution in [77]. We now brieﬂy reintroduce 
+important aspects from that work, focusing on discussion relevant to the
+SWSE use case.
+
+(cid:129)
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+391
+
+14.9.1 High-Level Approach
+
+First, we choose a rule-based approach which offers greater tolerance in the
+inevitable event of inconsistency than description logics-based approaches—indeed,
+consistency cannot be expected on the Web (cf. [74] for our discussion on reasoning
+issues in Linked Data). Second, rule-based approaches offer greater potential
+for scale following arguments made in [45]. Finally, many Web ontologies—
+although relatively lightweight and inexpressive—are not valid DL ontologies: for
+example, FOAF deﬁnes the data-type property foaf:mbox sha1sum as inversefunctional,
+ which is disallowed in OWL DL—in [8] and [125], the authors provided
+surveys of Web ontologies and showed that most are in OWL full, albeit for largely
+syntactic reasons.
+
+However, there does not exist a standard ruleset suitable for application over
+arbitrary Web data—we must compromise and deliberately abandon completeness,
+ instead striving for a more pragmatic form of reasoning tailored for the
+unique challenges of Web reasoning [69]. In [75], we discussed the tailoring of a
+nonstandard OWL ruleset—viz. pD* [79]—for application over Web data. More
+recently, OWL 2 has become a W3C Recommendation, and interestingly from our
+perspective includes a standard rule-expressible fragment of OWL, viz.: OWL 2
+RL [50]. In [77], we presented discussion on the new ruleset from the perspective of
+application over Web data, and showed that the ruleset is not immediately amenable
+to the requirements outlined, and still needs amendment for our purposes. We also
+refer the interested reader to [70] for more detail on use cases and techniques for
+applying OWL reasoning over Linked Data.
+
+First, from the OWL 2 RL/RDF ruleset, we do not apply rules which speciﬁcally
+infer what we term as “tautological statements,” which refer to syntactic RDFS and
+OWL statements such as rdf:type rdfs:Resource statements and reﬂexive
+owl:sameAs statements—statements which apply to every term in the graph.
+Given n rules which infer such statements and t unique terms in the dataset, such
+rules would burden the consumer application with t(cid:7)n largely jejune statements—in
+fact, we go further and ﬁlter such statements from the output.
+
+Second, we identiﬁed that separating terminological data (our T-Box)24 that
+describes classes and properties from assertional data (our A-Box) that describes
+individuals could lead to certain optimizations in rule execution, leveraging the
+observation that only <1% of Linked Data are terminological and that the terminological 
+data are the most frequently accessed segment for OWL reasoning [75].
+We used such observations to justify the identiﬁcation, separation, and provision of
+optimized access to our T-Box, storing it in memory.
+
+Third, after initial evaluation of the system at scale encountered a puzzling
+deluge of inferences, we discovered that incorporating the source of data into the
+
+24For example, we consider the triples mo:wikipedia rdfs:subPropertyOf foaf:page
+. and foaf:page owl:inverseOf foaf:topic . to be terminological.
+
+392
+
+A. Harth et al.
+
+reasoning algorithm is of utmost importance; na¨ıvely applying reasoning over the
+merge of arbitrary RDF graphs can lead to unwanted inferences whereby third
+parties redeﬁne classes and properties provided by popular ontologies [75]. For
+example, one document25 deﬁnes owl:Thing to be a member of 55 union classes
+and another deﬁnes nine properties as the domain of rdf:type.26 We counteract
+such behavior by incorporating the analysis of authoritative sources for classes and
+properties in the data.
+
+We will now discuss the latter two issues in more detail, but beforehand, let us
+
+treat some preliminaries used in this section.
+
+14.9.1.1 Reasoning Preliminaries
+
+We brieﬂy reintroduce some notions formalized in [75, 77]; for brevity, in this
+section, we aim to give an informative and informal description of terms and refer
+the interested reader to [75, 77] for a more formal description thereof.
+
+Generalized Triple. A generalized triple is a triple where blank nodes and literals
+are allowed in all positions [50]. Herein, we assume generalized triples internally in
+the reasoning process and postﬁlter non-RDF statements from the output.
+
+Metaclass. Informally, we consider a metaclass as a class speciﬁcally of classes or
+properties; i.e., the members of a metaclass are themselves either classes or properties.
+ Herein, we restrict our notion of meta-classes to the set deﬁned in RDF(S) and
+OWL speciﬁcations, where examples include rdf:Property, rdfs:Class,
+owl:Class, owl:Restriction, owl:DatatypeProperty, owl:-
+FunctionalProperty, etc.; rdfs:Resource, rdfs:Literal, e.g., are
+not metaclasses.
+
+Metaproperty. A metaproperty is one which has a metaclass as its domain;
+again, we restrict our notion of metaproperties to the set deﬁned in RDF(S)
+and OWL speciﬁcations, where examples include rdfs:domain, rdfs:-
+subClassOf, owl:hasKey, owl:inverseOf, owl:oneOf, owl:onProperty,
+ owl:unionOf, etc.; rdf:type, owl:sameAs, rdfs:label,
+e.g., do not have a metaclass as domain.
+
+Terminological Triple. We deﬁne the set of terminological triples as the union of the
+following sets of generalized triples:
+
+1. Triples with rdf:type as predicate and a metaclass as object
+2. Triples with a metaproperty as predicate
+3. Triples forming a valid RDF list whose head is the object of a metaproperty (e.g.,
+
+a list used for owl:unionOf, owl:intersectionOf)
+
+25http://lsdis.cs.uga.edu/(cid:3)oldham/ontology/wsag/wsag.owl
+26http://www.eiao.net/rdf/1.0
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+393
+
+Example 14.4. The triples:
+
+mo:wikipedia rdfs:subPropertyOf foaf:page .
+
+foaf:page owl:inverseOf foaf:topic .
+
+are considered terminological, whereas the following are not:
+
+ex:resource mo:wikipedia ex:wikipage .
+
+ex:resource rdf:type rdfs:Resource .
+
+Triple Pattern. A triple pattern is a generalized triple where variables from the
+inﬁnite set V are allowed in all positions. We call a set (to be read as conjunction)
+of triple patterns a basic graph pattern. Following standard notation, we preﬁx
+variables with “?” We say that a triple is a binding of a triple pattern if there exists
+a mapping of the variables in the triple pattern to some set of RDF constants such
+that, subsequently, the triple pattern equals the triple; we call this mapping variable
+binding. The notion of a binding for a graph pattern follows naturally.
+
+Terminological/Assertional Pattern. We refer to a terminological-triple/termin-
+bological-graph pattern as one that can only be bound by a terminological triple or,
+resp., a set thereof. An assertional pattern is any pattern which is not terminological.
+Inference Rule. We deﬁne an inference rule r as the pair (Ant e;Con), where the
+antecedent Ante and the consequent Con are basic graph patterns [112]; all variables
+in Con are contained in Ant e, and if Ant e is nonempty, at least one variable
+must coexist in Ant e and Con. Every unique match—in the union of the input
+and inferred data—for the graph pattern Ant e leads to the inference of Con with
+the respective variable bindings. Rules with empty Ant e can be used to model
+axiomatic statements which hold for every graph. Herein, we use SPARQL-like
+syntax to represent graph patterns, and will typically formally write inference rules
+as Ant e ) Con.
+Example 14.5. The OWL 2 RL/RDF rule prp-spo1 [50] supports inferences for
+rdfs:subPropertyOf with the following rule:
+
+?p1 rdfs:subPropertyOf ?p2 . ?x ?p1 ?y . ) ?x ?p2 ?y .
+
+where the antecedent Ante consists of the two patterns on the left side of ) and the
+consequent Con consists of the pattern on the right side of ). This can be read as
+an IF–THEN condition, where if data matching the patterns on the left are found, the
+respective bindings are used to infer the respective pattern on the right.
+
+14.9.1.2 Separating Terminological Data
+Given the above preliminaries, we can now deﬁne our notion of a T -split inference
+rule, whose antecedent is split into two: one part which can only be matched by
+terminological data and one which can be matched by assertional data.
+
+394
+
+A. Harth et al.
+
+Deﬁnition 14.1 (T -split inference rule). Let r be the rule (Ant e;Con). We deﬁne
+the T -split version of r as the triple (Ant eT ;Ant eG ;Con), where Ant eT is the set
+of terminological patterns in Ant e and Ant eG is given as all remaining antecedent
+patterns: Ant e n Ant eT .
+
+We generally write (Ant eT ;Ant eG ;Con) as Ant eT Ant eG ) Con, identifying
+
+terminological patterns by underlining.
+
+Example 14.6. Take the rule prp-dom [50]:
+
+?p rdfs:domain ?c . ?x ?p ?y .) ?y rdf:type ?c .
+
+The terminological (underlined) pattern can only be matched by triples who have
+rdfs:domain—a metaproperty—as predicate, and thus must be terminological.
+The second pattern can be matched by nonterminological triples and so is considered
+an assertional pattern.
+
+Given the general notion of terminological data, we can constrain our T-Box
+(Terminological-Box) to be the set of terminological triples present in our input data
+that match a terminological pattern in our rules—intuitively, our T-Box represents
+the descriptions of classes and properties required in our ruleset; e.g., if our ruleset
+is RDFS, we do not include OWL terminological triples in our T-Box. We deﬁne
+our closed T-Box—denoted T —as the set of terminological triples derived from
+the input and the result of exhaustively applying rules with no assertional patterns
+(axiomatic and “schema-level” rules) up to a least ﬁxed point [77]. Again, our
+“A-Box” is the set of all statements, including the T-Box and inferred statements.
+When applying a T -split inference rule, Ant eT is strictly only matched by our
+closed T-Box. Thus, in our reasoning system, we have a well-deﬁned distinction
+between T-Box and A-Box information, reﬂected in the deﬁnition of our rules, and
+the application of rules over the T-Box split data. This decoupling of T-Box and
+A-Box allows for incorporating the following optimizations:
+
+segment for reasoning, we can store the T-Box in an optimized index.
+
+1. Knowing that the T-Box is relatively small and is the most frequently accessed
+2. We can identify optimized T -split rules as those with low assertional-arity—
+namely, rules which do not require joins over a large A-Box can be performed in
+an optimal and scalable manner.
+
+3. The separation of the T-Box enables straightforward distribution over commodity
+
+hardware.
+
+With respect to the ﬁrst possible optimization, at the moment, we store the entire
+T-Box in memory. With respect to the second optimization, rules involving more
+than one assertional pattern (i.e., requiring a join operation over the large A-Box)
+are in practice difﬁcult to compute at the necessary scale [75]. We thus categorize
+rules according to the assertional arity of their antecedent; i.e., the number of
+assertional patterns in the antecedent. In [71], we performed similar categorization
+of OWL 2 RL/RDF rules. We then apply a subset of OWL 2 RL/RDF rules with
+only one assertional pattern; these rules do not require joins to be performed within
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+395
+
+the large A-Box but rather only between the T-Box and the A-Box. With regard
+to the third optimization for distribution, the T-Box can be replicated on each
+machine, minimizing the amount of data exchange and messages sent between
+machines [77].
+
+Assuming that we apply rules with only one assertional pattern, we can apply the
+
+following high-level reasoning procedure:
+
+1. To commence, we apply rules with no antecedent, inferring axiomatic statements.
+2. We then run the ﬁrst scan of the data, identifying terminological knowledge found
+
+in the data and separating and indexing the data in our in-memory T-Box.
+
+3. Using this T-Box, we apply rules which only require T-Box knowledge, deriving
+
+the closed T-Box.
+
+4. The second scan sequentially joins individual A-Box statements with the static
+
+in-memory T-Box, including recursively inferred statements.
+
+We call the above reasoning approach “partial indexing” in that only a subset of
+the data needs to be indexed for lookups. In general, the partial-indexing approach is
+suitable when only a small subset of the data need be indexed. In the above version,
+rules without A-Box joins are not supported, so we need only to index the T-Box.
+The approach is sound with respect to standard exhaustive rule application (e.g.,
+semina¨ıve evaluation) and also complete with the condition that a rule requiring
+assertional knowledge does not infer terminological triples (our T-Box is static and
+will not be updated) [77]. In summary, by avoiding expensive intra-A-Box joins, we
+instead perform reasoning at roughly the cost of two sequential scans of the input
+data and the cost of writing the inferred statements to disk [75].
+
+14.9.1.3 Authoritative Reasoning
+
+In order to curtail the possible side-effects of open Web data publishing, we include
+the source of data in inferencing. Our methods are based on the view that a publisher
+instantiating a vocabulary’s term (class/property) thereby accepts the inferencing
+mandated by that vocabulary and recursively referenced vocabularies for that term.
+Thus, once a publisher instantiates a class or property from a vocabulary, only that
+vocabulary and its references should inﬂuence what inferences are possible through
+that instantiation.
+
+In order to do so, we again leverage Linked Data best practices—in this case,
+particularly LDP2 and LDP3—use HTTP URIs, and offer an entity description at
+the dereferenced document. Similar to the ranking procedure, we follow the intuition
+that the document returned by resolving a URI is authoritative for that URI, and the
+prerogative of that document on that URI should have special consideration. More
+speciﬁcally—and recalling the dereferencing function deref and HTTP lookup
+function get from Sect. 14.4—we can deﬁne the authoritative function which
+gives the set of terms for which a graph at a given Web location (source) speaks
+authoritatively:
+
+396
+
+A. Harth et al.
+
+auth WS ! 2C
+
+s 7! fb 2 B j b 2 t 2 get.u/g
+[ fu 2 U j deref.u/ D sg
+
+where a Web document is authoritative for the blank nodes it contains and the URIs
+which dereference to it; for example, the FOAF vocabulary is authoritative for terms
+in its namespace. Note that no document is authoritative for literals.
+
+Now we wish to perform reasoning over terms as mandated in the respective
+authoritative document. For example, we want to perform inferencing over data
+instantiating FOAF classes and properties as mandated by the FOAF vocabulary
+and not let third-party vocabularies (not recursively referenced by FOAF) affect
+said inferencing. To negate the effects of nonauthoritative axioms on reasoning over
+Web data, we apply restrictions to the T -split application of rules with nonempty
+Ant eT
+, whereby the document serving the T-Box data bound by Ant eT
+must be authoritative for at least one term bound by a variable which appears in
+both Ant eT
+: that is to say, the document serving the terminological
+data must speak authoritatively for at least one term in the assertional data being
+reasoned over. We call the nonauthoritative redeﬁnition of third-party terms and
+remote vocabularies “ontology hijacking” [75].
+
+and Ant eG
+
+and Ant eG
+
+Example 14.7. Take the OWL 2 RL/RDF rule cax-sco:
+
+?c1 rdfs:subClassOf ?c2 . ?x a ?c1 . ) ?x a ?c2 .
+
+where we use a as a shortcut for rdf:type. Here, ?c1 is the only variable that
+appears in both Ant eT
+
+. Take an A-Box triple
+
+and Ant eG
+
+ex:me a foaf:Person .
+
+Here, ?c1 is bound by foaf:Person, and deref.foaf:Person/ = foaf:, the
+FOAF spec. Now, any document serving a binding for
+
+foaf:Person rdfs:subClassOf ?c2 .
+
+must be authoritative for the term foaf:Person: the triple must come from the
+FOAF spec. Note that ?c2 need not be authoritatively bound; e.g., FOAF can extend
+any classes they like.
+
+We do not consider authority for rules with empty Ant eT
+
+. Also, we
+consider reasoned T-Box triples as nonauthoritative, thus effectively excluding these
+triples from the T-Box [77].
+
+or Ant eG
+
+Since authoritativeness is on a T-Box level, we can effectively preﬁlter terminological 
+triples for each rule based on the source providing them. We refer the reader
+to [70, 75] for more detail on authoritative reasoning, including empirical analysis
+of the explosion of inferences encountered without the notion of authority. Note that
+the previous two examples from documents in footnotes 25 and 26 are ignored by
+the authoritative reasoning.
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+397
+
+14.9.2 Related Work
+
+We have extended our reasoning algorithm toward larger coverage of OWL 2
+RL/RDF and parallel distribution of inference [76]. Similarly, other works have
+been presented that tackle large-scale reasoning through parallelization: Urbani
+et al. [123] presented a MapReduce approach to RDFS reasoning in a cluster of
+commodity hardware similar to ourselves, identifying that RDFS rules have, at
+most, one assertional pattern in the antecedent, discussing how this enables efﬁcient
+MapReduce support. Published at the same venue, Weaver and Hendler [126]
+also leverage a separation of terminological data to enable distribution of RDFS
+reasoning. Although the above works have demonstrated scale in the order of
+hundreds of millions and a billion triples respectively, their experiments were
+focused on scalability issues and not on counteracting poor data quality on the
+Web. Weaver et al. [126] focus on evaluation over synthetic LUBM data; Urbani
+et al. [123] apply RDFS over (cid:6)865 m Linked Data triples, but produce 30 bn
+inferences which is against our requirement of reduced output—they do not consider
+authoritative reasoning or source of data, although they note in their performancecentric 
+paper that an algorithm similar to that in SAOR could be added.
+
+A number of systems have tackled the distributed computation of A-Box joins.
+The MARVIN [106] system uses a “divide-conquer-swap” technique for performing
+joins in a distributed setting, avoiding hash-based data partitioning to avoid problems 
+with data skew inherent in RDF [89]. Following on from [123], Urbani et al.
+introduced the WebPie system [122], applying incomplete but comprehensive pD*
+to 100 bn LUBM triples, discussing rule-speciﬁc optimizations for performing pD*
+“A-Box join rules” over MapReduce.
+
+In more recent work [88], Kolovski et al. have presented an (Oracle) RDBMSbased 
+OWL 2 RL/RDF materialization approach. They again use some similar
+optimizations to the scalable reasoning literature, including parallelization, canonicalization 
+of owl:sameAs inferences, and also partial evaluation of rules based
+on highly selective patterns—from discussion in the chapter, these selective patterns
+seem to correlate with the terminological patterns of the rule. Unlike the approaches
+mentioned thus far, the authors tackle the issue of updates, proposing variants of
+semina¨ıve evaluation to avoid rederivations.
+
+Although these works are certainly a large step in the right direction, we feel
+that applying such rules over 1 bn triples of arbitrary Linked Data is still an open
+research question given our previous experiences documented in [75]: for example,
+applying full and quadratic materialization of transitive inferences over the A-Box
+may become infeasible.(if not now, then almost certainly in the future).
+
+With respect to template rules, DLEJena [96] uses the Pellet DL reasoner for
+T-Box level reasoning and uses the results to template rules for the Jena rule
+engine; they only demonstrate methods on synthetic datasets up to a scale of (cid:6)1
+m triples. We take a somewhat different approach, discussing template rules in the
+context of the partial indexing technique, giving a lightweight bottom-up approach
+to optimizations.
+
+398
+
+A. Harth et al.
+
+A viable alternative approach to Web reasoning employed by Sindice [33]—the
+relation to which is discussed in depth in [75]—is to consider a small “per-
+document” closure which quarantines reasoning to a given document and the related
+documents it either implicitly or explicitly imports. Although such an approach
+misses inferences made through the merge of documents—for example, transitivity
+across sources—so does ours given our current limitation of not computing A-Box
+joins.
+
+Falcons employ a similar approach to our authoritative analysis to do reasoning
+over class hierarchies, but only include support of rdfs:subClassOf and
+owl:equivalentClass, as opposed to our general framework for authoritative
+reasoning over arbitrary T -split rules [27].
+
+14.9.3 Future Directions and Open Research Questions
+
+In order to make reasoning over arbitrary Linked Data feasible—both in terms
+of scale and usefulness of the inferred data—we currently renounce a lot of
+inferences theoretically warranted by the OWL semantics. We would thus like
+to extend our approach to cover a more complete fragment of OWL 2 RL/RDF,
+while still meeting the requirements outlined. This would include, for example, a
+cost–beneﬁt analysis of rules which require A-Box joins for reasoning over Web
+data. Similarly, since we perform partial materialization—and indeed since full
+OWL 2 RL/RDF materialization over Linked Data will probably not be feasible—
+we would like to investigate some backward-chaining (runtime) approaches which
+complement a partial materialization strategy. Naturally, such extensions would
+push the boundaries for scalability and performance even further than our current,
+cautious approach.
+
+Finally, we have not considered the meaningful assignment of context to inferred
+triples. Currently in SWSE, each inference is assigned a placeholder context which
+denotes the last rule ﬁred in its derivation. Thus, the provenance of inferences is
+lost. Currently, since our inferences are derived from a single assertional triple,
+we could consider assigning the inference the same context as that triple. If more
+than one document is considered responsible for an inference (be it terminological
+or assertional), tracking the provenance of inferences then becomes much more
+complicated, possibly leading to a large growth in quadruples required to store all
+possible provenances.
+
+Relatedly, we do not currently consider the combination of ranking into the
+reasoning process, where ranking is currently applied before (and independently of)
+reasoning. In more exploratory works [16, 70], we have extended our approach to
+include some notion of ranking, incorporating the ranks of triples and their contexts
+(using a variation of the algorithm in Sect. 14.8) into inference, and investigating
+the applicability of ranking as a quantiﬁcation of the trustworthiness of inferences.
+We use these ranks to repair detected inconsistencies: contradictions present in the
+corpus. In particular, we found (cid:6)301 k inconsistencies after reasoning, although
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+399
+(cid:6)294 k of these were given by invalid datatypes, with (cid:6)7 k members of disjoint
+classes. Along similar lines, inclusion of ranking could be used to facilitate topk 
+materialization: for example, only materializing triples relating to popularly
+instantiated classes and properties. Integration of these methods into the SWSE
+pipeline is the subject of future work.
+
+14.10 Indexing
+
+Having now reached the end of the discussion on the data acquisition, analysis,
+and enhancement components, we look at creating an index necessary to allow
+users perform top-k keyword lookups and focus lookups (see Sect. 14.2) over the
+Linked Data crawl which has been consolidated and includes the results of the
+reasoning process. Note that in previous work, we demonstrated a distributed system
+for allowing SPARQL querying over billions of triples [60]; however, we deem
+SPARQL out of scope for this work, focusing instead on a lightweight, bespoke
+index optimized for the requirements of the user interface.
+
+To allow for speedy access to the RDF data, we employ a set of indexes: an
+inverted index for keyword lookups based on RDF literals (text) and a sparse index
+for lookups of structured data. Inverted indexes are standard for keyword searches in
+information retrieval. For structured data, we use a sparse index because it represents
+a good trade-off between lookup performance, scalability, and simplicity [60].
+Following our previous techniques aiming at application over static datasets, our
+index structure does not support updates and is instead read optimized [60]; in
+principle, we could employ any sufﬁciently optimized implementation of an index
+structure that offers preﬁx lookup capabilities on keys.
+
+14.10.1 Inverted Index
+
+The inverted index is required to formulate the direct response to a user keyword
+query to be rendered by the UI (again, see Fig. 14.1). Our inverted index for keyword
+search is based on the Lucene [62]27 engine and is constructed in the following ways
+during a scan of the data:
+
+(cid:129) For each entity in the RDF graph, construct a Lucene document with the union
+
+of all string literals related by some property to the RDF subject.
+
+(cid:129) To each entity, add ﬁelds containing the identiﬁers (URI(s) or blank node
+given by the subject and/or owl:sameAs values), labels (rdfs:label,
+dc:title, etc.), descriptions (rdfs:comment, dc:description, etc.),
+
+27http://lucene.apache.org/java/
+
+400
+
+A. Harth et al.
+
+classes (objects of rdf:type triples), and possibly other metadata such as
+image URIs if required to create keyword result snippets.
+
+(cid:129) For each identiﬁer, add globally computed ranks.
+
+For lookups, we specify a set of keyword terms for which matching identiﬁers
+should be returned and, in addition, the desired slice of the result set (e.g., result
+1 to 10). Following standard information retrieval techniques, Lucene combines
+the globally computed ranks with query-dependent TF*IDF (query-relevance) ranks
+and selects the slice of results to be returned. We additionally associate entity
+labels with a ﬁxed “boost” score, giving label-term matches higher relevance, here
+assuming that many keyword searches will be for entity labels (e.g., galway, dan
+brickley). We use Lucene’s off-the-shelf similarity engine [62] which can be
+sketched as follows.
+
+Let q be the query, t a keyword term, ec the entity with the canonical identiﬁer
+c, litp.ec/ the set of literals attached to ec by the predicate p, lit.ec/ the set of all
+literals attached to ec, and rc D idrank.c/ the global (identiﬁer) rank for that entity.
+The score of an entity ec with respect to the query q is then computed as follows:
+
+score.q; ec/ D X
+l2litp .ec /
+
+X
+
+t2q\l
+
+.tft2lit.ec / (cid:7) idf 2
+
+t (cid:7) bp/ (cid:7) rc
+
+where bp is a weighting factor for different predicates which we use to boost label
+ﬁelds; where
+
+tft2l D
+
+q
+
+(cid:3)
+
+(cid:2)
+lit.ec/
+
+freqt
+
+represents the term frequency, given here as the square root of the number of
+appearances of t in all literals attached to ec; and where
+
+
+
+
+idf t D 1 C log
+
+n
+
+nt C 1
+
+represents the inverse document frequency, where n is the total number of entities
+indexed and nt is the total number of entities associated with the term t.
+
+The additional nontextual metadata stored in Lucene allows for result snippets
+to be directly created from the Lucene results, without requiring access to the
+structured index: from the contents of the additional ﬁelds, we generate an RDF
+graph and return the results to higher layers for generating the results page.
+
+14.10.2 Structured Index
+
+The structured index is implemented to give all information relating to a given entity
+(e.g., focus view; again see Fig. 14.2). The structured index is implemented using
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+401
+
+“sparse indexes” [60], where a blocked and sorted ISAM ﬁle contains the RDF
+quads and lookups are supported by a small in-memory index which holds the ﬁrst
+entry of each block: binary search is performed on the in-memory index to locate the
+on-disk blocks which can potentially contribute to the answer, where subsequently,
+those blocks are fetched, parsed, and answers ﬁltered and returned. Currently, we
+only require lookups on the subject position of quads, and thus only require one
+index sorted according to the natural order .s; p; o; c/.
+
+There are two tuning parameters for such an index. The ﬁrst is block size, which
+determines (1) the size of the chunks of data fetched from disk and (2) indirectly the
+size of the in-memory portion of the index. The second parameter is compression:
+minimizing the amount of data transferred from disk to memory should speed up
+lookups, provided that the time saved by smaller data transfers outweighs the time
+required for uncompressing data.
+
+14.10.3 Related Work
+
+A veritable plethora of RDF stores have been proposed in the literature, most
+aiming at providing SPARQL functionality, and each bringing with it its own set of
+priorities for performance, and its own strengths and weaknesses. A subset of these
+systems rely on underlying relation databases for storage, including 4store [54],
+Bigdata R(cid:8), 28 Hexastore [128], Jena SDB,29 Mulgara,30 Sesame [20], Virtuoso [43],
+etc.; the rest rely on so-called native RDF storage schemes, including HPRD [93],
+Jena TDB,31 RDF3X [102], SIREn [34], Voldemort,32 etc.
+
+We note that many SPARQL engines include inverted indexes—usually Lucene-
+based—to offer keyword search over RDF data. The authors of [99] describe
+full-text search benchmarking of existing RDF stores—in particular Jena, Sesame2,
+Virtuoso, and YARS2—testing queries of varying degrees of complexity involving
+full-text search. They showed that for many types of queries, the performance of
+YARS2 was often not as competitive as other stores, and correctly veriﬁed that
+certain types of queries (e.g., keyword matches for literals of a given property)
+are not supported by our system. With respect to performance, we have only ever
+implemented na¨ıve full-SPARQL query-optimization techniques in YARS2, and
+have instead focused on creating scalable read-optimized indexes, demonstrating
+batch processing of joins in a distributed environment and focusing on efﬁciently
+supporting simple lookups which potentially return large result sets. For example,
+we choose not to use OIDs (internal integer representations of constants): although
+
+28http://www.systap.com/bigdata.htm
+29http://openjena.org/SDB/
+30http://www.mulgara.org/
+31http://openjena.org/TDB/
+32http://project-voldemort.com/
+
+402
+
+A. Harth et al.
+
+OIDs are a proven avenue for optimized query processing involving large amounts
+of intermediate results (e.g., cf. [102]), we wish to avoid the expensive translation
+from internal OIDs to potentially many external constants, instead preserving the
+ability to stream results directly. In general, we do not currently require support
+for complex structured queries, and question the utility of more complex full-text
+functionality to lay users.
+
+14.10.4 Future Directions and Open Research Questions
+
+The future work of the indexing section is inextricably linked with that of the future
+direction of the query processing and user interface components. At the moment, our
+index supports simple lookups for entities matching a given keyword, data required
+to build a keyword snippet, and the quads for which that subject appears.
+
+Given a relatively static query model, a custom-built structured index can be
+tailored to offer optimized service to the user interface, as opposed to, e.g., a generic
+SPARQL engine. The main directions for future work in indexing would be to
+identify an intersection of queries for which optimized indexes can be built in a
+scalable manner and queries which offer greater potential to the UI.
+
+Further investigation of compression techniques and other low-level optimizations 
+may further increase the base performance of our system—however, we
+feel that the combination of RLE encoding and GZIP compression currently
+demonstrates satisfactory performance.
+
+A recent trend in data management is the emergence of so-called NoSQL
+databases which offer distributed indexing. A possible avenue of further research
+involves systems following the BigTable [24] data model such as Apache Cassandra 
+[90] which could offer distributed indexing capability for RDF.
+
+With regard to the combination of ranking factors in the keyword index, we
+currently use static boosting in the off-the-shelf Lucene similarity engine. Investigating 
+different methodologies for combining query-dependent and query-independent
+rankings (and across multiple ﬁelds given by different properties) is thus an open
+question. For example, in recent work, P´erez-Ag¨uera et al. have recently claimed
+that BM25F offers better results when combining multiple structured ﬁelds for
+indexing keywords in RDF [109].
+
+14.11 Query Processing
+
+With the distributed index built and prepared on the slave machines, we now require
+a query processor to accept user queries; request and orchestrate lookups over
+the slave machines, and aggregate, process, and stream the ﬁnal results. In this
+section, we assume that the master machine hosts the query processor: however,
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+403
+
+we look at different conﬁgurations in Sect. 14.12. We aim to characterize the queryprocessing 
+steps, and give performance for sequential lookups over the distributed
+index, and for the various information-retrieval tasks required by the user interface.
+In particular, we describe the two indexes needed for processing user keyword
+queries and user focus queries respectively (see Sect. 14.2).
+
+14.11.1 Distributed Keyword-Query Processing
+
+For a top-k keyword query, the coordinating machine requests k result identiﬁers
+and ranks from each of the slave machines. The coordinating machine then
+computes the aggregated top-k hits and requests the snippet result data for each
+of the hits from the originating machines and streams data to the initiating agent.
+For the purposes of pagination, given a query for page n, the originating machine
+requests the top n (cid:7) k result identiﬁers and associated ranks and then determines,
+requests, and streams the relevant result snippets.
+
+14.11.2 Distributed Focus-Query Processing
+
+Creating the raw data for the focus view of a given entity is somewhat complicated
+by the requirements of the UI. The focus view mainly renders the information
+encoded by quads for which the identiﬁer of the entity appears in the subject
+position; however, to provide a more legible rendering, the UI requires humanreadable 
+labels for each predicate and object, as well as ranks for prioritizing
+elements in the rendered view (see predicate/object labels in Fig. 14.2). Thus, to
+provide the raw data required for the focus view of a given entity, the master
+machine accepts the relevant identiﬁer, performs a hash function on the identiﬁer,
+and directly requests data from the respective slave machine (which itself performs
+a lookup on the structured index). Subsequently, the master machine generates a
+unique set of predicates and objects appearing in the result set; this set is then split
+by hash, with each subset sent in parallel to the target slave machines. The slave
+machines perform lookups for the respective label and global rank, streaming results
+to the coordinating machine, which in turn streams the ﬁnal results to the initiating
+agent.
+
+Collating the raw data for the focus view is more expensive than a simple
+lookup on one targeted machine—although helped by the hash-placement strategy,
+potentially many lookups may be required. We mitigate the expense using some
+application-level LRU caching, where the coordinating machine caches not only
+keyword snippet results and focus view results but also the labels and ranks
+for predicates and objects: in particular, this would save repetitive lookups on
+commonly encountered properties and classes.
+
+404
+
+A. Harth et al.
+
+14.11.3 Related Work
+
+Besides query-processing components for systems referenced in Sect. 14.10.3, other
+types of query processing have been deﬁned in the literature which do not rely on
+data warehousing approaches.
+
+The system presented in [61] leverages Linked Data principles to perform live
+lookups on Linked Data sources, rendering and displaying resulting data; however,
+such an approach suffers from low recall and inability to independently service
+keyword queries. In [57], we have described an approach which uses a lightweight
+hashing-based index structure—viz. a Q-Tree—for mapping structured queries to
+Linked Data sources which could possibly provide pertinent information; these
+sources are then retrieved and query processing performed. Such approaches suffer
+from poorer recall than data-warehousing approaches but enable the provision of
+up-to-date results to users, which is particularly expedient for query processing over
+highly dynamic sources. We could investigate inclusion of a live-lookup component
+in SWSE for a subset of queries which we identify to be best answered by means
+of live lookup; however, further research in this area is required to identify such
+queries and to investigate the performance of such a system.
+
+Preliminary work on the DARQ [113] system provides federated query processing 
+over a set of autonomous independent SPARQL endpoints. Such an approach
+may allow for increased query recall; however, the performance of such a system
+is still an open question; also, keyword search is still not a standard SPARQL
+operation, and thus, federating keyword queries would probably require manual
+wrappers for different SPARQL endpoints.
+
+14.11.4 Future Directions and Open Research Question
+
+With respect to current query-processing capabilities, our underlying index structures 
+have proven scalable. However, the focus - view currently requires on average
+hundreds—but possibly tens or hundreds of thousands—of lookups for labels and
+ranks. Given that individual result sizes are likely to continue to grow, we will need
+to incorporate one of the following optimizations: (1) we can build a specialized
+join index which precomputes and stores focus-view results, requiring one atomic
+lookup for the entire focus-view result at the cost of longer indexing time, and
+(judging from our evaluation) a doubling of structured-index size, and/or (2) we
+can generate a top-k focus-view result, paginating the view of a single entity and
+only retrieving incremental segments of the view—possibly asynchronously.
+
+Extending the query processing to handle more complex queries is a topic of
+importance when considering extension and improvement of the current spartan UI.
+In order to fully realize the potential beneﬁts of querying over structured data, we
+need to be able to perform optimized query processing. For querying data, there is
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+405
+
+a trade-off between the scalability of the approach and the expressivity of the query
+language used.
+
+In the general case, joins are expensive operations, and when attempting to
+perform arbitrary joins on very large datasets, the system either consumes a large
+amount of resources per query or becomes slow. Some systems (such as [82]) solve
+the scalability issue by partitioning the datasets into smaller units and have the user
+select a subdataset before further browsing or querying; however, such a solution
+impinges on the data-integration properties of RDF which provides the raison d’ˆetre
+of a system such as SWSE. Another solution is to precompute joins, allowing for
+direct lookup of results emulating the current approach; however, materializing
+joins can lead to quadratic growth in index sizes. Investigation of partial join
+materialization—perhaps based on the expense of a join operation, materialized size
+of join, runtime caching, etc.—may enable sufﬁciently optimized query processing.
+Another open research question here is how to optimize for top-k querying in
+queries involving joins; joins at large scale can potentially lead to the access of
+large - volumes of intermediary data, used to compute a ﬁnal small result size; thus,
+the question is how top-k query processing can be used to immediately retrieve the
+best results for joins, allowing, for example, path queries in the UI (joins on objects
+and subject) such that large intermediate data volumes need not be accessed, and
+rather than the approach of joining several attribute restrictions (e.g., facets) as done
+in the threshold algorithm [44].
+
+14.12 User Interface
+
+Having discussed data acquisition, enhancing, analysis,
+indexing, and queryprocessing 
+components, we have now come full circle and arrived at the user-facing
+component. The user interface offers two basic operations: keyword search, where
+the user speciﬁes a set of keywords and the system returns with a list of matching
+entities, and object focus, where the user can navigate to a consolidated view of all
+information available for one entity (see Sect. 14.2). Our user interface uses XSLT
+to convert the raw data returned by the query processor into result pages, offering
+a declarative means of specifying user interface rendering and ultimately providing
+greater ﬂexibility for tweaking presentation.
+
+14.12.1 Related Work
+
+There has been considerable work on rendering and displaying RDF data; such
+systems include BrowseRDF [105], Explorator [4], gFacet [66], Haystack [84],
+
+406
+
+A. Harth et al.
+
+Longwell,33 Piggybank [81], (Power)Magpie [51], Marbles,34 RKBExplorer,35
+Tabulator [10], Zitgist,36 as well as user interfaces for previously mentioned engines
+such as Falcons, Sig.ma, Sindice, Swoogle, Watson, etc.
+
+Fresnel [110] has deﬁned an interesting approach to overcome the difﬁcultly of
+displaying RDF in a domain-agnostic way by providing a vocabulary for describing
+how RDF should be rendered, thus allowing for the declarative provision of schemaspeciﬁc 
+views over data; some user interfaces have been proposed to exploit Fresnel,
+including LENA [87]; however, Fresnel has not seen widespread adoption on the
+Web thus far.
+
+14.12.2 Future Directions and Open Research Questions
+
+First, we must review the performance of the UI with respect to generating result
+pages—we had not previously considered this issue, but under high loads, UI result
+generation seems to be a signiﬁcant factor in deciding response times.
+
+With respect to functionality, we currently do not fully exploit the potential
+offered by richly structured data. First, such data could power a large variety of
+visualizations: for example, to render SIMILE’s timeline view37 or a GoogleMap
+view.38 Countless other visualizations are possible for a history and examples
+of visualizations, cf. [48]. Research into rendering and visualizing large graphstructured 
+datasets—particularly user evaluation thereof—could lead to novel user
+interfaces which better suit and exploit such information.
+
+Second, offering only keyword search and entity browsing removes the possibility 
+of servicing more expressive queries which offer users more direct answers;
+however, designing a system for domain-agnostic users to formulate such queries in
+an intuitive manner—and one which is guided by the underlying data to avoid empty
+results where possible—has proven nontrivial. We have made ﬁrst experiments
+with more expressive user interfaces for interacting with data through the VisiNav
+system39 [55], which supports faceted browsing [129], path traversal [5], and data
+visualizations on top of the keyword search and focus operations supported by
+SWSE. Within VisiNav, we encourage users to incrementally create expressive
+queries while browsing, as opposed to having a formal query formulation step—
+users are offered navigation choices which lead to nonempty results. However, for
+such extra functionality—speciﬁcally the cost of querying associated with arbitrary
+
+33http://simile.mit.edu/wiki/Longwell
+34http://marbles.sourceforge.net/
+35http://www.rkbexplorer.com/explorer/
+36http://dataviewer.zitgist.com/
+37http://www.simile-widgets.org/timeline/
+38http://maps.google.com/
+39http://visinav.deri.org/
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+407
+
+join paths—VisiNav must make scalability trade-offs: VisiNav can currently handle
+in the realm of tens of millions of statements.
+
+Efforts to provide guided construction of structured queries (e.g., cf. [100]) may
+be useful to so-called power-users; however, such methods again rely on some
+knowledge of the schema of the pertinent data and query. Other efforts to match
+keyword searches to structured queries (e.g., cf. [28, 94, 119]) could bring together
+the ease of use of Web search engines and the precise answers of structured data
+querying; however, again such formulations still require some knowledge of the
+schema(ta) of the data, and which types of entities link to which by what type of link.
+For the moment, we focus on providing basic functionality as should be familiar
+to many Web users. Previous incarnations of SWSE offered more complex userinteraction 
+models, allowing, e.g., ﬁltering of results based on type, traversing
+inlinks for an entity, and traversing links from a collection of entities. From informal
+feedback received, we realized that features such as inlink traversal (and the notion
+of directionality) were deemed confusing by certain users—or at least by our
+implementation thereof.40 We are thus more cautious about implementing additional
+features in the user interface, aiming for minimalistic display and interaction. One
+possible solution is to offer different versions of the user interface, for example,
+a default system offering simple keyword search for casual users and an optional
+system offering more complex functionality for power users. In such regards, user
+evaluation (currently out of scope) would be of utmost importance in making such
+design choices.
+
+We also wish to investigate the feasibility of offering programmatic interfaces
+through SWSE.41 The main requirements for such APIs are performance and
+reliability: the API has to return results fast enough to enable interactive applications
+and has to have high uptime to encourage adoption by external services. Full
+SPARQL is likely too powerful (and hence too expensive to evaluate) to provide
+stable, complete, and fast responses for. One possible workaround is to provide
+time-out queries, which return as many answers as can be serviced in a ﬁxed time
+period; another possible solution is to offer top-k query processing, or a wellsupported 
+subset of SPARQL (e.g., DESCRIBE queries and conjunctive queries
+with a limited number of joins or containing highly selective patterns) such that
+could serve as a foundation for visualizations and other applications leveraging the
+integrated Web data in SWSE.
+
+40In any case, our reasoning engine supports the owl:inverseOf construct which solves the
+problem of directionality, and we would hope that most (object) properties deﬁne a corresponding
+inverse property.
+41Please note that practical limitations with respect to the availability and administration of
+physical machines have restricted our ability to provide such interfaces with high reliability;
+indeed, we used to offer time-out SPARQL queries over (cid:4)1.5 bn statements through YARS2,
+but for the meantime, we can no longer support such a service.
+
+408
+
+14.13 Conclusion
+
+A. Harth et al.
+
+In this chapter, we have presented the results of research carried out as part of the
+SWSE project over several years. In particular, we have described how we adapted
+the architecture of large-scale Web search engines to the case of structured data.
+We have presented lightweight algorithms which demonstrate the data-integration
+possibilities for Linked Data and shown how such algorithms can be made scalable
+using batch-processing techniques such as scans and sorts and how they can be
+deployed over a distributed architecture. We have argued for the importance of
+taking the source of information into account when handling arbitrary RDF Web
+data, showing how Linked Data principles can be leveraged for such purposes,
+particularly in our ranking and reasoning algorithms.
+
+Research on how to integrate and interact with large amounts of data from a
+very diverse set of independent sources is fairly recent, as many characteristics of
+the research questions in the ﬁeld became visible after the deployment of large
+amounts of data by a sizable body of data publishers. The traditional application
+development cycle for data-intensive applications is to model the data schema and
+build the application on top: data modeling and application development are tightly
+coupled. That process is separated on the Semantic Web: data publishers just model
+and publish data, often with no particular application in mind. At the same time, the
+quality of data that a system such as SWSE operates over is perhaps as much of a
+factor in the system’s utility as the design of the system itself.
+
+Recently, there has been signiﬁcant success with Linked Data where an active
+community publishes datasets in a broad range of topics and maintains and interlinks
+these datasets. Again, efforts such as DBpedia have lead to a much richer Web
+of Data than the one present when we began working on SWSE. However, data
+heterogeneity still poses problems—not so much for the underlying components
+of SWSE—but for the user-facing components and the users themselves: allowing
+domain-oblivious users to create ﬂexible structured queries in a convenient and intuitive 
+manner is still an open question. Indeed, the Web of Data still cannot compete
+with the vast coverage of the Web of Documents, and perhaps never will [111].
+
+That said, making Web data available for querying and navigation has signiﬁcant
+scientiﬁc and commercial potential. First, the Web becomes subject to scientiﬁc
+analysis [12]: understanding the implicit connections and structure of the Web
+of Data can help to reveal new understandings of collaboration patterns and the
+processes by which networks form and evolve. Second, aggregating and enhancing
+scientiﬁc data published on the Web can help scientists to more easily perform
+data-intensive research, in particular allowing for the arbitrary repurposing of
+published datasets which can subsequently be used in ways unforeseen by the
+original publisher. Third, making the Web of Data available for interactive querying,
+browsing, and navigation has applications in areas such as e-commerce and e-health,
+allowing data analysts in such ﬁelds to pose complex structured queries over a
+dataset aggregated from multitudinous relevant sources.
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+409
+
+Acknowledgments The work presented herein was funded in part by Science Foundation Ireland
+under Grant No. SFI/08/CE/I1380 (Lion-2) and by an IRCSET postgraduate scholarship.
+
+References
+
+1. Alani, H., Brewster, C., Shadbolt, N.: Ranking ontologies with AKTiveRank. 5th international
+
+semantic web conference, pp. 1–15 (2006)
+
+2. Alani, H., Dasmahapatra, S., O’Hara, K., Shadbolt, N.: Identifying communities of practice
+
+through ontology network analysis. IEEE Intel. Syst. 18(2), 18–25 (2003)
+
+3. Anyanwu, K., Maduko, A., Sheth, A.: SemRank: ranking complex relationship search results
+on the semantic web. 14th International Conference on World Wide Web, pp. 117–127 (2005).
+DOI http://doi.acm.org/10.1145/1060745.1060766
+
+4. de Ara´ujo, S.F.C., Schwabe, D.: Explorator: a tool for exploring RDF data through direct
+
+manipulation. Linked data on the web WWW2009 workshop (LDOW2009) (2009)
+
+5. Athanasis, N., Christophides, V., Kotzinos, D.: Generating On the ﬂy queries for the semantic
+web: the ICS-FORTH graphical RQL interface (GRQL). 3rd international semantic web
+conference, pp. 486–501 (2004)
+
+6. Balmin, A., Hristidis, V., Papakonstantinou, Y.: Objectrank: authority-based keyword search
+in databases. Proceedings of the 13th International Conference on very Large Data Bases,
+pp. 564–575 (2004)
+
+7. Batsakis, S., Petrakis, E.G.M., Milios, E.: Improving the performance of focused web
+crawlers. Data Knowledge Eng. 68(10), 1001–1013 (2009). DOI http://dx.doi.org/10.1016/
+j.datak.2009.04.002
+
+8. Bechhofer, S., Volz, R.: Patching Syntax in OWL Ontologies. International semantic web
+conference (ISWC 2004), Lecture Notes in Computer Science, vol. 3298, pp. 668–682.
+Springer, Berlin, Heidelberg, New York (2004)
+
+9. Berners-Lee, T.: Linked Data. Design issues for the World Wide Web, World Wide Web
+
+Consortium (2006). http://www.w3.org/DesignIssues/LinkedData.html
+
+10. Berners-Lee, T., Chen, Y., Chilton, L., Connolly, D., Dhanaraj, R., Hollenbach, J., Lerer,
+A., Sheets, D.: Tabulator: exploring and analyzing linked data on the semantic web. In
+Proceedings of the 3rd International Semantic Web user Interaction Workshop (2006)
+
+11. Berners-Lee, T., Fielding, R., Masinter, L.: Uniform resource identiﬁer (URI): generic syntax.
+
+RFC 3986 (2005). http://tools.ietf.org/html/rfc3986
+
+12. Berners-Lee, T., Hall, W., Hendler, J., Shadbolt, N., Weitzner, D.J.: Creating a science of the
+
+web. Science 313(11) (2006)
+
+13. Bizer, C., Cyganiak, R.: D2R server – publishing relational databases on the web as SPARQL
+
+Endpoints. ISWC (2006). (poster)
+
+14. Bizer, C., Heath, T., Berners-Lee, T.: Linked data – the story so far. Int. J. Semant. Web Inf.
+
+Syst. 5(3), 1–22 (2009)
+
+15. Boldi, P., Codenotti, B., Santini, M., Vigna, S., Vigna, S.: UbiCrawler: a scalable fully
+
+distributed web crawler. Soft. Pract. Exp. 34, 2004
+
+16. Bonatti, P.A., Hogan, A., Polleres, A., Sauro, L.: Robust and Scalable Linked Data Reasoning
+
+Incorporating Provenance and trust Annotations. J. Web Semant. 9(2), Elsevier (2011)
+
+17. Bouquet, P., Stoermer, H., Mancioppi, M., Giacomuzzi, D.: OkkaM: towards a solution to the
+“Identity Crisis” on the semantic web. Proceedings of SWAP 2006, the 3rd Italian Semantic
+Web Workshop, CEUR Workshop Proceedings, vol. 201 (2006)
+
+18. Brewer, E.A.: Combining Systems and Databases: A Search Engine Retrospective,
+
+pp. 711–724. MIT Press, Cambridge, MA (2005)
+
+19. Brin, S., Page, L.: The anatomy of a large-scale hypertextual web search engine. Comput.
+
+Networks 30(1–7), 107–117 (1998)
+
+410
+
+A. Harth et al.
+
+20. Broekstra, J., Kampman, A., van Harmelen, F.: Sesame: a generic architecture for storing
+and querying RDF and RDF schema. 2nd international semantic web conference, pp. 54–68.
+Springer, Berlin, Heidelberg, New York (2002)
+
+21. Cai, D., He, X., Wen, J., Ma, W.: Block-level link analysis. 27th international ACM SIGIR
+
+conference on research and development in information retrieval, pp. 440–447 (2004)
+
+22. Caverlee, J., Liu, L.: QA-Pagelet: data preparation techniques for large-scale data analysis of
+
+the deep web. IEEE Trans. Knowl. Data Eng. 17(9), 1247–1262 (2005)
+
+23. Chakrabarti, S., van den Berg, M., Dom, B.: Focused crawling: a new approach to topicspeciﬁc 
+web resource discovery. Comput. Networks 31(11–16), 1623–1640 (1999)
+
+24. Chang, F., Dean, J., Ghemawat, S., Hsieh, W.C., Wallach, D.A., Burrows, M., Chandra,
+T., Fikes, A., Gruber, R.: Bigtable: a distributed storage system for structured data. OSDI,
+pp. 205–218 (2006)
+
+25. Chang, K.C.C., He, B., Zhang, Z.: Toward large scale integration: building a MetaQuerier
+
+over databases on the web. CIDR, pp. 44–55 (2005)
+
+26. Chen, Z., Kalashnikov, D.V., Mehrotra, S.: Exploiting relationships for object consolidation.
+IQIS ’05: Proceedings of the 2nd International Workshop on Information Quality in Information 
+Systems, pp. 47–58. ACM, New York, NY, USA (2005). DOI http://doi.acm.org/10.
+1145/1077501.1077512
+
+27. Cheng, G., Ge, W., Wu, H., Qu, Y.: Searching semantic web objects based on class hierarchies.
+
+Proceedings of Linked Data on the Web Workshop (2008)
+
+28. Cheng, G., Qu, Y.: Searching linked objects with falcons: approach, implementation and
+
+evaluation. Int. J. Semant. Web Inf. Syst. 5(3), 49–70 (2009)
+
+29. Cheng, T., Chang, K.C.C.: Entity search engine: towards Agile best-effort
+
+information
+
+integration over the web. CIDR, pp. 108–113 (2007)
+
+30. d’Aquin, M., Sabou, M., Motta, E., Angeletou, S., Gridinoc, L., Lopez, V., Zablith, F.: What
+
+can be done with the semantic web? an overview Watson-based applications. SWAP (2008)
+
+31. Dean, J., Ghemawat, S.: MapReduce: simpliﬁed data processing on large clusters. OSDI,
+
+pp. 137–150 (2004)
+
+32. Decker, S., Erdmann, M., Fensel, D., Studer, R.: Ontobroker: ontology based access to
+distributed and semi-structured information. DS-8: IFIP TC2/WG2.6 eighth working conference 
+on database semantics, pp. 351–369. Kluwer, B.V., Deventer, The Netherlands, The
+Netherlands (1998)
+
+33. Delbru, R., Polleres, A., Tummarello, G., Decker, S.: Context dependent reasoning for
+semantic documents in Sindice. Proceedings of the 4th International Workshop on Scalable
+Semantic Web Knowledge Base Systems (SSWS 2008). Karlsruhe, Germany (2008). URL
+http://www.polleres.net/publications/delb-etal-2008.pdf
+
+34. Delbru, R., Toupikov, N., Catasta, M., Tummarello, G.: A node indexing scheme for web
+
+entity retrieval. Proceedings of the Extended Semantic Web Conference (ESWC 2010)
+(2010)
+
+35. Delbru, R., Toupikov, N., Catasta, M., Tummarello, G., Decker, S.: Hierarchical link analysis
+for ranking web data. Proceedings of the Extended Semantic Web Conference (ESWC 2010)
+(2010)
+
+36. Dietze, H., Schroeder, M.: Semplore: a scalable IR approach to search the web of data. BMC
+
+Bioinfor. 10 (2009)
+
+37. Diligenti, M., Coetzee, F., Lawrence, S., Giles, C.L., Gori, M.: Focused crawling using
+context graphs. VLDB ’00: Proceedings of the 26th International Conference on very Large
+Data Bases, pp. 527–534. Morgan Kaufmann Publishers Inc., San Francisco, CA, USA (2000)
+38. Ding, L., Finin, T., Joshi, A., Pan, R., Cost, R.S., Peng, Y., Reddivari, P., Doshi, V.C., Sachs,
+J.: Swoogle: a search and metadata engine for the semantic web. 13th ACM conference on
+information and knowledge management. ACM, New York (2004)
+
+39. Ding, L., Pan, R., Finin, T., Joshi, A., Peng, Y., Kolari, P.: Finding and ranking knowledge on
+
+the semantic web. 4th international semantic web conference, pp. 156–170 (2005)
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+411
+
+40. Dong, H., Hussain, F.K., Chang, E.: State of the art in semantic focused crawlers. ICCSA
+’09: Proceedings of the International Conference on Computational Science and its Applications,
+ pp. 910–924. Springer, Berlin, Heidelberg (2009). DOI http://dx.doi.org/10.1007/
+978-3-642-02457-3 74
+
+41. Ehrig, M., Maedche, A.: Ontology-focused crawling of Web documents. SAC ’03: Proceedings 
+of the 2003 ACM Symposium on Applied Computing, pp. 1174–1178. ACM, New York,
+NY, USA (2003). DOI http://doi.acm.org/10.1145/952532.952761
+
+42. Elmagarmid, A.K., Ipeirotis, P.G., Verykios, V.S.: Duplicate record detection: a survey. IEEE
+
+Trans. Knowl. Data Eng. 19(1), 1–16 (2007)
+
+43. Erling, O., Mikhailov, I.: RDF support in the Virtuoso DBMS. CSSW, pp. 59–68 (2007)
+44. Fagin, R.: Combining fuzzy information from multiple systems (extended abstract). PODS
+’96: Proceedings of the Fifteenth ACM SIGACT-SIGMOD-SIGART Symposium on Principles 
+of Database Systems, pp. 216–226. ACM, New York (1996). DOI http://doi.acm.org/10.
+1145/237661.237715
+
+45. Fensel, D., van Harmelen, F.: Unifying reasoning and search to web scale. IEEE Inter.
+Comput. 11(2), 94–96 (2007). DOI http://doi.ieeecomputersociety.org/10.1109/MIC.2007.51
+46. Fielding, R., Gettys, J., Mogul, J., Nielsen, H.F., Masinter, L., Leach, P., Berners-Lee, T.:
+Hypertext transfer protocol – HTTP/1.1. RFC 2616 (1999). ftp://ftp.isi.edu/in-notes/rfc2616.
+txt
+
+47. Franz, T., Schultz, A., Sizov, S., Staab, S.: TripleRank: ranking semantic web data by tensor
+
+decomposition. 8th international semantic web conference (ISWC2009) (2009)
+
+48. Friendly, M.: A brief history of data visualization. In: Chen, C., H¨ardle, W., Unwin, A. (eds.)
+Handbook of Computational Statistics: Data Visualization, vol. III. Springer, Heidelberg
+(2006)
+
+49. Glaser, H., Millard, I., Jaffri, A.: RKBExplorer.com: a knowledge driven infrastructure
+for linked data providers. ESWC Demo, Lecture Notes in Computer Science, pp. 797–801.
+Springer, Belin, Heidelberg, New York (2008)
+
+50. Grau, B.C., Motik, B., Wu, Z., Fokoue, A., Lutz, C.: OWL 2 Web Ontology language: proﬁles.
+
+W3C Working Draft (2008). http://www.w3.org/TR/owl2-proﬁles/
+
+51. Gridinoc, L., Sabou, M., d’Aquin, M., Dzbor, M., Motta, E.: Semantic browsing with
+
+PowerMagpie. ESWC, pp. 802–806 (2008)
+
+52. Guha, R.V., McCool, R., Fikes, R.: Contexts for the Semantic Web. 3rd International Semantic
+
+Web Conference, Hiroshima (2004)
+
+53. Halpin, H., Hayes, P.J., McCusker, J.P., McGuinness, D.L., Thompson, H.S.: When
+owl:sameAs isn’t the same: an analysis of identity in linked data. International Semantic Web
+Conference (1), pp. 305–320 (2010)
+
+54. Harris, S., Lamb, N., Shadbolt, N.: 4store: The Design and Implementation of a Clustered
+RDF Store. 5th International Workshop on Scalable Semantic Web Knowledge Base Systems
+(SSWS2009) (2009)
+
+55. Harth, A.: Visinav: a system for visual search and navigation on web data. J. Web Semat. 8(4),
+
+348–354 (2010)
+
+56. Harth, A., Decker, S.: Optimized index structures for querying RDF from the web. 3rd Latin
+
+American Web Congress, pp. 71–80. IEEE Press, New York (2005)
+
+57. Harth, A., Hose, K., Karnstedt, M., Polleres, A., Sattler, K.U., Umbrich, J.: Data summaries
+
+for on-demand queries over linked data. WWW, pp. 411–420 (2010)
+
+58. Harth, A., Kinsella, S.: Topdis: tensor-based ranking for data search and navigation. Technical
+
+Report, DERI (2009)
+
+59. Harth, A., Kinsella, S., Decker, S.: Using naming authority to rank data and ontologies for
+
+web search. 8th International Semantic Web Conference (ISWC 2009) (2009)
+
+60. Harth, A., Umbrich, J., Hogan, A., Decker, S.: YARS2: a federated repository for querying
+graph structured data from the web. 6th International Semantic Web Conference, 2nd Asian
+Semantic Web Conference, pp. 211–224 (2007)
+
+61. Hartig, O., Bizer, C., Freytag, J.C.: Executing SPARQL queries over the web of linked data.
+
+International Semantic Web Conference, pp. 293–309 (2009)
+
+412
+
+A. Harth et al.
+
+62. Hatcher, E., Gospodnetic, O.: Lucene in Action. Manning Publications (2004)
+63. Hayes, P.: RDF semantics. W3C Recommendation (2004). http://www.w3.org/TR/rdf-mt/
+64. He, B., Patel, M., Zhang, Z., Chang, K.C.C.: Accessing the deep web. Commun. ACM 50(5),
+
+94–101 (2007)
+
+65. Heﬂin, J., Hendler, J., Luke, S.: SHOE: a knowledge representation language for internet
+applications. Technical Report CS-TR-4078, Department of Computer Science, University of
+Maryland (1999)
+
+66. Heim, P., Ziegler, J., Lohmann, S.: gFacet: a browser for the web of data. Proceedings of the
+International Workshop on Interacting with Multimedia Content in the Social Semantic Web
+(IMC-SSW’08), pp. 49–58. CEUR-WS (2008)
+
+67. Heydon, A., Najork, M.: Mercator: a scalable, extensible web crawler. World Wide Web 2,
+
+219–229 (1999)
+
+68. Hirai, J., Raghavan, S., Garcia-Molina, H., Paepcke, A.: WebBase: a repository of Web pages’.
+
+Comput. Networks 33(1–6), 277–293 (2000)
+
+69. Hitzler, P., van Harmelen, F.: A reasonable semantic web. Semant. Web Interop. Usabil. Appl.
+
+1 (2010)
+
+70. Hogan, A.: Exploiting RDFS and OWL for integrating heterogeneous, large-scale, linked data
+corpora. Ph.D. thesis, Digital Enterprise Research Institute, National University of Ireland,
+Galway (2011). Available from http://aidanhogan.com/docs/thesis/
+
+71. Hogan, A., Decker, S.: On the ostensibly silent ’W’ in OWL 2 RL. Third International
+
+Conference on Web Reasoning and Rule Systems, (RR2009), pp. 118–134 (2009)
+
+72. Hogan, A., Harth, A., Decker, S.: ReConRank: a scalable ranking method for semantic
+web data with context. 2nd Workshop on Scalable Semantic Web Knowledge Base Systems
+(SSWS2006) (2006)
+
+73. Hogan, A., Harth, A., Decker, S.: Performing object consolidation on the semantic web data
+
+graph. 1st I3 Workshop: Identity, Identiﬁers, Identiﬁcation Workshop (2007)
+
+74. Hogan, A., Harth, A., Passant, A., Decker, S., Polleres, A.: Weaving the pedantic web. Linked
+
+Data on the Web WWW2010 Workshop (LDOW2010) (2010)
+
+75. Hogan, A., Harth, A., Polleres, A.: Scalable authoritative OWL reasoning for the web. Int. J.
+
+Semant. Web Inf. Syst. 5(2) (2009)
+
+76. Hogan, A., Harth, A., Umbrich, J., Kinsella, S., Polleres, A., Decker, S.: Searching and
+browsing Linked Data with SWSE: the semantic web search engine. J. Web Semant. (2011).
+DOI DOI:10.1016/j.websem.2011.06.004
+
+77. Hogan, A., Pan, J.Z., Polleres, A., Decker, S.: SAOR: template rule optimisations for distributed 
+reasoning over 1 billion linked data triples. International Semantic Web Conference
+(2010)
+
+78. Hogan, A., Polleres, A., Umbrich, J., Zimmermann, A.: Some entities are more equal than
+others: statistical methods to consolidate Linked Data. 4th International Workshop on New
+Forms of Reasoning for the Semantic Web: Scalable and Dynamic (NeFoRS2010) (2010)
+
+79. ter Horst, H.J.: Completeness, decidability and complexity of entailment for RDF Schema
+
+and a semantic extension involving the OWL vocabulary. J. Web Semant. 3, 79–115 (2005)
+
+80. Hu, W., Chen, J., Qu, Y.: A self-training approach for resolving object coreference on the
+
+Semantic Web. WWW, pp. 87–96 (2011)
+
+81. Huynh, D., Mazzocchi, S., Karger, D.R.: Piggy bank: experience the semantic web inside
+
+your web browser. J. Web Semat. 5(1), 16–27 (2007)
+
+82. Huynh, D.F., Karger, D.: Parallax and companion: set-based browsing for the data web. Available 
+online (2008-12-15) http://davidhuynh.net/media/papers/2009/www2009-parallax.pdf
+
+83. Jiang, X.M., Xue, G.R., Song, W.G., Zeng, H.J., Chen, Z., Ma, W.Y.: Exploiting PageRank at
+different block level . 5th International Conference on Web Information Systems, pp. 241–252
+(2004)
+
+84. Karger, D.R., Bakshi, K., Huynh, D., Quan, D., Sinha, V.: Haystack: a general-purpose
+information management tool for end users based on semistructured data. CIDR, pp. 13–26
+(2005)
+
+14 Searching and Browsing Linked Data with SWSE(cid:2)
+
+413
+
+85. Kiryakov, A., Ognyanoff, D., Velkov, R., Tashev, Z., Peikov, I.: LDSR: a reason-able view to
+
+the web of linked data. Semantic Web Challenge (ISWC2009) (2009)
+
+86. Kleinberg, J.M.: Authoritative sources in a hyperlinked environment. J. ACM 46(5), 604–632
+
+(1999)
+
+87. Koch, J., Franz, T.: LENA – browsing RDF data more complex than Foaf. International
+
+Semantic Web Conference (Posters & Demos) (2008)
+
+88. Kolovski, V., Wu, Z., Eadon, G.: Optimizing enterprise-scale OWL 2 RL reasoning in a
+
+relational database system. International Semantic Web Conference (2010)
+
+89. Kotoulas, S., Oren, E., van Harmelen, F.: Mind the data skew: distributed inferencing by
+
+speeddating in elastic regions. WWW, pp. 531–540 (2010)
+
+90. Lakshman, A., Malik, P.: Cassandra: a decentralized structured storage system. Operat. Syst.
+
+Rev. 44(2), 35–40 (2010)
+
+91. Lee, H.T., Leonard, D., Wang, X., Loguinov, D.: IRLbot: scaling to 6 billion pages and
+beyond. ACM Trans. Web 3(3), 1–34 (2009). DOI http://doi.acm.org/10.1145/1541822.
+1541823
+
+92. Lei, Y., Uren, V., Motta, E.: Semsearch: a search engine for the semantic web. 14th International 
+Conference on Knowledge Engineering and Knowledge Management, pp. 238–245
+(2006)
+
+93. Liu, B., Hu, B.: HPRD: a high performance RDF database. NPC, pp. 364–374 (2007)
+94. Lopez, V., Uren, V.S., Motta, E., Pasin, M.: AquaLog: an ontology-driven question answering
+
+system for organizational semantic intranets. J. Web Semat. 5(2), 72–105 (2007)
+
+95. Manola, F., Miller, E., McBride, B.: RDF Primer. W3C Recommendation (2004). http://www.
+
+w3.org/TR/rdf-primer/
+
+96. Meditskos, G., Bassiliades, N.: DLEJena: a practical forward-chaining OWL 2 RL reasoner
+
+combining Jena and Pellet. J. Web Semat. 8(1), 89–94 (2010)
+
+97. Melnik, S., Raghavan, S., Yang, B., Garcia-Molina, H.: Building a distributed full-text index
+for the web. 10th International World Wide Web Conference, Hong Kong, pp. 396–406
+(2001)
+
+98. Michalowski, M., Thakkar, S., Knoblock, C.A.: Exploiting secondary sources for automatic
+object consolidation. Proceeding of 2003 KDD Workshop on Data Cleaning, Record Linkage,
+and Object Consolidation (2003)
+
+99. Minack, E., Siberski, W., Nejdl, W.: Benchmarking fulltext search performance of RDF
+
+stores. ESWC, pp. 81–95 (2009)
+
+100. M¨oller, K., Ambrus, O., Josan, L., Handschuh, S.: A visual interface for building SPARQL
+
+queries in Konduit. International Semantic Web Conference (Posters & Demos) (2008)
+
+101. Najork, M., Zaragoza, H., Taylor, M.: HITS on the web: how does it compare? Proceedings
+of the 30th Annual International ACM SIGIR Conference on Research and Development in
+Information Retrieval, p. 478. ACM, New York (2007)
+
+102. Neumann, T., Weikum, G.: The RDF-3X engine for scalable management of RDF data.
+
+VLDB J. 19(1), 91–113 (2010)
+
+103. Newcombe, H.B., Kennedy, J.M., Axford, S.J., James, A.P.: Automatic linkage of vital
+records: computers can be used to extract ”follow-up” statistics of families from ﬁles of
+routine records. Science 130, 954–959 (1959)
+
+104. Oren, E., Delbru, R., Catasta, M., Cyganiak, R., Stenzhorn, H., Tummarello, G.: Sindice.com:
+a document-oriented lookup index for open linked data. Int. J. Metadata Semant. Ontol. 3(1),
+37–52 (2008)
+
+105. Oren, E., Delbru, R., Decker, S.: Extending faceted navigation for RDF data. International
+
+Semantic Web Conference, pp. 559–572 (2006)
+
+106. Oren, E., Kotoulas, S., Anadiotis, G., Siebes, R., ten Teije, A., van Harmelen, F.: Marvin:
+distributed reasoning over large-scale Semantic Web data. J. Web Semat. 7(4), 305–316
+(2009)
+
+107. Page, L., Brin, S., Motwani, R., Winograd, T.: The PageRank citation ranking: bringing order
+
+to the web. Technical report, Stanford Digital Library Technologies Project (1998)
+
+414
+
+A. Harth et al.
+
+108. Pant, G., Srinivasan, P.: Learning to crawl: comparing classiﬁcation schemes. ACM Trans.
+
+Inf. Syst. 23(4), 430–462 (2005)
+
+109. P´erez-Ag¨uera, J.R., Arroyo, J., Greenberg, J., Iglesias, J.P., Fresno, V.: Using BM25F for
+
+semantic search. 3rd International Semantic Search Workshop (SEMSEARCH) (2010)
+
+110. Pietriga, E., Bizer, C., Karger, D.R., Lee, R.: Fresnel: a browser-independent presentation
+
+vocabulary for RDF. International Semantic Web Conference, pp. 158–171 (2006)
+
+111. Polleres, A., Hogan, A., Harth, A., Decker, S.: Can we ever catch up with the Web? Semant.
+
+Web Interoper. Usabil. Appl. 1 (2010)
+
+112. Prud’hommeaux, E., (eds.), Seaborne, A.: SPARQL query language for RDF. W3C Recommendation 
+(2008). http://www.w3.org/TR/rdf-sparql-query/
+
+113. Quilitz, B., Leser, U.: Querying Distributed RDF Data Sources with SPARQL. ESWC,
+
+pp. 524–538 (2008)
+
+114. Raghavan, S., Garcia-Molina, H.: Crawling the hidden web. VLDB, pp. 129–138 (2001)
+115. Sabou, M., Baldassarre, C., Gridinoc, L., Angeletou, S., Motta, E., d’Aquin, M., Dzbor, M.:
+
+WATSON: a gateway for the semantic web. ESWC 2007 poster session (2007-06)
+
+116. Smith, M.K., Welty, C., McGuinness, D.L.: OWL web ontology language guide. W3C
+
+Recommendation (2004). http://www.w3.org/TR/owl-guide/
+
+117. Stonebraker, M.: The case for shared nothing. IEEE Database Eng. Bull. 9(1), 4–9 (1986)
+118. Thelwall, M., Stuart, D.: Web crawling ethics revisited: cost, privacy, and denial of service.
+
+J. Am. Soc. Inform. Sci. Technol. 57, 1771–1779 (2006)
+
+119. Tran, T., Wang, H., Rudolph, S., Cimiano, P.: Top-k exploration of query candidates for
+efﬁcient keyword search on graph-shaped (RDF) data. ICDE ’09: Proceedings of the 2009
+IEEE International Conference on Data Engineering, pp. 405–416 (2009). DOI http://dx.doi.
+org/10.1109/ICDE.2009.119
+
+120. Tummarello, G., Cyganiak, R., Catasta, M., Danielczyk, S., Decker, S.: Sig.ma: live views on
+
+the web of data. Semantic Web Challenge (2009)
+
+121. Umbrich, J., Harth, A., Hogan, A., Decker, S.: Four heuristics to guide structured content
+crawling. Proceedings of the 2008 Eighth international conference on web engineeringVolume 
+00, pp. 196–202. IEEE Computer Society, Silver Spring, MD (2008)
+
+122. Urbani, J., Kotoulas, S., Maassen, J., van Harmelen, F., Bal, H.E.: OWL reasoning with
+
+WebPIE: calculating the closure of 100 Billion Triples. ESWC, vol. 1, pp. 213–227 (2010)
+
+123. Urbani, J., Kotoulas, S., Oren, E., van Harmelen, F.: Scalable distributed reasoning using
+MapReduce. International Semantic Web Conference (ISWC 2009), vol. 5823, pp. 634–649.
+Springer, Washington DC, USA (2009)
+
+124. Volz, J., Bizer, C., Gaedke, M., Kobilarov, G.: Discovering and maintaining links on the web
+
+of data. International Semantic Web Conference, pp. 650–665 (2009)
+
+125. Wang, T.D., Parsia, B., Hendler, J.A.: A survey of the web ontology landscape. International
+
+Semantic Web Conference, pp. 682–694 (2006)
+
+126. Weaver, J., Hendler, J.A.: Parallel materialization of the ﬁnite RDFS closure for hundreds of
+millions of triples. International Semantic Web Conference (ISWC2009), pp. 682–697 (2009)
+127. Wei, W., Barnaghi, P.M., Bargiela, A.: Search with meanings: an overview of semantic search
+
+systems. Int. J. Commun. SIWN 3, 76–82 (2008)
+
+128. Weiss, C., Karras, P., Bernstein, A.: Hexastore: sextuple indexing for semantic web data
+
+management. PVLDB 1(1), 1008–1019 (2008)
+
+129. Yee, K.P., Swearingen, K., Li, K., Hearst, M.: Faceted metadata for image search and
+browsing. SIGCHI Conference on Human factors in Computing Systems, pp. 401–408
+(2003). DOI http://doi.acm.org/10.1145/642611.642681
+
+

@@ -1,0 +1,2728 @@
+Algorithmica (2005) 41: 89–116
+DOI: 10.1007/s00453-004-1120-3
+
+Algorithmica
+
+© 2004 Springer Science+Business Media, Inc.
+
+New Techniques for Regular Expression Searching1
+
+Gonzalo Navarro2 and Mathieu Rafﬁnot3
+
+Abstract. We present two new techniques for regular expression searching and use them to derive faster
+practical algorithms.
+
+Based on the speciﬁc properties of Glushkov’s nondeterministic ﬁnite automaton construction algorithm,
+we show how to encode a deterministic ﬁnite automaton (DFA) using O(m2m ) bits, where m is the number of
+characters, excluding operator symbols, in the regular expression. This compares favorably against the worst
+case of O(m2m||) bits needed by a classical DFA representation (where  is the alphabet) and O(m22m )
+bits needed by the Wu and Manber approach implemented in Agrep.
+
+We also present a new way to search for regular expressions, which is able to skip text characters. The
+idea is to determine the minimum length (cid:5) of a string matching the regular expression, manipulate the original
+automaton so that it recognizes all the reverse preﬁxes of length up to (cid:5) of the strings originally accepted, and
+use it to skip text characters as done for exact string matching in previous work.
+
+We combine these techniques into two algorithms, one able and one unable to skip text characters. The
+algorithms are simple to implement, and our experiments show that they permit fast searching for regular
+expressions, normally faster than any existing algorithm.
+
+Key Words. Glushkov automaton, Compact DFA representation, Bit-parallelism, BDM, Reverse factors.
+
+1. Introduction. The need to search for regular expressions arises in many text-based
+applications, such as text retrieval, text editing and computational biology, to name a few.
+A regular expression is a generalized pattern composed of (i) basic strings and (ii) union,
+concatenation and Kleene closure of other regular expressions. Readers unfamiliar with
+the concept and terminology related to regular expressions are referred to a classical
+book such as [1]. We call m the length of our regular expression, not counting operator
+symbols. The alphabet is denoted , and n is the length of the text.
+
+The traditional techniques to search for a regular expression achieve O(n) search
+time. Their main problem has always been their space requirement, which can be as high
+as O(m22m||) bits to code the deterministic automaton (DFA) [26], [1]. An alternative
+is O(mn) search time and O(m) space [26], which is slow in practice.
+
+Newer techniques based on the Four Russians approach have obtained O(mn/log s)
+search time using O(s) space [19]. The same result with a simpler implementation was
+obtained using bit-parallelism [29]: Wu and Manber use a table of O(m22m ) bits that can
+be split into k tables of O(m22m/k ) bits each, at a search cost of O(kn) table inspections.
+
+1 This research was supported in part by ECOS-Sud Project C99E04 and, for the ﬁrst author, Fondecyt Grant
+1-020831.
+2 Department of Computer Science, University of Chile, Blanco Encalada 2120, Santiago, Chile.
+gnavarro@dcc.uchile.cl.
+3 Equipe G´enome et Informatique, Tour Evry 2, 523 place des terrasses de l’Agora, 91034 Evry, France.
+rafﬁnot@genopole.cnrs.fr.
+
+Received February 1, 2002; revised July 26, 2004. Communicated by Ming-Yang Kao.
+Online publication September 21, 2004.
+
+90
+
+G. Navarro and M. Rafﬁnot
+
+These approaches are based on Thompson’s nondeterministic ﬁnite automaton (NFA)
+construction [26], which produces an NFA of m + 1 to 2m states. Several regularities of
+Thompson’s NFA have been essential in the design of the newer algorithms [19], [29].
+Another NFA construction is Glushkov’s [12], [4]. Although it does not provide the
+same regularities of Thompson’s, this construction always produces an NFA of minimal
+number of states, m + 1. Hence its corresponding DFA needs only O(m2m||) bits,
+which is signiﬁcantly less than the worst case using Thompson’s NFA.
+
+Another more recent trend in regular expression searching is to avoid inspecting every
+text character. Adapting well-known techniques in simple string matching, these methods
+ﬁnd a set of strings such that some string in the set appears inside every occurrence
+of the regular expression. Hence the problem is reduced to multistring searching plus
+veriﬁcation of candidate positions ([27, Chapter 5] and Gnu Grep v2.0). The veriﬁcation
+has to be done with a classical algorithm.
+
+This paper presents new contributions to the problem of regular expression searching.
+The ﬁrst one is a bit-parallel representation of the DFA based on Glushkov’s NFA and
+its speciﬁc properties, which needs O(m2m ) bits and can be split into k tables as the
+existing one [29]. This is the most compact representation we are aware of. A second
+contribution is an algorithm able to skip text characters based on a completely new
+concept that borrows from the BDM and BNDM string matching algorithms [11], [22].
+The net result is a couple of algorithms, one unable and one able to skip text characters.
+The former is experimentally shown to be at least 10% faster than any previous nonskipping 
+algorithm to search for regular expressions of moderate size, which include most
+cases of interest. The latter is interesting when the regular expression does not match
+too short or too frequent strings, in which case it is faster than the former algorithm and
+generally faster than every character skipping algorithm.
+
+We organize the paper as follows. In the rest of this section we introduce the notation
+used. Section 2 reviews related work and puts our contribution in context in more detail.
+Section 3 presents basic concepts on Glushkov’s construction and Section 4 uses them to
+present our compact DFA and our ﬁrst search algorithm. Section 5 presents the general
+character skipping approach, and Section 6 our extension to regular expressions. Section
+7 gives an empirical evaluation of our new algorithms compared with the best we are
+aware of. Finally, Section 8 gives our conclusions.
+
+Earlier versions of this work appeared in [21] and [23]. The techniques presented here
+
+have been used in the recent pattern matching software Nrgrep [20].
+
+1.1. Notation. Some deﬁnitions that are used in this paper follow. A word is a string
+or sequence of characters over a ﬁnite alphabet . The empty word is denoted ε and the
+. A word x ∈ ∗
+set of all words built on  (ε included) is ∗
+is a factor (or substring)
+of p if p can be written p = uxv, u, v ∈ ∗
+. A factor x of p is called a sufﬁx (resp.
+preﬁx) of p if p = ux (resp. p = xv), u ∈ ∗
+.
+We deﬁne also the language to denote regular expressions. Union is denoted with
+the inﬁx sign “|”, Kleene closure with the postﬁx sign “∗” and concatenation simply
+by putting the subexpressions one after the other. Parentheses are used to change the
+precedence, which is normally “∗”, “.”, “|”. We adopt some widely used extensions:
+[c1...ck] (where ci are characters) is shorthand for (c1|...|ck ). Instead of a character c,
+a range c1–c2 can be speciﬁed to avoid enumerating all the characters between (and
+
+New Techniques for Regular Expression Searching
+
+91
+
+including) c1 and c2. Finally, the period (.) represents any character. We call R E our
+regular expression pattern, which is of length m. We note by L(R E ) the set of words
+generated by R E.
+We also deﬁne some terminology for bit-parallel algorithms. A bit mask is a sequence
+of bits. Typical bit operations are inﬁx “|” (bitwise or), inﬁx “&” (bitwise and), preﬁx
+“∼” (bit complementation) and inﬁx “<<” (“>>”), which moves the bits of the ﬁrst
+argument (a bit mask) to higher (lower) positions in an amount given by the argument
+on the right. Additionally, one can treat the bit masks as numbers and obtain speciﬁc
+effects using the arithmetic operations +, −, etc. Exponentiation is used to denote bit
+repetition, e.g. 031 = 0001.
+
+2. Our Work in Context. The traditional technique [26] to search for a regular expression 
+of length m in a text of length n is to convert the expression into an NFA with
+m + 1 to 2m nodes. Then it is possible to search the text using the automaton at O(mn)
+worst-case time. The cost comes from the fact that more than one state of the NFA may be
+active at each step, and therefore all may need to be updated. A more efﬁcient choice [1]
+is to convert the NFA into a DFA, which has only one active state at a time and therefore
+allows searching the text at O(n) cost, which is worst-case optimal. The problem with
+this approach is that the DFA may have O(22m ) states, which implies a preprocessing
+cost and extra space exponential in m. Several heuristics have been proposed to alleviate
+this problem, from the well-known lazy DFA that builds only the states reached while
+scanning the text (implemented for example in Gnu Grep) to attempts to represent the
+DFA more compactly [18]. Yet, the space usage of the DFA is still the main drawback
+of this approach.
+
+Some techniques have been proposed to obtain a good tradeoff between both extremes.
+In 1992 Myers [19] presented a Four Russians approach which obtains O(mn/log s)
+worst-case time and O(s) extra space. The idea is to divide the syntax tree of the regular
+expression into “modules”, which are subtrees of a reasonable size. These subtrees are
+implemented as DFAs and are thereafter considered as leaf nodes in the syntax tree. The
+process continues with this reduced tree until a single ﬁnal module is obtained.
+
+The DFA simulation of modules is done using bit-parallelism, which is a technique
+to code many elements in the bits of a single computer word (which is called a “bit
+mask”) and manage to update all of them in a single operation. In our case the vector of
+active and inactive states is stored as bits of a computer word. Instead of (a la Thompson
+[26]) examining the active states one by one, the whole computer word is used to index
+a table which, together with the current text character, provides the new bit mask of
+active states. This can be considered either as a bit-parallel simulation of an NFA or as
+an implementation of a DFA (where the identiﬁer of each deterministic state is the bit
+mask as a whole).
+
+Pushing even more in this direction, we may resort to pure bit-parallelism and forget
+about the modules. This was done in [29] by Wu and Manber, and included in their
+software Agrep [28]. A computer word is used to represent the active (1) and inactive (0)
+states of the NFA. If the states are properly arranged and the Thompson construction [26]
+is used, all the arrows carry ones from bit positions i to i + 1, except for the ε-transitions.
+Then a generalization of Shift-Or [3] (the canonical bit-parallel algorithm for exact
+
+92
+
+G. Navarro and M. Rafﬁnot
+
+string matching) is presented, where for each text character two steps are performed.
+First, a forward step moves all the ones that can move from a state to the next one. This
+is achieved by precomputing a table B of bit masks, such that the ith bit of B[c] is
+set if and only if the character c matches at the ith position of the regular expression.
+Second, the ε-transitions are carried out. As ε-transitions follow arbitrary paths, a table
+E : 2O(m) → 2O(m) is precomputed, where E[D] is the ε-closure of D. To move from
+the state set D to the new D
+
+(cid:9)
+
+after reading text character c, the action is
+(cid:9) ← E[(D << 1) & B[c]].
+
+D
+
+Possible space problems are solved by splitting this table “horizontally” (i.e. less bits
+] |
+|D1|
+D2]. This can be thought of as an alternative decomposition scheme, instead of
+
+per entry) in as many subtables as needed, using the fact that E[D1 D2] = E[D10
+E[0
+Myers’ modules.
+
+|D2|
+
+All the approaches mentioned are based on the Thompson construction of the NFA,
+whose properties have been exploited in different ways. An alternative and much less
+known NFA construction algorithm is Glushkov’s [12], [4]. A good point of this construction 
+is that, for a regular expression of m characters, the NFA obtained has exactly
+m + 1 states and is free of ε-transitions. Thompson’s construction, instead, produces
+between m + 1 and 2m states. This means that Wu and Manber’s method may need a
+table of size 22m entries of 2m bits each, for a total space requirement of 2m(22m+1+||)
+bits (E plus B tables).
+Unfortunately, the structural property that arrows are either forward or ε-transitions
+does not hold on Glushkov’s NFA. As a result, we need a table M : 2m+1 ×  →
+2m+1 indexed by the current state and text character, for a total space requirement of
+(m + 1)2m+1|| bits. The transition action is simply D
+(cid:9) ← M[D, c], just as for a
+classical DFA implementation.
+
+In this paper we use speciﬁc properties of the Glushkov construction (namely, that
+all the arrows arriving at a state are labeled by the same letter) to eliminate the need of a
+separate table per text character. As a result, we obtain the best of both worlds: we can
+have tables whose arguments have just m + 1 bits and we can have just one table instead
+of one per character. Thus we can represent the DFA using (m + 1)(2m+1 + ||) bits,
+which is not only better than both previous bit-parallel implementations but also better
+than the classical DFA representation, which needs in the worst case (m + 1)2m+1||
+bits using Glushkov’s construction.
+
+The net result is a simple algorithm for regular expression searching which normally
+uses less space and has faster preprocessing and search time. Although all are O(n)
+search time, a smaller DFA representation yields more locality of reference.
+
+The ideas presented up to now aim at a good implementation of the automaton, but
+they must inspect all the text characters. In many cases, however, the regular expression
+involves sets of relatively long substrings that must appear inside any occurrence of the
+regular expression. In Chapter 5 of [27], a multipattern search algorithm is generalized
+to regular expression searching, in order to take advantage of this fact. The resulting
+algorithm ﬁnds all sufﬁxes (of a predetermined length) of words of the language denoted
+by the regular expression and uses the Commentz-Walter algorithm [9] to search for them.
+Another technique of this kind is used in Gnu Grep v2.0, which extracts a single string (the
+longest) that must appear in any match. This string is searched for and the neighborhoods
+
+New Techniques for Regular Expression Searching
+
+93
+
+of its occurrences are checked for complete matches using a lazy deterministic automaton.
+Note that it is possible that there is no such single string, in which case the scheme cannot
+be applied.
+
+In this paper we present a new regular expression search algorithm able to skip text
+characters. It is based on extending BDM and BNDM [11], [22]. These are simple
+string search algorithms whose main idea is to build an automaton able to recognize the
+reverse preﬁxes of the pattern, and to examine backwards a window of length m on the
+text. This automaton helps us to determine (i) when it is possible to shift the window
+because no pattern substring has been seen, and (ii) the next position where the window
+can be placed, i.e. the last time that a pattern preﬁx was seen. BNDM is a bit-parallel
+implementation of this automaton, faster and much simpler than the traditional version,
+BDM, which makes the automaton deterministic.
+
+Our algorithm for regular expression searching is an extension where, by manipulating
+the original automaton, we search for any reverse preﬁx of a possible occurrence of the
+regular expression. Hence, this transformed automaton is a compact device to achieve
+the same multipattern searching, at much less space.
+
+3. Glushkov Automaton. There exist currently many different techniques to build
+an NFA from a regular expression R E of m characters (without counting the special
+symbols). The most classical one is the Thompson construction [26], which builds an
+NFA with at most 2m states (and at least m+1). This NFA has some particular properties
+(e.g. O(1) transitions leaving each node) that have been extensively exploited in several
+regular expression search algorithms such as that of Thompson [26], Myers [19] and Wu
+and Manber [29], [28].
+
+Another particularly interesting NFA construction algorithm is by Glushkov [12],
+popularized by Berry and Sethi in [4]. The NFA resulting from this construction has the
+advantage of having just m + 1 states (one per position in the regular expression). Its
+number of transitions is worst-case quadratic, but this is unimportant under bit-parallel
+representations (it just means denser bit masks). We present this construction in depth.
+
+3.1. Glushkov Construction. The construction begins by marking the positions of the
+characters of  in R E, counting only characters. For instance, (AT|GA)((AG|AAA)*)
+is marked (A1T2|G3 A4)((A5G6|A7 A8 A9)∗). A marked expression from a regular expression 
+R E is denoted R E and its language (including the indices on each character) L(R E ).
+On our example, L((A1T2|G3 A4)((A5G6|A7 A8 A9)∗)) = {A1T2, G3 A4, A1T2 A5G6,
+G3 A4 A5G6, A1T2 A7 A8 A9, G3 A4 A7 A8 A9, A1T2 A5G6 A5G6, . . .}. Let Pos(R E ) be
+the set of positions in R E (i.e. Pos = {1 . . . m}) and let  be the marked character alphabet.
+
+
+The Glushkov automaton is built ﬁrst on the marked expression R E and it recognizes
+L(R E ). We then derive from it the Glushkov automaton that recognizes L(R E ) by
+erasing the position indices of all the characters (see below).
+
+The idea of Glushkov is the following. The set of positions is taken as a reference,
+becoming the set of states of the resulting automaton (adding an initial state 0). So we
+build m + 1 states labeled from 0 to m. Each state j represents the fact that we have read
+in the text a string that ends at NFA position j. Now if we read a new character σ , we
+
+94
+
+G. Navarro and M. Rafﬁnot
+
+need to know which positions { j1 . . . jk} we can reach from j by σ . Glushkov computes
+from a position (state) j all the other accessible positions { j1 . . . jk}.
+
+We need four new deﬁnitions to explain in depth the algorithm. We denote below by
+
+∗
+
+σy the indexed character of R E that is at position y.
+, σx u ∈ L(R E )}, i.e. the set of
+DEFINITION. First(R E ) = {x ∈ Pos(R E ), ∃u ∈ 
+initial positions of L(R E ), that is, the set of positions at which the reading can start. In
+our example, First((A1T2|G3 A4)((A5G6|A7 A8 A9)∗)) = {1, 3}.
+, uσx ∈ L(R E )}, i.e. the set
+DEFINITION. Last(R E ) = {x ∈ Pos (R E ), ∃u ∈ 
+of ﬁnal positions of L(R E ), that is, the set of positions at which a string read can be
+recognized. In our example, Last((A1T2|G3 A4)((A5G6|A7 A8 A9)∗)) = {2, 4, 6, 9}.
+, uσx σyv ∈ L(R E )},
+DEFINITION. Follow(R E , x) = {y ∈ Pos(R E ), ∃u, v ∈ 
+i.e. all the positions in Pos(R E ) accessible from x. For instance, in our example, if
+we consider position 6, the set of accessible positions Follow((A1T2|G3 A4) ((A5G6|
+A7 A8 A9)∗), 6) = {7, 5}.
+
+∗
+
+∗
+
+DEFINITION. EmptyR E is TRUE if ε belongs to L(R E ) and FALSE otherwise.
+
+The Glushkov automaton G L = (S, , I, F, δ) that recognizes the language L(R E )
+is built from these three sets in the following way (Figure 1 shows our example NFA):
+1. S is the set of states, S = {0, 1, . . . , m}, i.e. the set of positions Pos(R E ) and the
+initial state I = 0.
+2. F is the set of ﬁnal states, F = Last(R E ) if EmptyR E = FALSE and F = Last(R E )∪
+{0} otherwise. Informally, a state (position) i is ﬁnal if it is in Last(R E ) (in which
+case when reaching such a position we know that we recognized a string in L(R E )).
+The initial state 0 is also ﬁnal if the empty word ε belongs to L(R E ).
+
+3. δ is the transition function of the automaton, deﬁned by
+
+(1)
+
+∀x ∈ Pos(R E ),
+
+δ(x, σy) = y.
+Informally, there is a transition from state x to y by σy if y follows x.
+
+∀y ∈ Follow(R E , x),
+
+The Glushkov automaton of the original R E is now simply obtained by erasing the
+position indices in the marked automaton. The new automaton recognizes the language
+
+G3
+
+A1
+
+0
+
+1
+
+2T
+
+2
+
+A7
+
+4
+
+A5
+
+5
+
+G6
+
+A5
+
+3
+
+A4
+
+A5
+
+A7
+
+A5
+
+6
+
+A7
+
+7
+
+A8
+
+8
+
+9A
+
+9
+
+A7
+
+Fig. 1. Marked Glushkov automaton built on the marked regular expression (A1T2|G3 A4) ((A5G6|A7 A8 A9)∗).
+The state 0 is initial. Double-circled states are ﬁnal.
+
+New Techniques for Regular Expression Searching
+
+95
+
+G
+
+A
+
+0
+
+T
+
+1
+
+2
+
+3
+
+4
+
+A
+
+A
+
+A
+
+A
+
+A
+
+A
+
+7
+
+A
+
+A
+
+6
+
+5
+
+G
+
+A
+
+A
+
+9
+
+8
+
+A
+
+Fig. 2. Glushkov automaton built on the regular expression (AT|GA)((AG|AAA)*). The state 0 is initial.
+Double-circled states are ﬁnal.
+
+L(R E ). The Glushkov automaton of our example (AT|GA)((AG|AAA)*) is shown in
+Figure 2.
+
+The complexity of this construction is O(m3), which can be reduced to O(m2) in
+different ways by using distinct properties of the First and Follow sets [5], [8]. However,
+when using bit-parallelism, the complexity is directly reduced to O(m2) by manipulating
+all the states in a register (see Section 4).
+
+3.2. A Bit-Parallel Implementation. We consider how to compute the variables First,
+Last, Follow and Empty. All along the Glushkov algorithm we manipulate sets of NFA
+states. As it is useful for the search algorithms presented later, we use bit-parallelism
+to represent these sets of states, that is, we represent sets using bit masks of m + 1
+bits, where the ith bit is 1 if and only if state number i belongs to the set. We blur the
+distinction between sets of states and bit masks in the rest of the paper.
+
+An immediate advantage of using a bit-parallel implementation is that we can easily
+handle classes of characters. This means that at each position of the regular expression
+there is not just a character of  but a set of characters, any of which is good to traverse 
+the corresponding arrow. Rather than just converting the set {a1, a2, . . . , ak} into
+(a1|a2| . . .|ak ) (and creating k positions instead of one), we can consider the class as a
+single letter.
+
+The algorithm of Glushkov is based on the parse tree of the regular expression. Each
+node v of this tree represents a subexpression R Ev of R E. For each node, its variables
+First(v), Last(v) and Emptyv are computed in postﬁx order. At the same time we ﬁll
+the values of a global table Follow that corresponds to the whole R E. We consider
+that regular expressions contain classes of characters rather than single characters at the
+leaves of their syntax trees.
+Figure 3 shows this preprocessing. Together with the above-mentioned variables, we
+ﬁll a table of bit masks B :  → 2m+1, such that the ith bit of B[c] is set if and only if
+c belongs to the class at the ith position of the regular expression. We assume that the
+table is initialized with zeros.
+
+We do not complete the Glushkov algorithm because we do not really use its NFA.
+
+Rather, we build directly from its First, Last and Follow variables.
+
+4. A Compact DFA Representation. The classical algorithm to produce a DFA from
+an NFA consists in making each DFA state represent a set of NFA states which may
+be active at that point. A possible way to represent the states of a DFA (i.e. the sets of
+
+96
+
+G. Navarro and M. Rafﬁnot
+
+If v = [ | ] (vl , vr ) OR v = · (vl , vr ) Then
+lpos ← Glushkov variables(vl , lpos)
+lpos ← Glushkov variables(vr , lpos)
+
+Glushkov variables(vR E , lpos)
+1.
+2.
+3.
+4.
+5.
+6.
+7.
+8.
+9.
+10.
+11.
+12.
+13.
+14.
+15.
+16.
+17.
+18.
+19.
+20.
+21.
+22.
+23.
+24.
+25.
+26.
+
+End of if
+Return lpos
+
+Else If v = [ | ] (vl , vr ) Then
+
+Else If v = ∗ (v∗) Then lpos ← Glushkov variables(v∗, lpos)
+End of if
+If v = (ε) Then
+Else If v = (C) , C ⊆  Then
+
+First(v) ← 0m+1, Last(v) ← 0m+1, Emptyv ← TRUE
+lpos ← lpos + 1
+For σ ∈ C Do B[σ ] ← B[σ ] | 0m−lpos10lpos
+First(v) ← 0m−lpos10lpos, Last(v) ← 0m−lpos10lpos
+Emptyv ← FALSE , Follow(lpos) ← 0m+1
+First(v) ← First(vl ) | First(vr ), Last(v) ← Last(vl ) | Last(vr )
+Emptyv ← Emptyvl
+First(v) ← First(vl ), Last(v) ← Last(vr )
+= TRUE Then First(v) ← First(v) | First(vr )
+If Emptyvl
+= TRUE Then Last(v) ← Last(vl ) | Last(v)
+If Emptyvr
+Emptyv ← Emptyvl
+For x ∈ Last(vl ) Do Follow(x) ← Follow(x) | First(vr )
+Else If v = ∗ (v∗) Then
+First(v) ← First(v∗), Last(v) ← Last(v∗), Emptyv ← TRUE
+For x ∈ Last(v∗) Do Follow(x) ← Follow(x) | First(v∗)
+
+Else If v = · (vl , vr ) Then
+
+OR Emptyvr
+
+AND Emptyvr
+
+Fig. 3. Computing the variables for the Glushkov algorithm. The syntax tree can be a union node ([ | ] (vl , vr ))
+or a concatenation node ( · (vl , vr )) of subtrees vl and vr ; a Kleen star node ( ∗ (v∗)) with subtree v∗, or a
+leaf node corresponding to the empty string (ε) or a class of characters (C).
+
+states of an NFA) is to use a bit mask of O(m) bits, as already explained. Previous bitparallel 
+implementations [19], [29] are built on this idea. We present in this section a new
+bit-parallel DFA representation based on Glushkov’s construction (recall Section 3.2).
+
+4.1. Properties of Glushkov’s Construction. We now study some properties of the
+Glushkov construction which are necessary for our compact DFA representation. All
+them are very easy to prove [6]. The proofs are included here for self-containment.
+
+First, since we do not build any ε-transitions (see formula (1)), we have that Glushkov’s
+NFA is ε-free. That is, in the approach of Wu and Manber [29], the ε-transitions are the
+complicated part, because all the others move forward. We do not have these transitions
+in the Glushkov automaton, but, on the other hand, the normal transitions do not follow
+such a simple pattern. However, there are still important structural properties in the
+arrows. One of these is captured in the following lemma.
+
+LEMMA 1. All the arrows leading to a given state in Glushkov’s NFA are labeled by
+the same character. Moreover, if classes of characters are permitted at the positions of
+
+New Techniques for Regular Expression Searching
+
+97
+
+the regular expression, then all the arrows leading to a given state in Glushkov’s NFA
+are labeled by the same class.
+
+PROOF. This is easily seen in formula (1). The character labeling every arrow that
+arrives at state y is precisely σy. This also holds if we consider that σy is in fact a subset
+of .
+
+These properties can be combined with the B table to yield our most important
+
+property.
+
+LEMMA 2. Let B(σ ) be the set of positions of the regular expression that contain
+character σ . Let Follow (x) be the set of states that can follow state x in one transition,
+by Glushkov’s construction. Let δ : S ×  → P(S) be the transition function of
+Glushkov’s NFA, i.e. y ∈ δ(x, σ ) if and only if from state x we can move to state y by
+character σ . Then it holds that
+
+δ(x, σ )= Follow(x) ∩ B(σ ).
+
+PROOF. The lemma follows from Lemma 1. Let state y ∈ δ(x, σ ). This means that y
+can be reached from x by σ and therefore y ∈ Follow(x) ∩ B(σ ). Conversely, let y ∈
+Follow(x) ∩ B(σ ). Then y can be reached by letter σ and it can be reached from x.
+However, Lemma 1 implies that every arrow leading to y is labeled by σ , including the
+one departing from x, and hence y ∈ δ(x, σ ).
+
+Finally, a last property is necessary for technical reasons made clear shortly.
+
+LEMMA 3. The initial state 0 in Glushkov’s NFA does not receive any arrow.
+
+PROOF. This is clear since all the arrows are built in formula (1), and the initial state is
+not in the Follow set of any other state (see the deﬁnition of Follow).
+
+4.2. A Compact Representation. We now use Lemma 2 to obtain a compact representation 
+of the DFA. The idea is to compute the transitions by using two tables: the ﬁrst one
+is simply B[σ ], which is built in algorithm Glushkov variables and gives a bit mask of
+the states reachable by each letter (no matter from where). The second is a deterministic
+version of Follow, i.e. a table T from sets of states to sets of states (in bit mask form)
+which tells which states can be reached from an active state in D, no matter by which
+character:
+
+(2)
+
+T [D]= (cid:1)
+i∈D
+
+Follow(i ).
+
+By Lemma 2, it holds that
+
+δ(D, σ )= (cid:1)
+i∈D
+
+Follow(i ) ∩ B(σ )= T [D] & B[σ ]
+
+98
+
+G. Navarro and M. Rafﬁnot
+
+BuildT (Follow,m)
+T [0] ← 0
+1.
+For i ∈ 0 . . . m Do
+2.
+3.
+4.
+5.
+6.
+7.
+
+End of for
+Return T
+
+End of for
+
+For j ∈ 0 . . . 2i − 1 Do
+
+T [2i + j] ← Follow(i ) | T [ j]
+
+Fig. 4. Construction of table T from Glushkov’s variables. We use a numeric notation for the argument of T
+and use Follow in bit mask form.
+
+(we are now using the bit mask representation for sets). Hence instead of the complete
+transition table δ : 2m+1 ×  → 2m+1 we build and store only T : 2m+1 → 2m+1 and
+B :  → 2m+1. The number of bits required by this representation is (m+1)(2m+1+||).
+Figure 4 shows the algorithm to build T from Follow at optimal cost O(2m ).
+
+4.3. A Search Algorithm. We now present the search algorithm based on the previous
+construction. We call First and Last the variables corresponding to the whole regular
+expression.
+Our ﬁrst step is to set Follow(0) = First for technical convenience. Second, we add a
+self-loop at state 0 which can be traversed by any σ ∈ . This is because, for searching
+purposes, the NFA that recognizes a regular expression must be converted into one that
+searches for the regular expression. This is achieved by appending ∗
+at its beginning,
+or which is the same, adding a self-loop as described. As, by Lemma 3, no arrow goes
+to state 0, it still holds that all the arrows leading to a state are labeled the same way
+(Lemma 1). Figure 5 shows the search algorithm.
+
+4.4. Horizontal Table Splitting. As mentioned, we can split the T table if it turns out
+to be too large. The splitting is based on the following property. Let T : 2m+1 → 2m+1
+
+Search(R E, T = t1t2 . . . tn)
+
+1.
+2.
+3.
+4.
+5.
+6.
+7.
+8.
+9.
+10.
+11.
+12.
+
+Preprocessing
+
+(vR E , m) ← Parse(R E) /* parse the regular expression */
+Glushkov variables(vR E ,0) /* build the variables on the tree */
+Follow(0) ← 0m1 | First /* add initial self-loop */
+For σ ∈  Do B[σ ] ← B[σ ] | 0m1
+T ← BuildT(Follow, m) /* build T table */
+D ← 0m1 /* the initial state */
+For j ∈ 1 . . . n Do
+
+If D & Last (cid:20)= 0m+1 Then report an occurrence ending at j − 1
+D ← T [D] & B[tj ] /* simulate transition */
+
+Searching
+
+End of for
+
+Fig. 5. Glushkov-based bit-parallel search algorithm. We assume that Parse gives the syntax tree vR E and the
+number of positions m in R E, and that Glushkov variables builds B, First, Last and Follow.
+
+New Techniques for Regular Expression Searching
+
+99
+
+be the table obtained applying (2). Let D = D1 : D2 be a splitting of mask D into
+two submasks, a left and a right submask. In our set representation of bit masks, D1 =
+D ∩ {0 . . . (cid:5) − 1} and D2 = D ∩ {(cid:5) . . . m}. If we deﬁne T1
+: 2(cid:5) → 2m+1 and
+T2 : 2m−(cid:5)+1 → 2m+1 using for T1[D1] and T2[D2] the same formula of (2), then it is
+clear that T [D] = T [D1]∪ T [D2]. In the bit mask view, we have a table T1 that receives
+the ﬁrst (cid:5) bits of D and a table T2 that receives the last m − (cid:5) + 1 bits of D. Each table
+gives the bit mask of the states reachable from states in their submask. The total set of
+states is no more than the union of both sets: those reachable from states in {0 . . . (cid:5) − 1}
+and those reachable from states in {(cid:5) . . . m}. Note that the results of each subtable still
+has m + 1 bits.
+In general we can split T into k tables T1 . . . Tk, such that Ti addresses the bits roughly
+from (i − 1)(m + 1)/k to i (m + 1)/k − 1, that is, (m + 1)/k bits. Each such table needs
+2(m+1)/k (m + 1) bits to be represented, for a total space requirement of O(2m/kmk) bits.
+The cost is that, in order to perform each transition, we need to pay for k table accesses
+to compute
+
+T [D1 D2 . . . Dk]= T1[D1] | T2[D2] | . . . | Tk[Dk],
+
+which makes the search time O(kn) in terms of table accesses. If we have O(s) bits of
+space, then we solve for s = 2m/kmk, to obtain a search time of O(kn) = O(mn/log s).
+
+4.5. Comparison. Compared with Wu and Manber’s algorithm [29], ours has the advantage 
+of needing (m + 1)(2m+1 + ||) bits of space instead of their m(22m+1 + ||)
+bits in the worst case (their best case is equal to our complexity). Just as they propose, we
+can split T horizontally to reduce space, to obtain O(mn/log s) time with O(s) space.
+Compared with our previous algorithm [21], the new one compares favorably against its
+(m + 1)2m+1|| bits of space. Therefore, our new algorithm should always be preferred
+over previous bit-parallel algorithms.
+With respect to a classical DFA implementation, its worst case is 2m+1 states, and it
+stores a table which for each state and each character stores the new state. This requires
+(m+1)2m+1|| bits in the worst case. However, in the classical algorithm it is customary
+to build only the states that can actually be reached, which can be much less than all the
+2m+1 possibilities.
+
+We can do something similar, in the sense of ﬁlling only the reachable cells of T (yet,
+we cannot pack them consecutively in memory as a classical DFA). Figure 6 shows the
+
+For i ∈ 0 . . . m Do /* ﬁrst build T [D] */
+
+If D & 0m−i 10i
+
+(cid:20)= 0m+1 Then T [D] ← T [D] | Follow(i )
+
+BuildTrec (D)
+1.
+2.
+3.
+4.
+5.
+6.
+7.
+8.
+
+End of for
+
+End of for
+N ← T [D]
+For σ ∈  Do
+
+If T [N & B[σ ]] = 0m+1 Then /* not built yet */
+
+BuildTrec (N & B[σ ])
+
+Fig. 6. Recursive construction of table T . We ﬁll only the reachable cells.
+
+100
+
+G. Navarro and M. Rafﬁnot
+
+recursive construction of this table, which is invoked with D = 0m1, the initial state, and
+assumes that T is initialized with zeros and that B, Follow and m are already computed.
+Finally, notice that we do not need to represent state 0, as it is always active. This
+reduces our space requirement to m(2m+||) bits of space. This improvement, however,
+cannot be used in the techniques presented later in this paper.
+
+5. The Reverse Factor Search Approach.
+In this section we describe the general
+reverse factor search approach currently used to search for single patterns [17], [11],
+[22] or multiple patterns [10], [25].
+
+The search is done using a window which has the length of the minimum word that
+we search for (if we search for a single word, we just take its length). We denote this
+minimum length (cid:5).
+
+We shift the window along the text, and for each position of the window, we search
+backwards (i.e. from right to left, see Figure 7) for any factor of any length-(cid:5) preﬁx of
+our set of patterns (if we search for a single word, this means any factor of the word).
+Also, each time we recognize a factor which is indeed a preﬁx of some of the patterns,
+we store our position in the window in a variable last (which is overwritten, so we know
+the last time that this happened). Now, two possibilities appear:
+
+(i) We do not reach the beginning of the window. This case is shown in Figure 7. The
+search for a factor fails on a letter σ , i.e. σ u is not a factor of a length-(cid:5) preﬁx of any
+pattern. We can directly shift the window to start at position last, since no pattern
+can start before, and begin the search again.
+
+(ii) We reach the beginning of the window. If we search for just one pattern, we have
+recognized it and we report the occurrence. Otherwise, we just recognized a length-(cid:5)
+preﬁx of one or more patterns. We verify directly in the text if there is a match of
+a pattern that starts at the initial window position, with a forward (i.e. left to right)
+scan. This can be done with a trie of the patterns. Next, in both cases, we shift the
+window to position last.
+
+Widw
+
+ a
+
+Seach f a fac
+
+Recd i  a he widw ii whe a e(cid:12)x f ay ae i ecgized
+
+ a
+
+(cid:27)
+
+Fai  f he each f a fac i (cid:27).
+The  ge e(cid:12)x a a  a
+
+(cid:27)
+
+afe hif
+
+ew widw
+
+Fig. 7. The reverse factor search approach.
+
+New Techniques for Regular Expression Searching
+
+101
+
+This simple approach leads to very fast algorithms in practice, such as BDM [11] and
+BNDM [22]. For a single pattern, this is optimal on average, matching Yao’s bound [30]
+of O(n log((cid:5))/(cid:5)), where (cid:5) the pattern length. In the worst case this scheme is quadratic
+(O(n(cid:5)) complexity). There exists, however, a general technique to keep the algorithms
+sublinear on average and linear in the worst case.
+
+5.1. A Linear Worst-Case Algorithm. The main idea used in [11], [22], [10], and [25]
+is to avoid retraversing the same characters in the backward window veriﬁcation. We
+divide the work done on the text into two parts: forward and backward scanning. To
+be linear in the worst case, none of these two parts must retraverse characters. In the
+forward scan it is enough to keep track of the longest pattern preﬁx v that matches the
+current text sufﬁx. This is easily achieved with a KMP automaton [16] (for one pattern)
+or an Aho–Corasick automaton [2] (for multiple patterns). All the matches are found
+using the forward scan.
+
+However, we also need to use backward searching in order to skip characters. The idea
+is that the window is placed so that the current longest preﬁx matched v is aligned with
+the beginning of the window. The position of the current text character inside the window
+(i.e. |v|) is called the critical position. At any point in the forward scan we can place
+the window (shifted |v| characters from the current text position) and try a backward
+search. Clearly, this is only promising when v is not very long compared with (cid:5). Usually,
+a backward scan is attempted when the preﬁx is less than (cid:21)(cid:5)/α(cid:22), where 0 < α < (cid:5) is
+ﬁxed arbitrarily (usually α = 2).
+
+The backward search proceeds almost as before, but it ﬁnishes as soon as the critical
+
+position is reached. The two possibilities are:
+
+(i) We reach the critical position. This case is shown in Figure 8. In this case we are
+not able to skip characters. The forward search is resumed in the place where it was
+left (i.e. from the critical position), it totally retraverses the window and continues
+until the condition to try a new backward scan holds again.
+
+Widw
+
+v
+
+	
+
+Ci
+
+We eached he ciica  ii
+
+Re	ead wih a fwad each
+
+Widw
+
+Ed f he fwad each
+back  a a  ae
+
+v0
+
+Ci0
+
+Widw
+
+Fig. 8. The critical position is reached, in the linear-time algorithm.
+
+102
+
+G. Navarro and M. Rafﬁnot
+
+Widw
+
+v
+
+ a
+
+Ci
+
+Safe hif
+
+(cid:27)
+
+(cid:27)
+
+(cid:27)
+
+Fai  f he each f a fac i (cid:27).
+
+ a
+
+Fwad each f  a.
+
+Ed f he fwad each
+back  he c	e i	ai
+
+v0
+
+Ci
+
+ew widw
+
+Fig. 9. The critical position is not reached, in the linear-time algorithm.
+
+(ii) We do not reach the critical position. This case is shown in Figure 9. This means that
+there cannot be a match in the current window. We start a forward scan from scratch
+at position last, totally retraverse the window and continue until a new backward
+scan seems promising.
+
+6. A Character Skipping Algorithm.
+In this section we explain how to adapt the
+general approach of Section 5 to regular expression searching. We ﬁrst explain a simple
+extension of the basic approach and later show how to keep the worst case linear. Recall
+that we search for a regular expression called R E of size m, which generates the language
+L(R E ).
+
+6.1. Basic Approach. The search in the general approach needs a window of length (cid:5)
+(the shortest pattern we search for). In regular expression searching this corresponds to
+the length of the shortest word of L(R E ). Of course, if this word is ε the problem of
+searching is trivial since every text position matches. We consider in the following that
+(cid:5) > 0.
+
+We use the general approach of Section 5, consisting of a backward and, when we
+reach the beginning of the window, a forward scan. To adapt this scheme to regular
+expression searching, we need two modiﬁcations:
+(i) In the backward search step we recognize any factor of the reverse preﬁxes of length
+(cid:5) of L(R E ). Moreover, we mark in a variable last the longest preﬁx of L(R E )
+recognized (of course this preﬁx will not be longer than (cid:5)).
+
+(ii) The forward search, applied when we reach the beginning of the window, veriﬁes
+whether there is a match of the regular expression starting at the beginning of the
+window. However, the occurrence can be much longer than (cid:5).
+We now detail the steps of the preprocessing and searching phases.
+
+Preprocessing. The preprocessing consists of three steps:
+1. Build the automaton that recognizes R E. We denote it F (R E ), and it is represented
+by the B and T tables as in Section 4.3. The difference with respect to that automaton
+is that this time we do not have an initial self-loop.
+
+New Techniques for Regular Expression Searching
+
+103
+
+P0 ← 0m1 /* the initial state */
+(cid:5) ← 0
+While P(cid:5) &Last = 0m+1 Do
+
+P(cid:5)+1 ← P(cid:5) | T [P(cid:5)]
+(cid:5) ← (cid:5) + 1
+
+Compute P (T , Last)
+1.
+2.
+3.
+4.
+5.
+6.
+7.
+
+End of while
+Return ((cid:5), P)
+
+Precede(i ) ← 0m+1
+For j ∈ 0 . . . m Do
+
+If Follow( j ) & 0m−i 10i
+
+(cid:20)= 0m+1 Then
+Precede(i ) ← Precede(i ) | 0m− j 10 j
+
+Reverse Arrows (Follow)
+For i ∈ 0 . . . m Do
+8.
+9.
+10.
+11.
+12.
+13.
+14.
+15.
+16.
+
+End of for
+Return Precede
+
+End of for
+
+End of if
+
+Fig. 10. Functions used in the preprocessing of the backward search.
+
+2. Determine (cid:5) and compute the set Pi (R E ) of all the nodes of F (R E ) reachable in i
+steps or less from the initial state, for each 0 ≤ i ≤ (cid:5) (so Pi (R E ) ⊆ Pi+1(R E )).
+Both values are easily computed with a breadth-ﬁrst search from the initial state until
+a ﬁnal node is reached ((cid:5) being then the current depth at that point).
+
+3. Build the automaton B(R E ) that recognizes any factor of the reverse preﬁxes of
+length (cid:5) of L(R E ). This is achieved by restricting the original automaton F (R E )
+to the nodes of P(cid:5)(R E ), reversing the arrows, taking as (the only) terminal state the
+initial state of F (R E ) and having all the states as initial states.
+
+Figure 10 gives some auxiliary functions for this preprocessing.
+We focus on B(R E ), our device to recognize the reverse factors of preﬁxes of length
+(cid:5) of L(R E ). It is not hard to see that any such factor corresponds to a path in F (R E )
+that touches only nodes in P(cid:5)(R E ). In B(R E ) there exists the same path with the arrows
+reversed, and since all the states of B(R E ) are initial, there exists a path from an initial
+state that spells out the reversed factor. Moreover, if the factor is a preﬁx, then the
+corresponding path in B(R E ) leads to its ﬁnal state (0).
+
+Note, however, that B(R E ) can recognize more words than desired. For instance,
+if there are loops in B(R E ), then it can recognize words longer than (cid:5). However, we
+can further restrict the set of words recognized by B(R E ). The idea is that if a state of
+B(R E ) is active but it is farther than i positions to the ﬁnal state of B(R E ), and only i
+window characters remain to be read, then this state cannot lead to a match. Hence, if
+we have to read i more characters of the window, we intersect the current active states
+of B(R E ) with the set Pi (R E ).
+
+It is easy to see that, with this modiﬁcation, the automaton recognizes exactly the
+desired preﬁxes, since if a state has not been “killed” by intersecting it with Pi (R E ) it
+is because it is still possible to obtain a useful preﬁx from it. Hence, only the desired
+
+104
+
+G. Navarro and M. Rafﬁnot
+
+(reverse) factors can survive all the process until they arrive at the ﬁnal state and become
+(reverse) preﬁxes.
+
+In fact, an alternative method in this sense would be a classical multipattern algorithm
+to recognize the reverse factors of the set of preﬁxes of length (cid:5) of L(R E ). However, this
+set may be large and the resulting scheme may need much more memory. The automaton
+B(R E ) is a more compact device to obtain the same result.
+
+How to represent B(R E ) deserves further consideration. After reversing the arrows
+of our automaton, it is no longer the result of Glushkov’s construction over a regular
+expression, and in particular the property that all the arrows arriving at a state are labeled
+by the same character does not hold anymore. Hence, our bit-parallel simulation of
+Section 4 cannot be applied.
+
+Fortunately, a dual property holds: all the arrows leaving a state are labeled by the same
+character or class. Hence, if we read a text character σ , we can ﬁrst kill the automaton
+states whose leaving transitions are not labeled by σ , and then take all the transitions
+from them. Let Tb be the T mask corresponding to B(R E ), and let B be the mask of
+F (R E ). Then a transition can be carried out by
+
+δb(D, σ )= Tb[D & B[σ ]].
+
+Searching. The search follows the general approach of Section 5. For each window
+position, we activate all the states of B(R E ) and traverse the window backwards updating
+last each time the ﬁnal state of B(R E ) is reached (recall that after each step we “kill”
+some states of B(R E ) using Pi (R E )). If B(R E ) runs out of active states we shift the
+window to position last. Otherwise, if we reach the beginning of the window, we start
+a forward scan using F (R E ) from the beginning of the window until either a match is
+found,4 we reached the end of the text, or F (R E ) runs out of active states. After the
+forward scan, we shift the window to position last.
+Figure 11 shows the search algorithm. As before, large T tables can be split.
+
+6.2. Linear Worst-Case Extension. We also extended the general linear worst-case
+approach (Section 5.1) to the case of regular expression searching.
+a self-loop at its initial state, for each letter of  (so now it recognizes ∗
+is our forward scanning automaton of Section 4.3.
+
+We transform the forward scan automaton F (R E ) of the previous algorithm by adding
+L(R E )). This
+
+The main difﬁculty in extending the general linear approach is determining where to
+place the window in order not to lose a match. The general approach considers the longest
+preﬁx of the pattern already recognized. However, this information cannot be inferred
+only from the active states of the automaton (for instance, it is not known how many
+times we have traversed a loop). We use an alternative concept: instead of considering
+the longest preﬁx already matched, we consider the shortest path to reach a ﬁnal state.
+This value can be determined from the current set of states. We devise two different
+alternatives that differ on the use of this information.
+window is placed so that it ﬁnishes (cid:5)(cid:9)
+
+Prior to explaining both alternatives, we introduce some notation. In general, the
+characters ahead of the current text position (for
+
+4 Since we report the beginning of matches, we stop the forward search as soon as we ﬁnd a match.
+
+New Techniques for Regular Expression Searching
+
+105
+
+Backward-Search(R E, T = t1t2 . . . tn)
+
+1.
+2.
+3.
+4.
+5.
+6.
+7.
+8.
+9.
+10.
+11.
+12.
+13.
+14.
+15.
+16.
+17.
+18.
+19.
+20.
+21.
+22.
+23.
+24.
+25.
+26.
+27.
+28.
+29.
+30.
+31.
+
+Preprocessing
+
+(vR E , m) ← Parse(R E) /* parse the regular expression */
+Glushkov variables(vR E ,0) /* build the variables on the tree */
+Follow(0) ← First
+T ← BuildT(Follow,m) /* build T table */
+((cid:5), P) ← Compute P(T ,Last)
+Precede ← Reverse Arrows(Follow)
+Tb ← BuildT(Precede, m)
+Searching
+pos ← 0
+While pos ≤ n − (cid:5) Do
+j ← (cid:5), last ← (cid:5)
+D ← P(cid:5)
+While D (cid:20)= 0m+1 AND j > 0 Do
+
+D ← T b[D & B[tpos+ j ]] & Pj−1
+j ← j − 1
+If D & 0m1 (cid:20)= 0m+1 Then /* preﬁx recognized */
+
+If j > 0 Then last ← j
+Else /* check a possible occurrence starting at pos+1 */
+
+D ← 0m1, i ← pos+1
+While i ≤ n AND D & Last= 0m+1 AND D (cid:20)= 0m+1 Do
+D ← T [D] & B[ti ]
+End of while
+If D & Last (cid:20)= 0m+1 Then
+
+Report an occurrence beginning at pos+1
+
+End of if
+
+End of if
+
+End of if
+End of while
+pos ← pos + last
+
+End of while
+
+Fig. 11. Backward search algorithm for regular expressions. Do not confuse the bit mask Last of ﬁnal states
+with the window position last of the last preﬁx recognized.
+
+0 ≤ (cid:5)(cid:9) ≤ (cid:5)). To simplify the exposition, we call this (cid:5)(cid:9)
+window.
+
+the “forward-length” of the
+
+In the ﬁrst alternative the forward-length of the window is the shortest path from an
+active state of F (R E ) to a ﬁnal state (this same idea has been used for multipattern
+matching in [10]). In this case we need to recognize any reverse factor of L(R E ) in
+the backward scan (not only the factors of preﬁxes of length (cid:5)).5 Each time (cid:5)(cid:9)
+is large
+enough to be promising ((cid:5)(cid:9) ≥ α(cid:5), for some heuristically ﬁxed α), we stop the forward
+scan and start a backward scan on a window of forward-length (cid:5)(cid:9)
+(the critical position
+being (cid:5) − (cid:5)(cid:9)
+). If the backward automaton runs out of active states before reaching the
+
+5 A stricter choice is to recognize any reverse factor of any word of length (cid:5)(cid:9)
+F (R E ), but this needs much more space and preprocessing time.
+
+that starts at an active state in
+
+106
+
+G. Navarro and M. Rafﬁnot
+
+critical position, we shift the window as in the general scheme (using the last preﬁx
+found) and restart a fresh forward scan. Otherwise, we continue the previous forward
+scan from the critical position, totally traversing the window and continuing until the
+condition to start a backward scan holds again.
+
+The previous approach is linear in the worst case (since each text position is scanned
+at most once forward and at most once backwards), and it is able to skip characters.
+However, a problem is that all the reverse factors of L(R E ) have to be recognized, which
+makes the backward scans longer and the shifts shorter. Also, the window forward-length
+(cid:5)(cid:9)
+is never larger than our previous (cid:5), since the initial state of F (R E ) is always active.
+The second alternative solves some of these problems. The idea now is that we
+continue the forward scan until all the active states belong to Pi (R E ), for some ﬁxed
+i < (cid:5) (say, i = (cid:5)/2). In this case the forward-length of the window is (cid:5)(cid:9) = (cid:5) − i, since
+it is not possible to have a match before reading that number of characters. Again, we
+select heuristically a minimum (cid:5)(cid:9) = α(cid:5) value. In this case we do not need to recognize
+all the factors. Instead, we can use the already known B(R E ) automaton. Note that the
+previous approach applied to this case (with all active states belonging to Pi (R E )) yields
+different results. In this case we limit the set of factors to be recognized, which allows
+us to shift the window sooner. On the other hand, its forward-length is shorter.
+
+7. Experimental Results. A major problem when presenting experiments on regular
+expressions is that there is no concept of a “random” regular expression, so it is not
+possible to search for, say, 1000 random patterns. Lacking such good choice, we present
+two types of experiments. A ﬁrst type is a kind of “qualitative test”, where we manually
+generate regular expressions of different characteristics in order to show how these
+characteristics affect the performance of our and other algorithms. These tests permit us
+to understand the main factors that inﬂuence the performance, but they say little about
+how the algorithms perform in real life because we focus in showing all the interesting
+cases rather than on more or less “typical cases” in practice. A second type is a real-life
+test, where we choose a set of regular expression patterns from a real application and
+perform a more massive comparison. Another feature of this massive test is that we
+handle in general larger regular expressions.
+
+We have used three different texts: DNA, the DNA sequence of h.influenzae
+with lines cut every 70 characters; English, consisting of writings of B. Franklin, ﬁltered 
+to lower-case; and Proteins, proteic sequences from the TIGR Database (TDB,
+http://www.tigr.org/tdb), with lines cut every 70 characters. All the texts were
+replicated to obtain exactly 10 Mb.
+
+Our machine is a Sun UltraSparc-1 of 167 MHz, with 64 Mb of RAM, running Solaris
+2.5.1. It is a 32-bit machine, so when we use 64-bit masks we are simulating it with two
+32-bit native words. We measured CPU times in seconds, averaging 100 runs over the
+10 Mb (the variance was very low). We include the time for preprocessing in the search
+ﬁgures, except where we show them separately. We show the results in tenths of a second
+per megabyte.
+
+The conclusion of the experiments is that our forward scanning algorithm is better
+than any competing technique on patterns that do not permit enough character skipping.
+On the patterns that do, our backward scanning algorithm is in most cases the best
+
+New Techniques for Regular Expression Searching
+
+107
+
+choice, although depending on the particularities of the pattern other character skipping
+techniques may work better. We also show that our algorithms adapt better than the
+others to long patterns.
+
+A good rule of thumb to determine whether a regular expression R E permits character
+skipping is to consider the length (cid:5) of the shortest string in L(R E ), and then count how
+many different preﬁxes of length ≤ (cid:5) exist in L(R E ). As this number approaches σ (cid:5),
+character skipping becomes more difﬁcult and forward scanning becomes a better choice.
+
+7.1. Qualitative Tests. We divide this comparison into three parts. First, we compare
+different existing algorithms to implement an automaton. These algorithms process all
+the text characters, one by one, and they only differ in the way they keep track of the
+state of the search. Second, we compare, using our automaton simulation, a simple
+forward-scan algorithm against the different variants of backward search proposed, to
+show that backward searching can be faster depending on the pattern. Finally, we compare 
+our backward search algorithm against other algorithms that are also able to skip
+characters.
+
+For this comparison we have ﬁxed a set of 10 patterns for English and 10 for DNA,
+which were selected to illustrate different interesting cases, as explained. The patterns
+are given in Tables 1 and 2. We show their number of letters, which is closely related to
+the size of the automata recognizing them, the minimum length (cid:5) of a match for each
+pattern, and their empirical matching probability (number of matches divided by n).
+The period (.) in the patterns matches any character except the end of line (lines have
+approximately 70 characters).
+
+7.1.1. Forward Scan Algorithms.
+In principle, any forward scan algorithm can be enriched 
+with backward searching to skip characters. Some are easier to adapt than others,
+however. In this experiment we only consider the performance of the forward scan
+methods. The purpose of this test is to evaluate our new forward search algorithm of
+Section 4.3. We have tested the following algorithms for forward scanning (see Section 
+2 for detailed descriptions of previous work). We left aside some algorithms which
+proved uncompetitive, at least for the sizes of the regular expressions we are consid-
+ering: Thompson’s [26] and Myers’ [19]. This last one is more competitive for larger
+patterns, as we show in Section 7.2. We have also left aside lazy deterministic automata
+
+Table 1. The patterns used on DNA.
+
+No.
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+
+Pattern
+
+AC((A|G)T)*A
+AGT(TGACAG)*A
+(A(T|C)G)|((CG)*A)
+GTT|T|AG*
+A(G|CT)*
+((A|CG)*|(AC(T|G))*)AG
+AG(TC|G)*TA
+[ACG][ACG][ACG][ACG][ACG][ACG]T
+TTTTTTTTTT[AG]
+AGT.*AGT
+
+Size
+
+(# letters)
+
+Minimum
+length (cid:5)
+
+6
+10
+7
+6
+4
+9
+7
+7
+11
+7
+
+3
+4
+1
+1
+1
+2
+4
+7
+11
+6
+
+Prob. match
+(empirical)
+0.015710000
+0.002904000
+0.331600000
+0.665100000
+0.382500000
+0.046700000
+0.003886000
+0.033150000
+0.000001049
+0.003109000
+
+108
+
+G. Navarro and M. Rafﬁnot
+
+Table 2. The patterns used on English text.
+
+No.
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+
+Pattern
+
+benjamin|franklin
+benjamin|franklin|writing
+[a-z][a-z0-9]*[a-z]
+benj.*min
+[a-z][a-z][a-z][a-z][a-z]
+(benj.*min)|(fra.*lin)
+ben(a|(j|a)*)min
+be.*ja.*in
+ben[jl]amin
+(be|fr)(nj|an)(am|kl)in
+
+Size
+
+(# letters)
+
+Minimum
+length (cid:5)
+
+16
+23
+3
+8
+5
+15
+9
+8
+8
+14
+
+8
+7
+2
+7
+5
+6
+6
+6
+8
+8
+
+Prob. match
+(empirical)
+0.000035860
+0.000101400
+0.609200000
+0.000007915
+0.202400000
+0.000035860
+0.009491000
+0.000012110
+0.000007915
+0.000035860
+
+implementations. However, as we show in Section 7.1.3, these also tend to be slower
+than ours.
+
+DFA: builds the classical deterministic automaton and runs it over the text. We have
+implemented the scheme using Glushkov’s construction, not minimizing the ﬁnal
+automaton.
+
+Agrep: builds over Thompson’s NFA and uses a bit mask to handle the active states
+[29]. The software [28] is from Wu and Manber. We forced the best choice of
+number of subtables.
+
+Ours-naive: our new algorithm of Section 4.3, building the whole table T with BuildT.
+
+We always use one table.
+
+Ours-optim: our new algorithm where we build only the T mask for the reachable
+
+states, using BuildTrec. We always use one table.
+
+The goal of showing two versions of our algorithm is as follows. Ours-naive builds
+the complete Td table for all the 2m+1 possible combinations (reachable or not) of active
+and inactive states. It permits comparing directly against Agrep and showing that our
+technique is superior. Ours-optim builds only the reachable states and it permits comparing 
+against DFA, the classical algorithm. The disadvantage of Ours-optim is that it
+does not permit splitting the tables (neither does DFA), while Ours-naive and Agrep do.
+Tables 3 and 4 show the results on the different patterns, where we have separated preprocessing 
+and search times. As can be seen, Ours-naive compares favorably in search
+time against Agrep, scanning (averaging over the 20 patterns) 16.0 Mb/s versus about
+13.2 Mb/s of Agrep. In some patterns they are very close and Agrep wins sometimes
+by a few milliseconds (except English pattern 3), but in the rest our approach is much
+faster. Ours-naive works quite well except on large patterns such as English pattern 2.
+Ours-optim behaves well in those situations too, and always compares favorably against
+the classical DFA, which scans the text at 14.4 Mb/s. This means that our new algorithm
+is at least 10% faster than any alternative approach.
+
+In all cases, searching for larger expressions costs more, both in preprocessing and
+in search time, because of the locality of reference. Note that Ours-optim is sometimes
+worse than Ours-naive. This occurs when most states are reachable, in which case Oursnaive 
+ﬁlls them all without the overhead of the recursion. However, this only happens
+when the preprocessing time is negligible.
+
+New Techniques for Regular Expression Searching
+
+109
+
+Table 3. Forward search times on DNA. The times have the form a + bn, where a is the
+
+preprocessing time and b is the search time per megabyte, all in tenths of seconds.
+
+Pattern
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+
+DFA
+
+0.034 + 0.643n
+0.006 + 0.624n
+0.028 + 0.796n
+0.025 + 0.883n
+0.018 + 0.831n
+0.007 + 0.658n
+0.004 + 0.634n
+0.004 + 0.646n
+0.006 + 0.621n
+0.038 + 0.639n
+
+Agrep
+
+0.104 + 0.756n
+0.133 + 0.754n
+0.095 + 0.758n
+0.101 + 0.760n
+0.089 + 0.757n
+0.126 + 0.762n
+0.104 + 0.750n
+0.101 + 0.831n
+0.096 + 0.694n
+0.108 + 0.748n
+
+Ours-naive
+0.009 + 0.584n
+0.049 + 0.566n
+0.007 + 0.759n
+0.012 + 0.788n
+0.005 + 0.755n
+0.014 + 0.584n
+0.015 + 0.571n
+0.008 + 0.583n
+0.005 + 0.568n
+0.011 + 0.560n
+
+Ours-optim
+0.005 + 0.575n
+0.000 + 0.576n
+0.087 + 0.775n
+0.029 + 0.807n
+0.008 + 0.777n
+0.004 + 0.592n
+0.040 + 0.567n
+0.071 + 0.582n
+0.007 + 0.565n
+0.036 + 0.562n
+
+7.1.2. Forward versus Backward Scanning. We now compare our new forward scan
+algorithm (called Fwd in this section and Ours-optim in Section 7.1.1) against backward
+scanning. There are three backward scanning algorithms. The simplest one, presented in
+Section 6.1, is called Bwd. The two linear variations presented in Section 6.2 are called
+LBwd-All (that recognizes all the reverse factors) and LBwd-Pref (that recognizes
+reverse factors of length-(cid:5) preﬁxes). The linear variations depend on a parameter α,
+which is between 0 and 1. We have tested the values 0.25, 0.50 and 0.75 for α. We have
+built only the reachable entries of their Tb tables.
+
+Tables 5 and 6 show the results. The improvements are modest on the DNA patterns
+we selected. This is a consequence of their shortness and high probability of occurrence
+(in particular, the method makes little sense if the minimum length is 1, and therefore
+patterns 3–5 were removed). However, from minimum length 4 or more the backward
+search becomes competitive (with the exception of pattern 8, because it matches with
+very high probability).
+
+The results are much better on our English patterns, where we obtained improvements
+in half of the patterns. In general, the linear versions are quite bad in comparison with the
+simple one, although in some cases they are faster than a forward search. It is difﬁcult
+to determine which of the two versions is better in which cases, and which is the best
+value for α.
+
+Table 4. Forward search times on English. The times have the form a + bn, where a is the
+
+preprocessing time and b is the search time per megabyte, all in tenths of seconds.
+
+Pattern
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+
+DFA
+
+0.010 + 0.633n
+0.022 + 0.629n
+0.003 + 0.932n
+0.068 + 0.639n
+0.009 + 0.879n
+0.242 + 0.645n
+0.007 + 0.631n
+0.081 + 0.628n
+0.000 + 0.627n
+0.012 + 0.632n
+
+Agrep
+
+0.114 + 0.779n
+0.112 + 1.583n
+0.106 + 0.769n
+0.100 + 0.755n
+0.095 + 0.871n
+1.494 + 0.775n
+0.122 + 0.755n
+0.103 + 0.755n
+0.102 + 0.704n
+0.774 + 0.789n
+
+Ours-naive
+0.074 + 0.569n
+20.61 + 0.575n
+0.007 + 0.856n
+0.008 + 0.567n
+0.050 + 0.664n
+0.043 + 0.569n
+0.006 + 0.572n
+0.048 + 0.562n
+0.011 + 0.567n
+0.018 + 0.567n
+
+Ours-optim
+0.009 + 0.563n
+0.019 + 0.569n
+0.022 + 0.898n
+0.000 + 0.578n
+0.000 + 0.684n
+0.013 + 0.567n
+0.001 + 0.578n
+0.027 + 0.556n
+0.002 + 0.565n
+0.005 + 0.561n
+
+110
+
+G. Navarro and M. Rafﬁnot
+
+Table 5. Backward search times on DNA, in seconds for 10 Mb. Preprocessing times are included.
+
+Pattern
+
+1
+2
+6
+7
+8
+9
+10
+
+Fwd
+0.576
+0.576
+0.592
+0.571
+0.589
+0.566
+0.566
+
+Bwd
+0.823
+0.658
+2.066
+0.710
+1.416
+0.265
+1.086
+
+α = 0.25
+1.931
+1.653
+2.572
+1.534
+1.669
+0.591
+1.927
+
+LBwd-All
+α = 0.50
+2.058
+1.648
+3.164
+1.530
+1.702
+0.573
+1.949
+
+α = 0.75 α = 0.25
+1.764
+2.112
+1.478
+1.640
+2.512
+3.147
+1.564
+1.568
+1.707
+1.804
+0.671
+0.559
+2.240
+1.593
+
+LBwd-Pref
+α = 0.50
+1.854
+1.491
+3.043
+1.572
+1.818
+0.669
+1.591
+
+α = 0.75
+1.911
+1.534
+3.013
+1.601
+1.870
+0.668
+1.909
+
+7.1.3. Character Skipping Algorithms. Finally, we consider other algorithms able to
+skip characters. Basically, the other algorithms are based in extracting one or more strings
+from the regular expression, so that some of those strings must appear in any match. A
+single or multiple pattern exact search algorithm is then used as a ﬁlter, and only where
+some string in the set is found is its neighborhood checked for an occurrence of the whole
+regular expression. Two approaches exist:
+
+Single pattern: one string is extracted from the regular expression, so that the string
+must appear inside every match. If this is not possible the scheme cannot be applied.
+We use Gnu Grep v2.4, which implements this idea. Where the ﬁlter cannot be
+applied, Grep uses a forward scanning algorithm based on a lazy deterministic
+automaton (i.e. built on the ﬂy as the text is read). Hence, we plot this value only
+where the idea can be applied. We point out that Grep also abandons a line when
+it ﬁnds the ﬁrst match in it.
+Multiple patterns: this idea was presented in [27]. A length (cid:5)(cid:9) < (cid:5) is selected, and
+all the possible sufﬁxes of length (cid:5)(cid:9)
+of L(R) are generated and searched for. The
+choice of (cid:5)(cid:9)
+is not obvious, since longer strings make the search faster, but there
+are more of them. Unfortunately, the code of [27] is not public, so we have used
+the following procedure: ﬁrst, we extract by hand the sufﬁxes of length (cid:5)(cid:9)
+for
+each regular expression; then we use the multipattern search of Agrep [28], which
+is very fast, to search for those sufﬁxes; and ﬁnally the matching lines are sent
+to Grep, which checks the occurrence of the regular expression in the matching
+lines. We ﬁnd by hand the best (cid:5)(cid:9)
+value for each regular expression. The resulting
+algorithm is quite similar to the idea of [27].
+
+Table 6. Backward search times on English, in seconds for 10 Mb.
+
+Pattern
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+
+Fwd
+0.564
+0.571
+0.900
+0.578
+0.684
+0.568
+0.578
+0.559
+0.565
+0.562
+
+Bwd
+0.210
+0.294
+2.501
+0.589
+1.951
+0.725
+0.250
+0.934
+0.184
+0.216
+
+α = 0.25
+0.442
+1.173
+3.303
+1.702
+2.051
+1.821
+0.459
+1.748
+0.373
+0.421
+
+LBwd-All
+α = 0.50
+0.432
+1.001
+2.591
+1.684
+2.404
+1.846
+0.447
+1.855
+0.368
+0.454
+
+α = 0.75 α = 0.25
+0.468
+0.463
+0.932
+1.092
+3.012
+2.559
+0.941
+1.712
+2.128
+2.094
+1.009
+1.842
+0.511
+0.471
+1.871
+1.333
+0.413
+0.391
+0.438
+0.468
+
+LBwd-Pref
+α = 0.50
+0.489
+0.981
+2.562
+0.928
+2.147
+1.122
+0.519
+1.447
+0.393
+0.461
+
+α = 0.75
+0.499
+0.952
+2.561
+0.917
+2.177
+1.092
+0.510
+1.470
+0.411
+0.483
+
+New Techniques for Regular Expression Searching
+
+111
+
+Table 7. Algorithm comparison on DNA, in seconds for 10 Mb.
+
+Single-pattern
+
+Multipattern
+
+Pattern
+
+1
+2
+6
+7
+8
+9
+10
+
+Fwd
+0.576
+0.576
+0.592
+0.571
+0.589
+0.566
+0.566
+
+Bwd
+0.823
+0.658
+2.066
+0.710
+1.416
+0.265
+1.022
+
+ﬁlter
+1.231
+0.919
+1.060
+1.331
+1.162
+0.202
+0.932
+
+ﬁlter
+2.282
+1.203
+2.248
+1.650
+2.104
+0.310
+1.833
+
+Tables 7 and 8 show the results. The single pattern ﬁlter is a very effective trick, but it
+can be applied only in a restricted set of cases. It improves over Bwd in a couple of cases,
+only one really signiﬁcant. The multipattern ﬁlter, on the other hand, is more general, but
+its times are higher than ours in general, especially where backward searching is better
+than forward searching. Note that, in general, Bwd is the best whenever it is better than
+Fwd.
+
+7.2. A Real-Life Test.
+It is not hard to ﬁnd dozens of examples of regular expression
+patterns used in real life. A quick overview on the Web shows patterns to recognize
+URLs, email addresses, email ﬁelds, IP addresses, phone numbers, zip codes, HTML
+tags, dates, hours, ﬂoating point numbers, programming language variables, comments
+and so on. In general, these patterns are rather small and we have obtained the same
+performance as for our short frequently matching patterns of the previous sections. This
+shows that many real-life patterns would behave as our examples on DNA.
+
+We would like to consider other applications where the above conditions do not
+hold. We have focused on a computational biology application related to peptidic site
+searching, which permits us to experiment with larger patterns.
+
+PROSITE is a well-known set of patterns used for protein searching [13]. Proteins are
+regarded as texts over a 20-letter upper-case alphabet. PROSITE patterns are formed by
+the following items: (i) classes of characters, denoted by the set of characters they match,
+for example [AKDE] is equivalent to (A|K|D|E ); (ii) bounded length gaps, denoted by
+x(a, b), which match any string of length a to b, for example x(1, 3) is equivalent to
+
+Table 8. Algorithm comparison on English, in seconds for 10 Mb.
+
+Single-pattern
+
+Multipattern
+
+Pattern
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+
+Fwd
+0.564
+0.571
+0.900
+0.578
+0.684
+0.568
+0.578
+0.559
+0.565
+0.562
+
+Bwd
+0.210
+0.294
+2.501
+0.589
+1.951
+0.725
+0.250
+0.934
+0.184
+0.216
+
+ﬁlter
+—
+—
+—
+
+0.171
+
+—
+—
+
+0.260
+0.632
+0.193
+0.983
+
+ﬁlter
+0.309
+0.371
+1.648
+0.873
+2.024
+1.003
+0.442
+0.661
+0.307
+0.348
+
+112
+
+G. Navarro and M. Rafﬁnot
+
+(|ε)(|ε). Except for very recent developments [24], PROSITE patterns are searched
+for as regular expressions, so this is quite a real application in computational biology.
+
+Not every PROSITE pattern is interesting for our purposes. In particular, many of
+them have no gaps and hence are in fact linear patterns, very easy to search with much
+simpler algorithms [3], [22]. We also removed eight patterns having more than 64 states
+because they were too few to be representative of these large NFAs. The result is 329
+PROSITE patterns. Those patterns occur too frequently (classes are large and gaps are
+long) to permit any backward search approach, so we consider only forward searching
+in this experiment.
+
+Our forward scanning algorithm is that of Section 4.3. To accommodate up to 64 states,
+we have used a couple of integers (or a long integer) to hold the bit mask of 64 bits. This
+time we have horizontally split the tables into subtables, so the preprocessing is done
+using BuildT. The width of the subtables is limited to 16 bits, so the number of subtables
+is (cid:25)m/16(cid:26), ranging from one to four. For one and two subtables we use specialized code,
+while the cases of three and four tables are handled with a loop sentence. On the other
+hand, using bit masks of 32 bits makes all the operations much faster for the shorter
+patterns that can be accommodated in 32 bits. So, when comparing against algorithms
+that cannot handle more than 32 NFA states, we use our 32-bit-masks version; and when
+comparing against other algorithms we use our slower 64-bit-masks version.
+Figure 12 shows the search time of our algorithm as a function of Glushkov’s NFA
+size (that is, m + 1), both for 32-bit and 64-bit masks. Clear jumps can be seen when
+moving to more subtables. The difference between specialized code for up to two tables
+is also clear. Inside homogeneous areas, the increase in time corresponding to having
+larger subtables is also clear.
+
+We compare those times against other approaches. We start with the full DFA implementation,
+ that is, the DFA is completely built and later used for searching. The code
+was written by ourselves and built over Glushkov’s NFA. We removed all the patterns
+that requested more than 64 Mb of memory for the automaton because they needed more
+than 10 min to be searched for. This left us with only 215 patterns. Figure 13 shows the
+relative performance as a function of the number of states in the NFA. We consider only
+NFAs of up to 32 states in this case, so we compare against our 32-bit version. As can
+
+)
+s
+t
+i
+
+ 
+
+b
+2
+3
+(
+ 
+s
+r
+u
+O
+
+1.2
+
+1.1
+
+1
+
+0.9
+
+0.8
+
+0.7
+
+0.6
+
+0.5
+
+0.4
+
+5
+
+10
+
+20
+
+15
+25
+Glushkov NFA size
+
+30
+
+35
+
+(a)
+
+)
+s
+t
+i
+
+ 
+
+b
+4
+6
+(
+ 
+s
+r
+u
+O
+
+16
+
+14
+
+12
+
+10
+
+8
+
+6
+
+4
+
+2
+
+0
+
+0
+
+10
+
+20
+
+30
+
+40
+
+50
+
+60
+
+70
+
+Glushkov NFA size
+
+(b)
+
+Fig. 12. Our search times as a function of the NFA size (m + 1), using 32-bit masks (a) and 64-bit masks (b).
+
+New Techniques for Regular Expression Searching
+
+113
+
+120
+
+100
+
+80
+
+60
+
+40
+
+20
+
+)
+2
+3
+(
+s
+r
+u
+O
+A
+F
+D
+
+/
+
+5
+
+4.5
+
+4
+
+3.5
+
+3
+
+2.5
+
+2
+
+1.5
+
+)
+2
+3
+(
+s
+r
+u
+O
+A
+F
+D
+
+/
+
+0
+
+5
+
+10
+
+20
+
+15
+25
+Glushkov NFA size
+
+30
+
+35
+
+1
+
+5
+
+10
+
+20
+
+15
+25
+Glushkov NFA size
+
+30
+
+35
+
+(a)
+
+(b)
+
+Fig. 13. Comparison on PROSITE patterns between our algorithm and the full DFA implementation for NFAs
+of up to 32 states. Part (b) shows in detail the patterns where the full DFA implementation is up to ﬁve times
+slower than our algorithm.
+
+be seen, our technique is always faster than a full DFA implementation, which takes an
+unreasonable amount of time for a signiﬁcant number of patterns as their lengths grow.
+Only seven patterns of more than 32 states can be handled by the full DFA implementation 
+using less than 64 Mb. From these seven patterns, six were four to twelve times
+slower than our 64-bit version, so we can say that this method cannot handle in general
+patterns of more than 32 states. That is, the full DFA method does not generalize to long
+regular expressions, and for short ones, we are clearly faster.
+
+In order to test an external DFA implementation, we considered Grep. Since Grep
+took more than 10 min on NFAs of more than 20 states, we considered only those of up
+to 20 states. This left us with 98 patterns. We compared against our 32-bit version, as it
+was more than enough for the patterns that Grep could handle.
+
+Figure 14 shows the results. As can be seen, there were still ﬁve patterns, some with
+as few as 17 states, which were more than 40 times slower than our algorithm. For the
+
+)
+2
+3
+(
+s
+r
+u
+O
+/
+p
+e
+r
+G
+
+10000
+
+1000
+
+100
+
+10
+
+1
+
+0.1
+
+8
+
+10
+
+12
+
+14
+
+16
+
+18
+
+20
+
+22
+
+Glushkov NFA size
+
+(a)
+
+)
+2
+3
+(
+s
+r
+u
+O
+/
+p
+e
+r
+G
+
+1.7
+
+1.6
+
+1.5
+
+1.4
+
+1.3
+
+1.2
+
+1.1
+
+1
+
+0.9
+
+8
+
+10
+
+12
+
+14
+
+16
+
+18
+
+20
+
+22
+
+Glushkov NFA size
+
+(b)
+
+Fig. 14. Comparison on PROSITE patterns between our algorithm and Gnu Grep for NFAs of up to 20 states.
+Part (b) shows in detail the patterns where Gnu Grep implementation is up to two times slower than our
+algorithm.
+
+114
+
+)
+4
+6
+(
+s
+r
+u
+O
+/
+s
+r
+e
+y
+M
+
+5.5
+
+5
+
+4.5
+
+4
+
+3.5
+
+3
+
+2.5
+
+2
+
+1.5
+
+1
+
+0
+
+10
+
+20
+
+30
+
+40
+
+50
+
+60
+
+70
+
+Glushkov NFA size
+
+(a)
+
+G. Navarro and M. Rafﬁnot
+
+)
+2
+3
+(
+s
+r
+u
+O
+p
+e
+r
+g
+A
+
+/
+
+3.8
+3.6
+3.4
+3.2
+3
+2.8
+2.6
+2.4
+2.2
+2
+1.8
+
+8
+
+10
+
+12
+
+14
+
+16
+
+18
+
+20
+
+22
+
+24
+
+26
+
+28
+
+Glushkov NFA size
+
+(b)
+
+Fig. 15. Comparison between our and Myers’ algorithm (a) and Agrep (b) for PROSITE patterns. Our algorithm
+uses masks of 64 bits against Myers and 32 bits against Agrep.
+
+majority, we are about 1.3 times faster for short patterns and about 1.1 times faster for
+patterns needing two table accesses. In three cases Grep was up to 5% faster than us.
+Observe, however, that Grep cannot handle longer patterns and that, even in the area
+shown, it can give rise to surprises with exceedingly long execution times.
+
+We now compare our algorithm against Myers’ [19]. The code, from Myers, builds an
+NFA of DFAs based on Thompson’s construction. The main purpose of this comparison
+is to compare two different mechanisms to handle large patterns, so we have used only the
+64-bit version of our code. As can be seen in Figure 15(a), our table splitting technique
+is not only a simpler, but also a more efﬁcient, mechanism to handle longer patterns than
+Myers’. Our technique is two to ﬁve times faster for NFAs of up to 32 states (where we
+handcode the use of one or two tables), and about 1.5 times faster for up to 64 states,
+where we use a normal loop to update the bit mask.
+
+Finally, we show a comparison against Agrep software [29], [28] by Wu and Manber,
+where we have respected its original decisions about splitting tables. Agrep is limited
+to Thompson NFAs of less than 32 states, so only some patterns could be tested and we
+only show our 32-bit code. Figure 15(b) shows the comparison, where it can be seen that
+we are twice as fast on short patterns and around three times faster for longer patterns.
+This shows the superiority of Glushkov-based over Thompson-based constructions.
+
+It is important to notice that the results on bit-parallel algorithms improve with technological 
+progress, whereas those on classical algorithms do not. For example, if we ran
+our experiments on a 64-bit machine, our search times on 64-bit masks would be as good
+as those on 32-bit masks (apart from the effects on the number of tables used).
+
+8. Conclusions. We have presented new techniques and algorithms for faster regular
+expression searching. We have shown how to represent a DFA in a compact form and
+how to manipulate an automaton in order to permit skipping text characters at search
+time. These techniques yield fast and simple search algorithms, which we have shown
+experimentally to be faster than previous approaches in most cases.
+
+Bit-parallelism has been an essential tool in recent research on regular expression
+searching, and our work is not an exception. The ﬂexibility of bit-parallelism permits
+
+New Techniques for Regular Expression Searching
+
+115
+
+extending the search problem, for example to permit a limited number of errors in the
+occurrences of the regular expression, and it has been demonstrated in pattern matching
+software such as Agrep [28] and Nrgrep [20]. The latter is built on the ideas presented
+in this paper. Also, it extends Grep’s idea of selecting a necessary string, so it chooses
+the most promising subgraph of the NFA for scanning.
+
+The preprocessing time is a subject of future work. Very long patterns need heavy
+use of table splitting, which worsens the search times, and other approaches may be
+preferable.
+
+Finally, we point out that there is some recent work on reducing the number of states
+of NFAs [7], [15], and on restricting these types of reductions in order to retain the
+useful properties of Glushkov construction (especially that of Lemma 2), which permits
+applying the compact DFA representation we propose in this paper [14].
+
+References
+
+[1] A. Aho, R. Sethi, and J. Ullman. Compilers: Principles, Techniques and Tools. Addison-Wesley,
+
+Reading, MA, 1985.
+
+[2] A. V. Aho and M. J. Corasick. Efﬁcient string matching: an aid to bibliographic search. Communications
+
+of the ACM, 18(6):333–340, 1975.
+
+[3] R. Baeza-Yates and G. Gonnet. A new approach to text searching. Communications of the ACM,
+
+35(10):74–82, 1992.
+
+[4] G. Berry and R. Sethi. From regular expression to deterministic automata. Theoretical Computer
+
+Science, 48(1):117–126, 1986.
+
+[5] A. Br¨uggemann-Klein. Regular expressions into ﬁnite automata. Theoretical Computer Science,
+
+[6]
+
+[7]
+
+120(2):197–213, 1993.
+J.-M. Champarnaud. Subset construction complexity for homogeneous automata, position automata
+and ZPC-structures. Theoretical Computer Science, 267:17–34, 2001.
+J.-M. Champarnaud and F. Coulon. NFA reduction algorithms by means of regular inequalities. In
+Proceedings of DLT 2003, LNCS 2710, pages 194–205. Springer-Verlag, Berlin, 2003.
+
+[8] C.-H. Chang and R. Paige. From regular expression to DFAs using NFAs. In Proceedings of the 3rd
+Annual Symposium on Combinatorial Pattern Matching (CPM), LNCS 664, pages 90–110. SpringVerlag,
+ Berlin, 1992.
+
+[9] B. Commentz-Walter. A string matching algorithm fast on the average.
+
+In Proceedings of the 6th
+International Colloquium on Automata, Languages and Programming (ICALP), LNCS 6, pages 118–
+132. Springer-Verlag, Berlin, 1979.
+
+[10] M. Crochemore, A. Czumaj, L. Gasieniec, S. Jarominek, T. Lecroq, W. Plandowski, and W. Rytter.
+Fast practical multi-pattern matching. Rapport 93–3, Institut Gaspard Monge, Universit´e de Marne la
+Vall´ee, 1993.
+
+[11] A. Czumaj, M. Crochemore, L. Gasieniec, S. Jarominek, Thierry Lecroq, W. Plandowski, and W. Rytter.
+
+Speeding up two string-matching algorithms. Algorithmica, 12:247–267, 1994.
+
+[12] V.-M. Glushkov. The abstract theory of automata. Russian Mathematical Surveys, 16:1–53, 1961.
+[13] K. Hofmann, P. Bucher, L. Falquet, and A. Bairoch. The PROSITE database, its status in 1999. Nucleic
+
+Acids Research, 27:215–219, 1999.
+
+[14] L. Ilie, G. Navarro, and S. Yu. On NFA reductions. In Theory is Forever (Salomaa Festschrift), LNCS
+
+3113, pages 112–124. Springer-Verlag, Berlin, 2004.
+
+[15] L. Ilie and S. Yu. Reducing NFAs by invariant equivalences. Theoretical Computer Science, 306:373–
+
+390, 2003.
+
+[16] D. E. Knuth, J. H. Morris, and V. R. Pratt. Fast pattern matching in strings. SIAM Journal on Computing,
+
+6(1):323–350, 1977.
+
+[17] T. Lecroq. Experimental results on string matching algorithms. Software Practice and Experience,
+
+25(7):727–765, 1995.
+
+[18] M. Mohri. String matching with automata. Nordic Journal of Computing, 4(2):217–231, 1997.
+
+116
+
+G. Navarro and M. Rafﬁnot
+
+[19] E. Myers. A four-Russian algorithm for regular expression pattern matching. Journal of the ACM,
+
+39(2):430–448, 1992.
+
+[20] G. Navarro. NR-grep: a fast and ﬂexible pattern matching tool. Software Practice and Experience
+
+(SPE), 31:1265–1312, 2001.
+
+[21] G. Navarro and M. Rafﬁnot. Fast regular expression search. In Proceedings of the 3rd Workshop on
+
+Algorithm Engineering (WAE ’99), LNCS 1668, pages 199–213. Springer-Verlag, Berlin, 1999.
+
+[22] G. Navarro and M. Rafﬁnot.
+
+and sufﬁx automata.
+http://www.jea.acm.org/2000/NavarroString.
+
+Fast and ﬂexible string matching by combining bit-parallelism
+(JEA), 5(4), 2000.
+
+ACM Journal of Experimental Algorithmics
+
+[23] G. Navarro and M. Rafﬁnot. Compact DFA representation for fast regular expression search.
+
+In
+Proceedings of the 5th Workshop on Algorithm Engineering (WAE ’01), LNCS 2141, pages 1–12.
+Springer-Verlag, Berlin, 2001.
+
+[24] G. Navarro and M. Rafﬁnot. Fast and simple character classes and bounded gaps pattern matching, with
+applications to protein searching. Journal of Computational Biology, 10(6):903–923, 2003. Earlier
+version in Proceedings of RECOMB 2001.
+
+[25] M. Rafﬁnot. On the multi-backward dawg matching algorithm (MultiBDM). In Proceedings of the
+4th South American Workshop on String Processing (WSP), pages 149–165. Carleton University Press,
+Ottawa, 1997.
+
+[26] K. Thompson. Regular expression search algorithm. Communications of the ACM, 11(6):419–422,
+
+1968.
+
+[27] B. Watson. Taxonomies and Toolkits of Regular Language Algorithms. Ph. D. dissertation, Eindhoven
+
+University of Technology, 1995.
+
+[28] S. Wu and U. Manber. Agrep – a fast approximate pattern-matching tool. In Proceedings of the USENIX
+
+Technical Conference, pages 153–162, 1992.
+
+[29] S. Wu and U. Manber. Fast text searching allowing errors. Communications of the ACM, 35(10):83–91,
+
+1992.
+
+[30] A. Yao. The complexity of pattern matching for a random string. SIAM Journal on Computing,
+
+8:368–387, 1979.
+
+

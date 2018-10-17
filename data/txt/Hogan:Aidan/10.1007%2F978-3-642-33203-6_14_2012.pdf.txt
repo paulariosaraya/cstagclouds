@@ -1,0 +1,1403 @@
+Improving the Recall of Live Linked Data
+
+Querying through Reasoning
+
+Jürgen Umbrich1, Aidan Hogan1, Axel Polleres2, and Stefan Decker1
+
+1 Digital Enterprise Research Institute, National University of Ireland, Galway
+
+2 Siemens AG Österreich, Siemensstrasse 90, 1210 Vienna, Austria
+
+{Jürgen.Umbrich,Aidan.Hogan,Stefan.Decker}@deri.org,
+
+axel.polleres@siemens.com
+
+Abstract. Linked Data principles allow for processing SPARQL queries
+on-the-ﬂy by dereferencing URIs. Link-traversal query approaches for
+Linked Data have the beneﬁt of up-to-date results and decentralised
+execution, but operate only on explicit data from dereferenced documents,
+ aﬀecting recall. In this paper, we show how inferable knowledge—
+speciﬁcally that found through owl:sameAs and RDFS reasoning—can
+improve recall in this setting. We ﬁrst analyse a corpus featuring 7 million
+Linked Data sources and 2.1 billion quadruples: we (1) measure expected
+recall by only considering dereferenceable information, (2) measure the
+improvement in recall given by considering rdfs:seeAlso links as previous
+proposals did. We further propose and measure the impact of additionally 
+considering (3) owl:sameAs links, and (4) applying lightweight RDFS
+reasoning for ﬁnding more results, relying on static schema information.
+We evaluate diﬀerent conﬁgurations for live queries covering diﬀerent
+shapes and domains, generated from random walks over our corpus.
+
+1 Introduction
+
+Recently, a rich lode of RDF data has been published on the Web as Linked Data
+by governments, academia, industry, communities and individuals alike [15].
+Publishing Linked Data is governed by four principles, here summarising [2]:
+P1 use URIs to name things, such that P2 those URIs can be dereferenced via
+HTTP, such that P3 dereferencing yields useful RDF content about that which
+is named, such that P4 the returned content includes links (mentions external
+URIs) for further discovery. Given that the URIs used to name resources map
+(through HTTP) to the physical location of structured information about them,
+information published as Linked Data can be viewed as forming a scale-free,
+decentralised database, consisting of millions of structured Web documents [13].
+Further still, thanks to the provision of typed “RDF links” between such documents 
+[15, § 4.5], agents can traverse and navigate the resulting Web of Data in
+a manner analogous to browsing through the Web of Documents.
+
+Tangentially, SPARQL [22]—the W3C standardised RDF query language—
+provides the declarative means to formulate structured queries against these
+data. Traditional approaches for posing queries against Linked Data retrieve
+and cache data in local indexes; however, the dynamicity and scope of Web data
+
+M. Krötzsch and U. Straccia (Eds.): RR 2012, LNCS 7497, pp. 188–204, 2012.
+c(cid:2) Springer-Verlag Berlin Heidelberg 2012
+
+Improving the Recall of Live Linked Data Querying through Reasoning
+
+189
+
+implies that results are often stale or missing. Hartig et al. [12] propose using
+dereferenceable URIs in a SPARQL query—and recursively, in the intermediate
+results—to automatically determine a focussed set of sources that, by Linked
+Data principles, are likely to be query relevant, retrieving them live from the
+Web at query-time and processing them for answers. By operating over compliant
+Linked Data, their approach bypasses the need for source graphs to be explicitly
+named or pre-indexed, allowing for ad hoc, live discovery. Later work [10] calls
+this approach Link Traversal Based Query Execution (LTBQE). A core challenge
+for LTBQE is to identify, retrieve and process a minimal number of sources that
+yield maximal results, keeping response times low while maximising answers.
+
+In this paper, we ﬁrst reintroduce the LTBQE approach, and highlight the
+core assumptions under which it operates well. We then show to what extent
+these assumptions hold in practice—i.e., measuring how much data is attainable 
+from dereferencing—through empirical analysis of a corpus of ∼7.4 m RDF
+Web documents. We further propose extensions of LTBQE to (i) minimise the
+number of sources accessed by being more selective about links followed; (ii)
+increase recall by considering some lightweight semantics of Linked Data that
+allow for (ii.a) ﬁnding additional query-relevant sources and data through consideration 
+of owl:sameAs links, and (ii.b) ﬁnding additional query-relevant data
+through rule-based materialisation with respect to a lightweight subset of RDFS
+(viz. ρDF [20]). We measure the expected eﬀect on recall for each of these extensions 
+through similar analysis of our data. Finally, we generate a diverse set
+of benchmark queries from our corpus and run them live over remote sources,
+comparing diﬀerent LTBQE conﬁgurations and extensions.
+
+2 Background and Related Work
+
+Traditional approaches to query Linked Data locally replicate the content of
+remote Linked Data sources and execute SPARQL queries over the local copy.
+In previous years, we supported such a service powered by YARS2 [9] allowing
+for querying over millions of RDF Web documents (and their entailments), but
+discontinued the endpoint due to prohibitive running costs. Current centralised
+SPARQL endpoints harvesting Linked Data include “FactForge” [3]1 (powered
+by BigOWLIM [4]), OpenLink’s LOD cache2 and Sindice’s “Semantic Web In-
+dex” [21]3 (both powered by Virtuoso [7]). The primary targets for these engines
+are (i) to have a broad coverage of the Web of Data, (ii) to keep results up to
+date, (iii) to have fast response times. These objectives are (partially) met using
+distribution techniques, replication, optimised indexes, compression techniques,
+data synchronisation, and so forth [4, 7, 9, 21]. However, maintaining a broad,
+up-to-date and optimised local index is a Sisyphean task.
+
+Federated SPARQL engines execute queries over a group of independent endpoints,
+ dividing and routing sub-queries to individual endpoints [1,23,24]. Given
+1 http://factforge.net/sparql
+2 http://lod.openlinksw.com/sparql
+3 http://sparql.sindice.com/
+
+190
+
+J. Umbrich et al.
+
+the recent spread of SPARQL endpoints on the Web of Data, federation is a
+timely topic and enjoys increasing attention. However, our techniques operate
+over raw source documents, not SPARQL endpoints.
+
+Recently, various authors have proposed methods for performing live querying,
+ accessing remote data at runtime. Ladwig and Tran [17] categorise these
+approaches as follows: (i) top-down query evaluation, (ii) bottom-up query evaluation,
+ and (iii) mixed strategy query evaluation. Top-down evaluation determines
+remote, query-relevant sources using a source-selection index: a local repository 
+summarising information about sources that can vary from inverted-index
+structures [19, 21], to query-routing indexes [26], schema-level indexes [25], or
+lightweight hash-based structures [27]. The bottom-up query evaluation strategy
+involves discovering relevant sources on-the-ﬂy during the evaluation of queries
+by selectively and recursively following links starting from a “seed set” of URIs
+taken from the query [12]. The third strategy uses (in a top-down fashion) some
+knowledge about sources to generate the seed list, then discovering additional
+relevant sources using a bottom-up approach [17]. All such approaches rely on
+time-consuming remote lookups, but conversely oﬀer fresh results.
+
+An appealing use-case for live querying is to combine both centralised and
+live querying results: to complement the fast but potentially stale results of a
+centralised engine with slower but fresher live results. A number of works have
+tackled this combination on a variety of levels (see, e.g., [13, 18, 28]).
+
+3 Preliminaries
+
+We now present some preliminaries. Before we continue, we introduce a motivating 
+example that will be used to explain the concepts involved: Figure 1 illustrates 
+an RDF (sub)graph taken from four (real) interlinked sources on the Web
+of Data. The graph contains structured information about one publication (dblp-
+Pub:HartigBF09), “four” people (oh:olaf, cb:chris, dblpAuth:Olaf_Hartig,
+dblpAuth:Christain_Bizer) and four dereferenceable documents.
+
+Presented below Figure 1 are three example queries. For Query 1, the LTBQE
+approach dereferences oh:olaf, ﬁnds cb:chris as a binding, and dereferences it
+to look for depictions; however the URI does not dereference, and so the LTBQE 
+resorts to following the rdfs:seeAlso link, as supported in the original proposal 
+[12]. For Query 2, oh:olaf is again dereferenced, the FOAF ﬁle of cb:chris
+is found through a see-also link; however, to traverse further and ﬁnd answers,
+the query-processor needs to traverse the owl:sameAs link and also support the
+semantics thereof. We propose and evaluate this extension later. Finally, the
+FOAF vocabulary deﬁnes foaf:name to be a sub-property of rdfs:label, where
+RDFS reasoning is required to answer Query 3; we also propose this extension.
+We now formally deﬁne these concepts, covering preliminaries relating to RDF
+
+and Linked Data (§ 3.1), SPARQL (§ 3.2) and RDFS & OWL (§ 3.3).
+
+3.1 RDF and Linked Data
+We ﬁrst provide some notation for dealing with RDF and Linked Data principles.
+
+Improving the Recall of Live Linked Data Querying through Reasoning
+
+191
+
+"Olaf Hartig"
+
+rdfs:label,
+ foaf:name
+
+dblpAuthP:Olaf_Hartig
+
+ohDoc:
+
+http://....
+
+foaf:img
+
+oh:olaf
+
+foaf:name
+
+o wl:sa m e A s
+
+dblpAuth:Olaf_Hartig
+
+dc:creator
+foaf:maker
+
+dblpPub:HartigBF09
+
+foaf:knows
+
+dc:creator   foaf:maker
+
+dblpAuthP:Christian_Bizer
+
+rdfs:seeAlso
+
+cbDoc:
+
+cb:chris
+
+owl:sameAs
+
+dblpAuth:Christian_Bizer
+
+foaf:depiction
+
+http://....
+
+foaf:name
+
+"Chris Bizer"
+
+dblpPub     =http://dblp.l3s.de/d2r/resource/publications/conf/semweb/
+dblpAuth =http://dblp.l3s.de/d2r/resource/authors/
+dblpAuthP. =http://dblp.l3s.de/d2r/page/authors/
+oh              =http://olafhartig.de/foaf.rdf#   ohDoc..=http://olafhartig.de/foaf.rdf
+cb      .... =http://www.bizer.de#              cbDoc..=http://www4.wiwiss.fu-berlin.de/bizer/foaf.rdf
+
+dereferenceable
+
+Fig. 1. Snapshot of a sub-graph from the Linked Open Data Web
+
+SELECT ?f ?img WHERE {
+
+oh:olaf foaf:knows ?f .
+?f foaf:depiction ?img }
+
+SELECT ?f WHERE {
+
+oh:olaf foaf:knows ?f .
+?pub dc:creator ?f, oh:olaf }
+
+SELECT ?f ?l WHERE {
+oh:olaf foaf:knows ?f .
+?f rdfs:label ?l }
+
+Query 1. Friends’ images
+
+Query 2. Coauthors
+
+Query 3. Friends’ labels
+
+Deﬁnition 1 (RDF Term, Triple and Graph).
+The set of RDF terms consists of the set of URIs U, the set of blank-nodes
+B and the set of literals L. An RDF triple t := (s, p, o) is an element of the
+set G := UB × U × UBL (where, e.g., UB is a shortcut for set-union). A set
+of RDF triples G ⊂ G is called an RDF graph. We use the functions subj(G),
+pred(G), obj(G), terms(G), to denote the set of all terms projected from the resp.
+triple position (terms gives all positions).
+
+Deﬁnition 2 (Data Source and Linked Dataset).
+We deﬁne the http-download function get : U → 2G as the mapping from URIs
+to RDF graphs provided by means of HTTP lookups that directly return status
+code 200 OK and data in a suitable RDF format. We deﬁne the set of (RDF)
+data sources S ⊂ U as the set of URIs S := {s ∈ U : get(s) (cid:6)= ∅}. We deﬁne a
+Linked Dataset as Γ ⊂ get; i.e., a ﬁnite set of pairs (u, get(u)), and merge(Γ ) :=
+(cid:2)
+(u,G)∈Γ G as the RDF merge of graphs in Γ , which preserves the uniqueness
+
+of blank-node labels across graphs [14].
+
+Deﬁnition 3 (Dereferencing RDF). A URI may issue a HTTP redirect to
+another URI with a 30x response code; we denote this function as redir : U →
+U, which strips the fragment identiﬁer of a URI (if present) and which would
+(thereafter) map a URI to itself in the case of failure (e.g., where no redirect
+exists). We denote the ﬁxpoint of redir as redirs, denoting traversal of a number
+of redirects (a limit may be imposed to avoid cycles). We denote dereferencing by
+the composition deref := get◦redirs, which maps a URI to an RDF graph retrieved
+with status code 200 OK after following redirects, or which maps a URI to the
+
+192
+
+J. Umbrich et al.
+
+empty set in the case of failure. We denote the set of dereferenceable URIs as
+D := {d ∈ U : deref(d) (cid:6)= ∅}; note that S ⊂ D and we place no expectations on
+what deref(d) returns (as long as it returns some valid RDF).
+Taking Figure 1, e.g., redir(oh:olaf) = ohDoc:, deref(oh:olaf) = deref(ohDoc:) =
+{(oh:olaf, foaf:name, "Olaf Hartig") . . .} and deref(cb:chris) = ∅.
+
+3.2 SPARQL
+
+We now introduce some concepts relating to SPARQL [22]. Note that herein, we
+focus on evaluating simple, conjunctive, basic graph patterns (BGPs) .
+
+Deﬁnition 4 (Variables, Triple Patterns and Queries (BGPs)).
+Let V be the set of variables ranging over UBL. A triple pattern tp := (s, p, o)
+is an element of the set Q := VUL × VU × VUL. For simplicity, we do not
+consider blank-nodes in triple patterns (they could be replaced with variables). A
+ﬁnite (herein, non-empty) set of triple patterns Q ⊂ Q is called a Basic Graph
+Pattern, or herein, simply a query. We use vars(Q) ⊂ V to denote the set of
+variables in Q. Finally, we may overload graph notation where, e.g., terms(Q)
+returns all elements of VUL in Q.
+
+Deﬁnition 5 (SPARQL solutions).
+Call the partial function μ : dom(μ) ∪ UL → UBL a solution mapping, which
+binds variables in dom(μ) ⊂ V to UBL and which is the identify function for
+UL. Overloading notation, let μ : Q → G and μ : 2Q → 2G also resp. denote a
+solution mapping from triple patterns to RDF triples, and basic graph patterns to
+RDF graphs such that μ(tp) := (μ(s), μ(p), μ(o)) and μ(Q) := {μ(tp) | tp ∈ Q}.
+Now, we deﬁne the set of solutions for a query Q over a Linked Dataset Γ as
+Ω(Γ, Q) := {μ | μ(Q) ⊆ merge(Γ ) ∧ dom(μ) = vars(Q)}. Note that herein, and
+unlike SPARQL, solutions are given as sets (not multi-sets), implying a default
+DISTINCT semantics for queries.
+Taking an example, if we let Γ be Figure 1 and Q be Query 3, then Ω(Γ, Q) =
+{(?f, cb:chris), (?l, "Chris Bizer")}.
+
+3.3 RDFS and OWL
+
+We deﬁne some preliminaries relating to RDFS and OWL. In particular, we support 
+a miniature subset of OWL 2 RL/RDF rules for supporting owl:sameAs
+entailments, given in Table 1. Our RDFS rules are the subset of ρDF rules proposed 
+by Muñoz et al. [20], which deal with instance data entailments.4 Our
+subset of OWL rules are speciﬁcally chosen to support the semantics of equality 
+(particularly replacement) for owl:sameAs. Note that these rules support
+the RDFS/OWL features originally recommended for use by Bizer et al. when
+publishing Linked Data [5, §4.2, §6]. The rules we consider are given in Table 1.
+4 We drop implicit typing [20] rules but allow generalised RDF in interim inferences.
+
+Improving the Recall of Live Linked Data Querying through Reasoning
+
+193
+
+Table 1. ρDF and owl:sameAs rules with OWL 2 RL/RDF naming
+
+Head
+
+Body
+
+ID
+prp-spo1 ?p1 rdfs:subPropertyOf ?p2 . ?s ?p1 ?o . ?s ?p2 ?o .
+prp-dom ?p rdfs:domain ?c . ?s ?p ?o .
+prp-rng ?p rdfs:range ?c . ?s ?p ?o .
+cax-sco
+?c1 rdfs:subClassOf ?c2 . ?s a ?c1 .
+eq-sym
+?x owl:sameAs ?y .
+eq-trans ?x owl:sameAs ?y . ?y owl:sameAs ?z .
+?s owl:sameAs ?s(cid:2) . ?s ?p ?o .
+eq-rep-s
+eq-rep-p ?p owl:sameAs ?p(cid:2) . ?s ?p ?o .
+eq-rep-o ?o owl:sameAs ?o(cid:2) . ?s ?p ?o .
+
+?p a ?c .
+?o a ?c .
+?s a ?c2 .
+?y owl:sameAs ?x .
+?x owl:sameAs ?z .
+?s(cid:2) ?p ?o .
+?s ?p(cid:2) ?o .
+?s ?p ?o(cid:2) .
+
+Deﬁnition 6 (Entailment Rules and Closure). Given a ruleset R and
+a Linked Dataset Γ , we denote by RΓ := Γ ∪ (υ, G) the closure of Γ wrt. R,
+where (abusing notation) G contains the materialised inferences from recursively
+applying the rules in R over merge(Γ ) (cid:12) G up to a ﬁxpoint, and where υ is a
+built-in URI for naming the materialised graph.
+
+4 Link Traversal Based Query Execution
+
+We ﬁrst introduce the Link Traversal Based Query Execution (LTBQE) approach 
+introduced by Hartig et al. [12] (§ 4.1), and then look at extensions of
+the approach (§ 4.2). Our formalisms are tailored for the purpose of this work;
+a comprehensive study of semantics and computability is presented in [11].
+
+4.1 Baseline LTBQE
+
+Deﬁnition 7 (LTBQE Query Relevant Sources and Answers). Deﬁne
+derefs : 2U → U × 2G; U (cid:13)→ {(redirs(u), deref(u)) | u ∈ U)} as the mapping from
+a set of URIs to the Linked Dataset it represents by dereferencing all URIs.
+Given a BGP query Q as before, let UQ := terms(Q) ∩ U denote the set of
+:= derefs(UQ) represent the dataset retrieved by
+URIs appearing in Q. Let Γ Q
+dereferencing all query URIs.5 Next let uris(μ) := {u ∈ U | ∃v s.t. (v, u) ∈ μ}
+0
+denote the set of URIs in a solution mapping μ, and let Ui := {u ∈ uris(μ) |
+∃μ,∃tp ∈ Q s.t. μ({tp}) ⊆ merge(Γ Q
+i−1)} for i ∈ N be the set of URIs that
+appear as a solution mapping for a triple pattern in Q for the dataset Γ Q
+i−1, and
+let Γ Q
+0 .6 The set of LTBQE query relevant sources for Q
+i
+is given as the least n such that Γ Q
+n+1, denoted simply Γ Q. The set of
+LTBQE query answers for Q is given as Ω(Γ Q, Q), or simply ΩQ.
+
+:= derefs(Ui) ∪ Γ Q
+
+n = Γ Q
+
+With regards to completeness, let get denote the dataset (theoretically) represented 
+by the entire Web of Data (note: get ⊂ U× 2G). One may then ask when
+ΩQ is complete with respect to get. A trivial suﬃcient condition for completeness
+5 One could consider Γ Q
+6 Or, equivalently (for static data) Γ Q
+
+0 as also containing “seed” data [12].
+
+i−1 ∪ derefs(Ui \ Ui−1).
+
+:= Γ Q
+
+i
+
+194
+
+J. Umbrich et al.
+
+SELECT * WHERE { cb:chris ?p ?o . }
+
+Query 4. Not dereferenceable
+
+SELECT ?olaf ?name WHERE {
+
+oh:olaf foaf:name ?name . ?olaf foaf:name ?name . }
+
+Query 5. Connected by literal
+
+SELECT ?s WHERE { ?s owl:sameAs dblpAuth:Olaf_Hartig . }
+
+Query 6. Not in dereferenceable document
+
+SELECT ?paper WHERE {
+
+cb:chris owl:sameAs ?dblpC .
+oh:olaf owl:sameAs ?dblpO .
+?dblpC foaf:maker ?paper .
+?dblpO foaf:maker ?paper .
+
+}
+
+Query 7. Query answer
+only reachable from the
+seed URI oh:olaf
+
+is given by Γ Q = get; such a case is, however, infeasible. Otherwise the completeness 
+condition is rather simple and entirely unveriﬁable: Γ Q must contain
+all of the data relevant on the Web to answer the query. Of course, verifying that
+the condition does not hold is signiﬁcantly easier in many cases. The implications 
+are that: ﬁrst, given a query with no dereferenceable URIs, LTBQE cannot
+return results (as per Query 4 where cb:chris does not dereference). Second,
+given a query with multiple URIs, diﬀerent reachability conditions can occur
+from diﬀerent starting points (as per Query 7 where the answer is only reachable 
+starting from ol:olaf); thus, all query URIs must be initially retrieved [12].
+Third, answers “connected” by literals or involving blank-nodes in unreachable
+documents will often aﬀect completeness (as per Query 5 where the answer is
+connected by the literal "Olaf Hartig"’, here not yet considering owl:sameAs).
+Fourth, in the general case, reachability is heavily dependent on the amount of
+data returned by the deref(u) function, which would ideally return all triples
+mentioning u on the Web of Data (e.g., in Query 6, the owl:sameAs inlinks for
+dblpAuth:Olaf_Hartig are not in its dereferenced document and will not be
+found). The fourth assumption is clearly idealised; hence, in Section 5 we will
+empirically analyse how much the assumption holds in practice, giving insights
+into the recall of LTBQE. First, however, we propose our reasoning extensions.
+
+4.2 Extending LTBQE
+1. Following rdfs:seeAlso: The ﬁrst extension to LTBQE is proposed by Hartig
+et al., and uses rdfs:seeAlso links to extend the set of query sources. Adapting
+Deﬁnition 7, let ¯Γ Q
+
+0 and let:
+
+0 := Γ Q
+
+¯Ui := Ui ∪ {u ∈ U | ∃u(cid:4) ∈ Ui s.t. (u(cid:4), rdfs:seeAlso, u) ∈ merge( ¯Γ Q
+
+i−1)} ,
+
+i
+
+:= derefs( ¯Ui)∪Γ Q
+
+let ¯Γ Q
+0 , and ﬁnally let ¯Γ Q be the ﬁxpoint as before and let ¯ΩQ
+be the respective solutions. This extends LTBQE to ﬁnd more sources through
+rdfs:seeAlso links. An example for this has been presented in Query 1.
+
+2. Following and Reasoning Over owl:sameAs: We propose an extension of LTBQE 
+to consider owl:sameAs inferences. Let R denote the set of rules of the
+
+Improving the Recall of Live Linked Data Querying through Reasoning
+
+195
+
+form eq-* in Table 1. Let now eΓ Q
+from Def. 7), and let:
+
+0 := RΓ Q
+
+0 (recalling RΓ from Def. 6 and Γ Q
+
+0
+
+i := {u ∈ uris(μ) | ∃μ,∃tp ∈ Q s.t. μ({tp}) ⊆ merge(eΓ Q
+U(cid:4)
+eUi := {u ∈ U | ∃u(cid:4) ∈ U(cid:4)
+:= Rderefs(eUi)∪ eΓ Q
+
+i−1)} ,
+i s.t. (u(cid:4), owl:sameAs, u) ∈ merge(eΓ Q
+
+where eΓ Q
+0 , and ﬁnally let eΓ Q be the ﬁxpoint as before and
+i
+let eΩQ be the respective solutions. Here, owl:sameAs links are used to expand
+the set of query relevant sources, and owl:sameAs rules are used to materialise
+inferable knowledge given by the OWL semantics, potentially generating additional 
+answers. An example for this has been presented in Query 2.
+
+i−1)} ,
+
+3. Reasoning for ρDF: We propose a ﬁnal novel extension of LTBQE to consider
+a subset of RDFS reasoning as per the prp-* and cax-sco rules in Table 1, which
+we again denote here by R. We currently consider a static set of schema data
+representing vocabularies on the Web, which we denote by Γ voc. This serves
+as input into the LTBQE algorithm. In future work, we plan to investigate
+dereferencing schema knowledge live from the Web of Data.
+
+Now, adapting Deﬁnition 7, let ρΓ Q
+
+0 := Γ voc ∪ RΓ Q
+
+0 and let:
+
+ρUi := {u ∈ uris(μ) | ∃μ,∃tp ∈ Q s.t. μ({tp}) ⊆ merge(ρΓ Q
+
+i−1)} ,
+
+:= Rderefs(ρUi)∪ρΓ Q
+
+where ρΓ Q
+0 , and ﬁnally let ρΓ Q be the ﬁxpoint as before and
+i
+let ρΩQ be the respective solutions. Here, RDFS rules and background schema
+knowledge (Γ voc) are used to materialise inferable knowledge, potentially generating 
+additional answers (and thus possibly ﬁnding new query relevant sources).
+An example for this has been presented in Query 3.
+
+Combined. Of course, the above methods can be combined in a natural fashion,
+where, e.g., for combining all extensions, the query relevant sources are denoted
+¯Γ Q and the answers by e
+e
+ρ
+
+¯ΩQ.
+
+ρ
+
+5 Empirical Study
+
+In Section 4.1, we mentioned that the recall of the LTBQE approach is—in the
+general case—dependent on the dereferenceability of data. Along those lines,
+we now present the results of our empirical study of a Linked Data corpus. We
+survey the ratio of all triples mentioning a URI in our corpus against those returned 
+in the dereferenceable document of that URI; we do so for diﬀerent triple
+positions. We also look at the comparative recall of data considering (1) explicit,
+dereferenceable information; (2) including rdfs:seeAlso links [12]; (3) including
+owl:sameAs links and inferable knowledge; (4) including RDFS reasoning.
+
+196
+
+J. Umbrich et al.
+
+Empirical Corpus. We use the Billion Triple Challenge 2011 dataset for our survey,
+ which was crawled in mid-May 2011 from 7.4 million RDF/XML documents
+spanning 791 pay-level domains (data providers). The resulting corpus contains
+2.15 g quadruples (1.97 g unique triples) mentioning 538 m RDF terms, of which
+52 m (10%) are Literals, 382 m (71%) are blank nodes, and 103 m (19%) are
+URIs. We denote the corpus as Γ∼. It’s important to note that this corpus is
+only a sample of the Web of Data; in particular, we only use the information
+about HTTP lookups provided by the dataset. We found that a total of 25.4 m
+lookups were performed (excluding robots.txt). As such, we only have knowledge 
+of redir and deref functions for 18.65 m URIs; all of these URIs are HTTP
+and do not have non-RDF ﬁle-extensions. We denote these URIs by U∼. Of the
+18.65 m, 8.37 m (44.8%) dereferenced to RDF; we denote these by D∼. Further
+note that, wrt. the Web of Data, our sample recall measures specify an upper
+bound.
+
+RDFS Schema. From our corpus, we extract a static set of schema data for the
+RDFS reasoning. As argued in [6], schema data on the Web is often noisy, where
+third-party publishers “redeﬁne” popular terms outside of their namespace; for
+example, one document deﬁnes nine properties as the domain of rdf:type, which
+would have a drastic eﬀect on our reasoning.7 Thus, we perform authoritative reasoning,
+ which conservatively discards certain third-party schema axioms (cf. [6]).
+Our schema data only considers triples of the following form:
+
+(s, rdfs:subPropertyOf, o) ∈ deref(s), (s, rdfs:subClassOf, o) ∈ deref(s)
+
+(s, rdfs : domain, o) ∈ deref(s), (s, rdfs : range, o) ∈ deref(s)
+
+We extracted a total of 397 thousand such authoritative RDFS triples from
+98 PLDs as follows: 334 thousand rdfs:subClassOf (82 PLDs); 11 thousand
+rdfs:subPropertyOf (67 PLDs); 26 thousand rdfs:domain (79 PLDs); and 26
+thousand rdfs:range (77 PLDs).
+
+5.1 Recall for Baseline
+
+We ﬁrst measure the average dereferenceability of information in our sample.
+For a dereferenceable uri d, we compute the sample dereferencing recall sdr(d)
+as the ratio of the number of unique triples mentioning d in deref(d) vs. unique
+triples mentioning d across the entire sample. We denote by sdr∼ the average
+sdr(d) for all d ∈ D∼. We also analyse the sdr(d) restricting the speciﬁc triple
+positions where d appears. We ignore d in the average if it does not appear in the
+relevant triple position in the sample. Table 2 presents the results for diﬀerent
+triple positions. Column type-object considers d only when appearing as object
+in a triple with the predicate rdf:type (a class position).
+
+The analysis provides some interesting initial insights into the LTBQE approach.
+ Given a HTTP URI without a common non-RDF extension, we have a
+
+7 viz. http://www.eiao.net/rdf/1.0
+
+Improving the Recall of Live Linked Data Querying through Reasoning
+
+197
+
+Table 2. Dereferenceability results for diﬀerent triple positions
+
+Measure
+|U∼|
+|D∼|
+|U∼|/|D∼|
+average sdr∼
+std. dev. ± sdr∼
+
+any
+
+18.65 m
+8.37 m
+0.44
+0.51
+0.5
+
+9.55 m
+8.09 m
+0.85
+0.95
+±0.195
+
+47.67 k
+
+745
+0.01
+
+0.00007
+±0.008
+
+subject predicate object
+
+typeobject
+
+9.73 m 213.38 k
+21.1 k
+4.5 m
+0.09
+0.46
+0.002
+0.438
+±0.458
+±0.05
+
+44.8% success ratio to receive RDF/XML content regardless of the triple position.
+ If such a URI dereferences to RDF, we receive on average (at most) 51%
+of all triples in which it appears on the Web. Given a pattern with a URI in the
+subject position, the dereferenceable ratio increases to 95%; for objects, the ratio
+drops to 43.8%; LTBQE would perform poorly for triple patterns with (only)
+a URI in the predicate position (0.007%); etc. High standard deviations imply
+that the dereferenceability is often “all or nothing”. In summary, LTBQE performs 
+well when URIs appear as the subject of triple patterns, moderately when
+URIs appear in the object, but will perform poorly when URIs appear in the
+predicate or object of an rdf:type triple. In practice, documents dereferenced by
+property and class terms do not host a high percentage of their extension.
+
+5.2 Recall for Extensions
+We now measure the sdr increase given by extending LTBQE to also consider
+rdfs:seeAlso and owl:sameAs links, as well as inferable knowledge given by
+owl:sameAs and RDFS reasoning.
+
+Beneﬁt of Following rdfs:seeAlso Links. We measured the percentage of dereferenceable 
+URIs in D∼ which have at least one rdfs:seeAlso link in their dereferenced 
+document to be 2% (201 k URIs). Where such links exist, following them
+increases the amount of unique triples by a factor of 1.006× vs. triples in the
+dereferenced document alone. We conclude that, in the general case, considering
+rdfs:seeAlso triples will only marginally aﬀect the recall increase of LTBQE.
+
+Beneﬁt of Following owl:sameAs Links & inferable Knowledge. We measured the
+percentage of dereferenceable URIs in D∼ which have at least one owl:sameAs
+link in their dereferenced document to be 16% for our sample. Where such links
+exist, following them and applying the eq-* entailment rules over the resulting 
+information increases the amount of unique triples by a factor of 2.5× vs.
+the unique (explicit) triples in the dereferenced document alone. We conclude
+that, in the general case, owl:sameAs links are only sometimes found for deferenceable 
+URIs, but where available, following them and applying entailment
+generates signiﬁcantly more data for generating answers (albeit potentially producing 
+“duplicate” answers under diﬀerent URI aliases).
+
+198
+
+J. Umbrich et al.
+
+Beneﬁt of Including ρDF Inferable Knowledge. We measured the percentage
+of dereferenceable URIs in D∼ whose dereferenced documents given non-empty
+unique entailments through authoritative ρDF reasoning with respect to Γ voc as
+81%. Where such entailments are non-empty, they increase the amount of unique
+triples by a factor of 1.78× vs. the unique (explicit) triples in the dereferenced
+document. We conclude that such reasoning often increases the amount of data
+available for LTBQE query answering, and by a signiﬁcant amount.
+
+6 Evaluation
+
+In order to test our methods for queries covering a diverse set of sources and
+query types, we evaluate our proposed LTBQE extensions for a set of pseudorandomly 
+generated queries extracted from our Linked Data corpus. These
+queries are then applied live to determine real-world behaviour. Our aim is to
+compare and contrast diﬀerent setups and assess our proposed extensions in a
+realistic scenario. To the best of our knowledge, we are the ﬁrst work to evaluate
+the original LTBQE proposal in a live and diverse environment.
+
+Implementation: We have (re-)implemented Hartig et al.’s iterator-based algorithm 
+for LTBQE (which was shown to be complete) [12]. We use ARQ to
+parse and process input SPARQL queries.8 We further use the LDSpider crawling 
+framework for performing live Linked Data lookups; LDSpider respects the
+robots.txt policy, blacklists typical non-RDF URI patterns (e.g., .jpeg) and enforces 
+a half-second delay between two consequential lookups for URIs hosted
+at the same domain.9 We use the SAOR engine to support the aforementioned
+rule-based reasoning extensions [6]. Note that we use the same input RDFS data
+as used in the empirical study of the previous section.
+
+Optimised LTBQE: Inspired by our empirical analysis, we also implement and
+evaluate a variation of the LTBQE approach which does not dereference URIs
+appearing only in the predicate position of a (possibly partially bound) triplepattern.
+ Further, we add another optimisation to avoid dereferencing URIs that
+are only bound by non-distinguished variables not appearing elsewhere in the
+query (i.e., variables whose value is not used elsewhere). Since these optimisation
+reduce the number of query-relevant sources, they may in theory lead to less
+results, though in practice (and as per our empirical survey), we would expect
+a minimal change in recall over the baseline.
+
+Evaluation Queries: We benchmark queries of elemental graph shapes, viz., entity,
+ star and path queries.
+Entity Queries. (entity-[s|o|so]) ask for all available triples for an entity. We
+generate three types of entity queries, asking for triples where a URI appears as
+8 http://jena.sourceforge.net/ARQ/
+9 http://code.google.com/p/ldspider/
+
+Improving the Recall of Live Linked Data Querying through Reasoning
+
+199
+
+the subject (entity-s); as the object (entity-o); as the subject and object (entity-
+so). An example for entity-so would be {<d> ?p1 ?o . ?s ?p2 <d> .}. These type
+of queries are very common in Linked Data browsers or display interfaces.
+Star Queries. (star-[s3|o3|s1-o1|s2-o1|s1-o2 ]) contain three acyclic triple patterns 
+which share exactly one URI (called the centre node) where predicate terms
+are constant. We generate four variations of such queries, diﬀering in the number
+of triple patterns where the centre node appears as the subject (s) or object (o).
+An example for star-s2-o1 would be {<d> foaf:knows ?o ; foaf:name ?o1 . ?o3
+dc:creator <d> .}
+Path Queries. ([s|o]-path-[2|3 ]) consist of 2 or 3 triple patterns that form a path
+where precisely two triple pattern share the same variable. Exactly one triple
+pattern has a URI at either the subject or object position and all predicate terms
+are constant. We generate four path sub-types: path shaped queries of length 2
+and 3 where either the subject or object of one triple pattern is a constant. An
+example for s-path-2 is Query 1.
+
+Query Generation: In total, we generate 100 SELECT DISTINCT queries for
+each of the above 11 query shapes using random walks in our corpus. To help
+ensure that queries return non-empty results (in case there are no HTTP connection 
+errors or time outs) we consider dereferenceable information for the query
+generation which (1) picks randomly a pay-level-domain available in the dereferenceable 
+URIs D∼, (2) selects randomly a URI from D∼ for that PLD and (3)
+generates appropriate triple patterns from the dereferenceable document of the
+selected URI. For path shaped queries, when performing steps (2) and (3), the
+URI for the next triple pattern is selected out of the URIs contained for the previous 
+triple pattern, as per a random walk of dereferenceable URIs. Distinguished
+variables are picked by randomly choosing a single variable as distinguished and
+make further variables distinguished with a probability of 0.5.
+
+Benchmark Stable Queries: We observed that the results for the same query
+varied over diﬀerent runs and thus introduce the notion of “benchmark stable
+queries” which are queries for which the response codes for the baseline URIs
+are the same across all setups runs. The variation of results for diﬀerent runs is
+caused by remote server or connection failures while dereferencing content, e.g.,
+we sometimes encountered 503 - Service unavailable response codes possibly due
+to temporarily high loads on remote servers. Only considering stable queries improves 
+the comparability of results across diﬀerent setups. Table 3 shows that in
+average ∼94% ( 1,029
+1,029) returned
+empty results. We inspected the causes for the empty result set for all “stable”
+queries (right side of Table 3). The typewritten numbers correspond to HTTP
+server response codes.10 The column “mixed” indicates that there are at least
+two URIs with diﬀerent response codes and the column “data” indicates that the
+10 Aside from common response codes, a 498 code denotes robots.txt forbidden access,
+499 denotes that a server returned a mime type diﬀerent to application/rdf+xml,
+602 denotes socket timeouts and 603 denotes unknown host exceptions.
+
+1,100) of the queries are stable from which ∼38% ( 389
+
+200
+
+J. Umbrich et al.
+
+Table 3. Statistics about stability of queries
+
+Breakdown (1,100)
+
+Causes for empty results (389)
+
+stable
+1,029
+
+e
+s
+a
+e
+r
+c
+n
+
+i
+
+e
+m
+
+i
+t
+
+y
+r
+e
+u
+q
+
+.
+g
+v
+a
+
++100
+
++75
+
++50
+
++25
+
++0
+
+(empty) unstable 403 404 498 499 500 502 602 603 mixed data
+93
+
+15 110
+
+(389)
+
+6
+
+85
+
+71
+
+7
+
+15
+
+38
+
+18
+
+2
+
+entity-o (∼8.25 sec)
+entity-s (∼9.99 sec)
+entity-so (∼12.28 sec)
+
+entity-o (∼53 results)
+entity-s (∼16 results)
+entity-so (∼34 results)
+
+e
+s
+a
+e
+r
+c
+n
+
+i
+
+l
+l
+a
+c
+e
+r
+
+t
+l
+
+u
+s
+e
+r
+
+.
+g
+v
+a
+
++200
+
++150
+
++100
+
++50
+
++0
+
+legacy
+
+seeAlso
+
+sameAs
+
+ρDF
+
+comb
+
+legacy
+
+seeAlso
+
+sameAs
+
+ρDF
+
+comb
+
+(a) Average time increase.
+
+(b) Average recall increase.
+
+Fig. 2. Average time and recall increase relative to baseline for entity queries
+
+missing results are not HTTP-related (e.g., the data changed). The main reasons 
+for empty “stable” queries are (i) either query relevant documents are not
+available any more (404), (ii) the IP address of a host could not be determined
+(indicated by 603) or (iii) the underlying data changed (last column).
+
+Results per Query Class: We execute each query with six diﬀerent setups: legacy
+denotes the original LTBQE approach; base denotes optimised LTBQE; select
+denotes seeAlso, sameAs, and ρDF which all extend base; comb denotes all
+extensions of base applied together. We discuss the results for each query-type,
+presented as bar plots showing the average recall and time increase per setup vs.
+base (represented as the x-axis). For ρDF, we do not include the time needed
+to load schema data, which can be done prior to query time.
+Entity Queries. Figure 2a shows that the original source selection approach
+requires between 60% to 110% additional time compared to our source selection
+optimisation and increases the recall by 3%, shown in Figure 2b. All such ﬁgures
+include the absolute baseline results (represented by the x-axis) in the legend. Our
+extensions increase the recall for all entity queries with a maximum increase of
+200% for entity-so queries and the combination of all extensions. To enable such
+increases in recall, the query time increases by up to 55%.
+Star Queries. The results for the star shaped queries, presented in Figure 3a
+and Figure 3b show similarities with the observations for the entity queries.
+The query times increase without an improvement of the recall if we dereference
+all appearing URIs and our extensions improve the recall by a maximum of
+140% for 3 out of the 4 query classes. It is worth noting the small volume of
+
+Improving the Recall of Live Linked Data Querying through Reasoning
+
+201
+
++855
+
++800
+
++150
+
++100
+
++50
+
++0
+
+e
+s
+a
+e
+r
+c
+n
+
+i
+
+e
+m
+
+i
+t
+
+y
+r
+e
+u
+q
+
+.
+g
+v
+a
+
+star-1-2 (∼ 7.08 sec)
+star-0-3 (∼ 7.47 sec)
+
+star-3-0 (∼7.16 sec)
+star-2-1 (∼ 6.63 sec)
+
+star-3-0 (∼1 results)
+star-2-1 (∼7 results)
+star-1-2 (∼11 results)
+star-0-3 (∼2 results)
+
+e
+s
+a
+e
+r
+c
+n
+
+i
+
+l
+l
+a
+c
+e
+r
+
+t
+l
+
+u
+s
+e
+r
+
+.
+g
+v
+a
+
++200
+
++150
+
++100
+
++50
+
++0
+
+legacy
+
+seeAlso
+
+sameAs
+
+ρDF
+
+comb
+
+legacy
+
+seeAlso
+
+sameAs
+
+ρDF
+
+comb
+
+(a) Average time increase.
+
+(b) Average recall increase.
+
+Fig. 3. Average time and recall increase relative to baseline for star queries
+
+e
+s
+a
+e
+r
+c
+n
+
+i
+
+e
+m
+
+i
+t
+
+y
+r
+e
+u
+q
+
+.
+g
+v
+a
+
++400
+
++350
+
++300
+
++100
+
++50
+
++0
+
+s-path-2 (∼8.86 sec)
+s-path-3 (∼11.6 sec)
+o-path-2 (∼11.26 sec)
+o-path-3 (∼15.1 sec)
+
+s-path-2 (∼6 results)
+s-path-3 (∼28 results)
+o-path-2 (∼94 results)
+o-path-3 (∼86 results)
+
+e
+s
+a
+e
+r
+c
+n
+
+i
+
+l
+l
+a
+c
+e
+r
+
+t
+l
+
+u
+s
+e
+r
+
+.
+g
+v
+a
+
++200
+
++150
+
++100
+
++50
+
++0
+
+legacy
+
+seeAlso
+
+sameAs
+
+ρDF
+
+comb
+
+legacy
+
+seeAlso
+
+sameAs
+
+ρDF
+
+comb
+
+(a) Average time increase.
+
+(b) Average recall increase.
+
+Fig. 4. Average time and recall increase relative to baseline for path queries
+
+results for the baseline, which may skew average relative increases. Further, we
+observed some extreme outliers for the query class star-1-2 due to one query
+which took around 1 hour to terminate because of a document download from
+the ecowlim.tfri.gov.tw provider (which did not even contribute to the results).
+Path Queries. The results for the path shaped queries show an average time
+increase of up to 420% vs. legacy compared to our optimised selection for the
+two o-path query classes in Figure 4a. In contrast to the previous query classes,
+we see in Figure 4b that the seeAlso extension improves the recall by over 50%
+for the s-path-3 query class, which is the highest measured improvement for
+that extension across all query classes. In addition, we observe a recall increase
+of at least 50% for s-path-* queries with the ρDF and comb setups, whereas we
+measured only a marginal increase for o-path-* queries.
+
+7 Conclusion
+
+Proposed link-traversal query approaches for Linked Data have the beneﬁt of up-
+to-date results and decentralised execution, but operate over incomplete knowledge 
+available in dereferenced documents, thus aﬀecting recall for results.
+
+202
+
+J. Umbrich et al.
+
+We empirically study this issue for a large sampling of the Web of Data,
+consisting of 7.4 million Linked Data documents and 2.1 billion quadruples. We
+further propose to improve recall by considering inferable knowledge, speciﬁcally
+that found through owl:sameAs and RDFS reasoning. We again validate our
+extensions by analysis of our corpus, where we show increases in data available
+to the LTBQE approach (1) of 1.006× considering rdfs:seeAlso information as
+proposed in [12], (2) of 2.5× considering owl:sameAs and (3) of 1.8× if we
+apply ρDF reasoning using static schema information. We generate and run
+queries (of eleven diﬀerent shapes) live over the Web of Data, comparing six
+diﬀerent setups, demonstrating the degree to which our extensions ﬁnd additional
+results at the cost of accessing more sources and thus taking longer. In addition,
+our comprehensive experiment also highlights the problem of unreliable server
+behaviour, which aﬀects query processing and is symptomised by outliers in
+results and unavailability of data for certain queries.
+
+Future Work. We plan to extend our entailment rules to cover more of OWL
+2 RL/RDF and to investigate changes in recall when considering dynamically
+dereferenced schema data vs. static schema data. We also plan to use owl:sameAs
+optimisations for canonicalising equivalent URIs as opposed to materialising all
+equivalent data. Another open issue relates to that of data quality, where, e.g.,
+Halpin et al. [8] suggest that owl:sameAs may often be unreliable; we have
+experiences of dealing with data-quality issues for reasoning in other works [16].
+From such work, we herein borrowed the notion of authoritative RDFS reasoning;
+further measures to make results more “robust” are a subject for future work.
+
+Given the relatively slow response times from the LTBQE approach (where
+1% of all queries returned in less than a second, whereas 67% of the queries
+executed in less than 10 seconds), our ultimate goal is to use such live querying
+techniques, in a best-eﬀort manner, to compliment centralised query services
+with fresh answers, particularly for query patterns that are determined to be
+dynamic and for which data should be retrieved directly from source. In this
+scenario, our optimisations should help to get faster live-query answers and our
+extensions to ﬁnd further answers. In general, combining diﬀerent Linked Data
+querying techniques to ﬁnd a sweet-spot between fast response times and a high
+recall of (fresh) answers is an open question, the solution to which is likely to
+be userand 
+query-speciﬁc. Along such lines, in this paper we have formalised,
+proposed and evaluated the feasibility in a real-world setting of several novel live
+querying techniques, a selection of which also incorporate lightweight reasoning.
+
+Acknowledgements. This research has been supported by Science Foundation
+Ireland under Grant No. SFI/08/CE/I1380 (Lion-II).
+
+References
+
+1. Buil-Aranda, C., Arenas, M., Corcho, O.: Semantics and Optimization of the
+SPARQL 1.1 Federation Extension. In: Antoniou, G., Grobelnik, M., Simperl, E.,
+Parsia, B., Plexousakis, D., De Leenheer, P., Pan, J. (eds.) ESWC 2011, Part II.
+LNCS, vol. 6644, pp. 1–15. Springer, Heidelberg (2011)
+
+Improving the Recall of Live Linked Data Querying through Reasoning
+
+203
+
+2. Berners-Lee, T.: Linked Data. Design issues, W3C (2006)
+3. Bishop, B., Kiryakov, A., Ognyanoﬀ, D., Peikov, I., Tashev, Z., Velkov, R.: Fact-
+
+forge: A fast track to the web of data. Sem. Web J. (2011)
+
+4. Bishop, B., Kiryakov, A., Ognyanoﬀ, D., Peikov, I., Tashev, Z., Velkov, R.: Owlim:
+
+A family of scalable semantic repositories. SWJ (2011)
+
+5. Bizer, C., Cyganiak, R., Heath, T.: How to publish Linked Data on the web, Tutorial 
+(July 2008), linkeddata.org
+
+6. Bonatti, P.A., Hogan, A., Polleres, A., Sauro, L.: Robust and scalable Linked Data
+
+reasoning incorporating provenance and trust annotations. JWS (2011)
+
+7. Erling, O., Mikhailov, I.: RDF Support in the Virtuoso DBMS. In: Pellegrini, T.,
+Auer, S., Tochtermann, K., Schaﬀert, S. (eds.) Networked Knowledge - Networked
+Media. Studies in Computational Intelligence, vol. 221, pp. 7–24. Springer, Heidelberg 
+(2009)
+
+8. Halpin, H., Hayes, P.J., McCusker, J.P., McGuinness, D.L., Thompson, H.S.: When
+owl:sameAs Isn’t the Same: An Analysis of Identity in Linked Data. In: PatelSchneider,
+ P.F., Pan, Y., Hitzler, P., Mika, P., Zhang, L., Pan, J.Z., Horrocks,
+I., Glimm, B. (eds.) ISWC 2010, Part I. LNCS, vol. 6496, pp. 305–320. Springer,
+Heidelberg (2010)
+
+9. Harth, A., Umbrich, J., Hogan, A., Decker, S.: YARS2: A Federated Repository for
+Querying Graph Structured Data from the Web. In: Aberer, K., Choi, K.-S., Noy,
+N., Allemang, D., Lee, K.-I., Nixon, L.J.B., Golbeck, J., Mika, P., Maynard, D.,
+Mizoguchi, R., Schreiber, G., Cudré-Mauroux, P. (eds.) ASWC 2007 and ISWC
+2007. LNCS, vol. 4825, pp. 211–224. Springer, Heidelberg (2007)
+
+10. Hartig, O.: Zero-Knowledge Query Planning for an Iterator Implementation of Link
+Traversal Based Query Execution. In: Antoniou, G., Grobelnik, M., Simperl, E.,
+Parsia, B., Plexousakis, D., De Leenheer, P., Pan, J. (eds.) ESWC 2011, Part I.
+LNCS, vol. 6643, pp. 154–169. Springer, Heidelberg (2011)
+
+11. Hartig, O.: SPARQL for a Web of Linked Data: Semantics and Computability. In:
+Simperl, E., Cimiano, P., Polleres, A., Corcho, O., Presutti, V. (eds.) ESWC 2012.
+LNCS, vol. 7295, pp. 8–23. Springer, Heidelberg (2012)
+
+12. Hartig, O., Bizer, C., Freytag, J.-C.: Executing SPARQL Queries over the Web of
+Linked Data. In: Bernstein, A., Karger, D.R., Heath, T., Feigenbaum, L., Maynard,
+D., Motta, E., Thirunarayan, K. (eds.) ISWC 2009. LNCS, vol. 5823, pp. 293–309.
+Springer, Heidelberg (2009)
+
+13. Hartig, O., Langegger, A.: A database perspective on consuming Linked Data on
+
+the web. Datenbank-Spektrum (2010)
+
+14. Hayes, P.: RDF semantics. W3C Recommendation (February 2004)
+15. Heath, T., Bizer, C.: Linked Data: Evolving the Web into a Global Data Space.
+
+Morgan & Claypool (2011)
+
+16. Hogan, A.: Exploiting RDFS and OWL for Integrating Heterogeneous, Large-Scale,
+
+Linked Data Corpora. PhD thesis, DERI, NUIG (2011)
+
+17. Ladwig, G., Tran, T.: Linked Data Query Processing Strategies. In: PatelSchneider,
+ P.F., Pan, Y., Hitzler, P., Mika, P., Zhang, L., Pan, J.Z., Horrocks,
+I., Glimm, B. (eds.) ISWC 2010, Part I. LNCS, vol. 6496, pp. 453–469. Springer,
+Heidelberg (2010)
+
+18. Ladwig, G., Tran, T.: SIHJoin: Querying Remote and Local Linked Data. In: Antoniou,
+ G., Grobelnik, M., Simperl, E., Parsia, B., Plexousakis, D., De Leenheer,
+P., Pan, J. (eds.) ESWC 2011, Part I. LNCS, vol. 6643, pp. 139–153. Springer,
+Heidelberg (2011)
+
+204
+
+J. Umbrich et al.
+
+19. Li, Y., Heﬂin, J.: Using Reformulation Trees to Optimize Queries over Distributed
+Heterogeneous Sources. In: Patel-Schneider, P.F., Pan, Y., Hitzler, P., Mika, P.,
+Zhang, L., Pan, J.Z., Horrocks, I., Glimm, B. (eds.) ISWC 2010, Part I. LNCS,
+vol. 6496, pp. 502–517. Springer, Heidelberg (2010)
+
+20. Muñoz, S., Pérez, J., Gutierrez, C.: Simple and eﬃcient minimal RDFS. JWS
+
+(2009)
+
+21. Oren, E., Delbru, R., Catasta, M., Cyganiak, R., Stenzhorn, H., Tummarello, G.:
+Sindice.com: a document-oriented lookup index for open Linked Data. IJMSO
+(2008)
+
+22. Prud’hommeaux, E., Seaborne, A.: SPARQL query language for RDF. W3C Recommendation 
+(January 2008), http://www.w3.org/TR/rdf-sparql-query/
+
+23. Quilitz, B., Leser, U.: Querying Distributed RDF Data Sources with SPARQL. In:
+Bechhofer, S., Hauswirth, M., Hoﬀmann, J., Koubarakis, M. (eds.) ESWC 2008.
+LNCS, vol. 5021, pp. 524–538. Springer, Heidelberg (2008)
+
+24. Schwarte, A., Haase, P., Hose, K., Schenkel, R., Schmidt, M.: FedX: A Federation
+Layer for Distributed Query Processing on Linked Open Data. In: Antoniou, G.,
+Grobelnik, M., Simperl, E., Parsia, B., Plexousakis, D., De Leenheer, P., Pan, J.
+(eds.) ESWC 2011, Part II. LNCS, vol. 6644, pp. 481–486. Springer, Heidelberg
+(2011)
+
+25. Stuckenschmidt, H., Vdovjak, R., Houben, G.-J., Broekstra, J.: Index structures
+
+and algorithms for querying distributed RDF repositories. In: WWW (2004)
+
+26. Tran, T., Zhang, L., Studer, R.: Summary Models for Routing Keywords to Linked
+Data Sources. In: Patel-Schneider, P.F., Pan, Y., Hitzler, P., Mika, P., Zhang, L.,
+Pan, J.Z., Horrocks, I., Glimm, B. (eds.) ISWC 2010, Part I. LNCS, vol. 6496, pp.
+781–797. Springer, Heidelberg (2010)
+
+27. Umbrich, J., Hose, K., Karnstedt, M., Harth, A., Polleres, A.: Comparing data
+
+summaries for processing live queries over Linked Data. In: WWWJ (2011)
+
+28. Umbrich, J., Karnstedt, M., Hogan, A., Parreira, J.X.: Freshening up while staying
+
+fast: Towards hybrid SPARQL queries. In: EKAW (2012)
+
+

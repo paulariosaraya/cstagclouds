@@ -1,0 +1,2833 @@
+SOFTWARE—PRACTICE AND EXPERIENCE
+Softw. Pract. Exper. 2005; 35:1107–1130
+Published online 6 May 2005 in Wiley InterScience (www.interscience.wiley.com). DOI: 10.1002/spe.663
+
+LZgrep: a Boyer–Moore string
+matching tool for Ziv–Lempel
+compressed text
+Gonzalo Navarro1,∗,† and Jorma Tarhio2
+
+1Department of Computer Science, University of Chile
+2Department of Computer Science and Engineering, Helsinki University of Technology, Finland
+
+SUMMARY
+
+We present a Boyer–Moore (BM) approach to string matching over LZ78 and LZW compressed text.
+The idea is to search the text directly in compressed form instead of decompressing and then searching
+it. We modify the BM approach so as to skip text using the characters explicitly represented in the
+LZ78/LZW formats, modifying the basic technique where the algorithm can choose which characters to
+inspect. We present and compare several solutions for single and multipattern searches. We show that
+our algorithms obtain speedups of up to 50% compared to the simple decompress-then-search approach.
+Finally, we present a public tool, LZgrep, which uses our algorithms to offer grep-like capabilities directly
+searching ﬁles compressed using Unix’s Compress, a LZW compressor. LZgrep can also search ﬁles
+compressed with Unix gzip, using new decompress-then-search techniques we develop, which are faster
+than the current tools. This way, users can always keep their ﬁles in compressed form and still search them,
+uncompressing only when they want to see them. Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+KEY WORDS:
+
+text searching; compressed pattern matching; Ziv–Lempel format; direct search on compressed
+text
+
+INTRODUCTION
+
+Perhaps one of the most recurrent subproblems appearing in every application is the need to ﬁnd the
+occurrences of a pattern string inside a large text. The string matching problem lies at the kernel of
+applications such as information retrieval and management, computational biology, signal processing,
+databases, knowledge discovery and data mining, to name just a few. Text searching tools such as grep
+are extremely popular and routinely used.
+
+∗
+Correspondence to: Gonzalo Navarro, Department of Computer Science, University of Chile, Blanco Encalada 2120, Santiago,
+Chile.
+†E-mail: gnavarro@dcc.uchile.cl
+
+Contract/grant sponsor: Fondecyt; contract/grant number: 1-020831
+Contract/grant sponsor: Academy of Finland
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Received 30 October 2003
+Revised 28 October 2004
+Accepted 5 November 2004
+
+1108
+
+G. NAVARRO AND J. TARHIO
+
+Formally, the string matching problem is deﬁned as follows: given a pattern P = p1 . . . pm and a
+text T = t1 . . . tu, both sequences over an alphabet  of size σ , ﬁnd all the occurrences of P in T , that
+is, return the set {|x|, T = xP y}. There are dozens of string matching algorithms [1,2]. The most
+successful in practice are those algorithms capable of skipping text characters without inspecting
+them all. This includes the Boyer–Moore (BM) [3] and the Backward-DAWG-Matching (BDM) [1]
+families.
+
+In order to save space, it is usual to store the text in compressed form. Text compression [4] tries
+to exploit the redundancies of the text in order to represent it using less space. Compression is not
+only appealing for saving space, but also for saving disk and network transmission time. CPU speeds
+have been doubling every 18 months, while disk transfer times have remained mostly unchanged for
+10 years. This makes compression more and more appealing to save transmission time, even if it has
+to be paid for with some CPU time for decompression.
+
+There are many different compression schemes, among which the Ziv–Lempel family [5–7] is the
+most popular in practice because of its good compression ratios combined with efﬁcient compression
+and decompression performance. As a matter of fact, most of the popular text and general-purpose
+compression packages in use are based on this family, for example zip, pkzip, winzip, arj, gzip,
+compress and so on. The only relatively popular alternative is bzip2, based on the work of Burrows and
+Wheeler [8], which compresses more than Ziv–Lempel approaches but is much slower at compression
+and decompression. Other compression formats, especially lossy ones, are used on images, video and
+multimedia data.
+
+One problem that arises when searching a text document that is compressed is that one must
+decompress it ﬁrst. This has been the usual approach for a long time. Indeed, existing tools like
+Unix zgrep are shorthands for this decompress-then-search approach. However, in recent years, it has
+been shown that it is possible to speed up this process by searching the text directly in compressed
+form.
+
+The compressed matching problem [9] is deﬁned as the task of performing string matching in a
+compressed text without ﬁrst decompressing it. Given a text T , a corresponding compressed string
+Z = z1 . . . zn, and a pattern P , the compressed matching problem consists in ﬁnding all occurrences of
+P in T , using only P and Z. A naive algorithm consists of ﬁrst decompressing Z and then performing
+standard string matching. A smarter algorithm processes Z directly without decompressing it.
+
+Many algorithms for compressed pattern matching have been proposed in the last decade. Many of
+them, however, work over compression formats that are not widely used, despite being convenient
+for efﬁcient search. This reduces the possibility of them coming into general use. There are, on the
+other hand, a few proposals about searching over Ziv–Lempel compressed text. Good worst-case
+complexities have been achieved, and there exist practical implementations able to search in less time
+than that needed for decompression plus searching.
+
+However, BM techniques have never been explored for searching compressed text. Our work
+explores this direction. We present an application of BM techniques for string matching over
+LZ78/LZW compressed texts. The worst-case complexity of the resulting algorithms is not
+competitive. However, in practice our algorithms are faster than all previous work, and beat the best
+decompress-then-search approach by up to 50%. We extend our techniques to search for multiple
+patterns simultaneously.
+
+Using the algorithms developed in this paper, we have built LZgrep, a compressed text searching
+tool that provides grep-like capabilities when directly searching over ﬁles compressed with Unix
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+LZGREP: A BOYER–MOORE STRING MATCHING TOOL
+
+1109
+
+compress program, which is public. LZgrep also searches ﬁles compressed with gzip, a public LZ77
+based compressor. LZgrep is faster than zgrep and resorts to it when the pattern is more complex than
+simple string(s), so it can be safely used as a replacement of zgrep. LZgrep can be freely downloaded
+for non-commercial purposes from http://www.dcc.uchile.cl/∼gnavarro/software.
+
+RELATED WORK
+
+One of the most successful approaches to searching compressed text is oriented to natural language.
+Huffman coding [10] on words (considering the text words instead of characters as the source symbols)
+has been shown to yield compression ratios‡ of 25–30% [11]. Moreover, the compressed text can be
+searched extremely quickly, sometimes several times faster than searching the uncompressed text [12].
+This approach works very well in the usual information retrieval scenarios and merges very well with
+inverted indices [13,14]. It is, however, difﬁcult to use this technology outside of this scenario. On the
+one hand, the texts have to contain natural language, as this approach does not work for general texts
+such as DNA, proteins, music, oriental languages and even some agglutinating languages. On the other
+hand, the overhead posed by considering the set of words as the source symbols is alleviated only for
+very large ﬁles (10 MB or more). Hence, the approach is not well suited to individual compressed ﬁles
+that can be independently stored, managed and transferred, but to a well-organized text collection with
+a strict control that maintains a centralized vocabulary upon insertions, deletions and updates of the
+ﬁles in the collection. This is, for example, the model of glimpse [15]. In this work we aim at a more
+oblivious method where ﬁles can be managed independently.
+
+Several other approaches have been proposed to search texts compressed under different formats,
+some existing and some speciﬁcally designed for searching. Some examples are: different variations
+of Byte-Pair encoding [16,17], classical Huffman encoding [18,19], modiﬁed variants of Ziv–Lempel
+[20,21], and even general systems that abstract many formats [22]. Some of these approaches are
+good in practice, in particular a BM based strategy over Byte-Pair encoding [17]. These approaches are
+interesting. However, their main weakness is that in practice most people use Ziv–Lempel compression
+methods, and this constitutes a barrier for the general adoption of these methods.
+
+Searching Ziv–Lempel compressed texts is, however, rather complex. The compression is based on
+ﬁnding repetitions in the text and replacing them with references to previous occurrences. The text
+is parsed as a sequence of ‘blocks’, each of which is built by referencing previous blocks. Hence the
+pattern can appear in different forms across the compressed text, possibly split into two or more blocks.
+In LZ78/LZW the blocks can only be a previous block plus one character, while in LZ77 they can be
+any previous text substring.
+
+The ﬁrst algorithm to search Ziv–Lempel compressed text [23] is able to search for single patterns in
+the LZ78 format. It was later extended to search for multiple patterns on LZW [24]. These algorithms
+have good worst-case complexities but are rather theoretical. Algorithms with a more practical ﬂavor,
+based on bit parallelism, were proposed later for LZ78/LZW [20,25]. Other algorithms for different
+speciﬁc search problems over LZ78/LZW have been presented [26–28].
+
+‡The size of the compressed text as a percentage of the uncompressed text.
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+1110
+
+G. NAVARRO AND J. TARHIO
+
+Table I. Notation.
+
+Meaning
+
+Letter
+
+T
+u
+Z
+
+n
+P
+m
+
+σ
+r
+
+Uncompressed text of length u, T = t1t2 . . . tu
+Compressed text of n elements, Z = z1z2 . . . zn
+
+Length of uncompressed text, in characters (or ‘letters’)
+
+(in LZ78/LZW each zi is actually a block, called bi )
+Length of compressed text, measured in elements
+Pattern to search for (uncompressed), of length m
+Length of search pattern, measured in characters
+Alphabet T and P are drawn on
+Number of different symbols in , σ = ||
+In multipattern search, number of patterns sought, P 1 . . . P r
+
+Searching LZ77 compressed text has been even harder. The only search technique [29] is a
+randomized algorithm to determine whether a pattern is present or not in the text. Later studies [20]
+gave more evidence that LZ77 is difﬁcult to handle.
+
+Note that BM techniques, which have been successful in other formats, had not been applied to
+Ziv–Lempel compression. This was carried out for the ﬁrst time in the earlier version of this work
+[30]. In that paper it was shown that the BM approach was superior to previous techniques. All those
+implementations were carried out over a simulated compression format, for simplicity. Our aim in this
+paper is to describe and extend those BM techniques, and show that they can be implemented over a
+real LZW compression format (Unix compress) to yield an efﬁcient grep-like compressed text search
+tool that can be easily and widely used.
+
+BASIC CONCEPTS
+
+Table I gives a reminder of the notation we use for the rest of the paper.
+
+The Ziv–Lempel compression formats LZ78 and LZW
+
+The general idea of Ziv–Lempel compression is to replace substrings in the text by a pointer to a
+previous occurrence thereof. If the pointer takes less space than the string it is replacing, compression
+is obtained. Different variants over this type of compression exist [4]. We are particularly interested in
+the LZ78/LZW format, which we describe in depth.
+
+The Ziv–Lempel compression algorithm of 1978 (usually named LZ78 [6]) is based on a dictionary
+of blocks, in which we add every new block computed. At the beginning of the compression, the
+dictionary contains a single block b0 of length 0. The current step of the compression is as follows: if
+we assume that a preﬁx T1...j of T has already been compressed in a sequence of blocks Z = b1 . . . br,
+all them in the dictionary, then we look for the longest preﬁx of the rest of the text Tj+1...u which is a
+block of the dictionary. Once we have found this block, say bs of length (cid:3)s, we construct a new block
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+LZGREP: A BOYER–MOORE STRING MATCHING TOOL
+
+1111
+
+Prefix encoded
+
+Dictionary
+
+a
+
+0
+
+a
+
+1
+
+an
+
+0
+
+a
+
+1
+
+n
+
+2
+
+anan
+
+0
+
+a
+
+1
+
+n
+
+2
+
+ananas
+
+0
+
+a
+
+1
+
+n
+
+2
+
+n
+
+3
+
+s
+
+4
+
+n
+
+3
+
+Compressed file
+
+(0, a)
+
+(0, a)(0, n)
+
+(0, a)(0, n)(1, n)
+
+(0, a)(0, n)(1, n)(1, s)
+
+Figure 1. Compression of the word ananas with the algorithm LZ78.
+
+br+1 = (s, Tj+(cid:3)s+1), we write the pair at the end of the compressed ﬁle Z, i.e. Z = b1 . . . br br+1,
+and we add the block to the dictionary. It is easy to see that this dictionary is preﬁx-closed (that is, any
+preﬁx of an element is also an element of the dictionary) and a natural way to represent it is a trie.
+
+We give as an example the compression of the word ananas in Figure 1. The ﬁrst block is (0, a),
+and next (0, n). When we read the next a, a is already the block 1 in the dictionary, but an is not in the
+dictionary. So we create a third block (1, n). We then read the next a, a is already the block 1 in the
+dictionary, but as does not appear. So we create a new block (1, s).
+
+The compression algorithm is efﬁcient in practice if the dictionary is stored as a trie data structure,
+which allows rapid searching of the new text preﬁx (for each character of T we move once in the
+trie). The decompression needs to build the same dictionary (the pair that deﬁnes the block r is read
+at the rth step of the algorithm), although this time it is not convenient to have a trie, and an array
+implementation is preferable. Compared to LZ77, the compression is rather fast but decompression is
+slow.
+Let us go into a little more detail about the decompression process. We read block br = (b, c), so
+we know that the last character of block br is c. Now we go to our stored block b = (b(cid:4), c(cid:4)) and then
+. Now we go to the stored block b(cid:4) = (b(cid:4)(cid:4), c(cid:4)(cid:4)) and
+know that the next-to-last character of the block is c(cid:4)
+know that the character preceding c(cid:4)
+, and so on until we reach block b0 and we have found all the
+characters of the block. We refer to the sequence br , b, b(cid:4), b(cid:4)(cid:4) . . . as a referencing chain.
+
+is c(cid:4)(cid:4)
+
+Many variations on LZ78 exist, which deal basically with the best way to code the pairs in
+the compressed ﬁle, or with the best way to cope with limited memory for compression [31,32].
+A particularly interesting variant is from Welch, called LZW [7]. In this case, the extra character
+(second element of the pair) is not coded, but it is taken as the ﬁrst character of the next block (the
+dictionary is started with one block per character). LZW is used by Unix’s Compress program. Figure 2
+shows the LZW compression of the word ananas.
+
+In this paper we focus on LZW. However, the techniques are easily translated from and to LZ78, as
+these are just coding variants. The ﬁnal character of LZ78, which is implicit in LZW, can be readily
+obtained by keeping count of the ﬁrst character of each block (which is copied directly from the
+referenced block) and then looking at the ﬁrst character of the next block.
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+1112
+
+G. NAVARRO AND J. TARHIO
+
+Prefix encoded
+
+a
+
+0
+
+an
+
+0
+
+anan
+
+0
+
+ananas
+
+0
+
+Dictionary
+
+a
+
+n
+
+s
+
+a
+
+n
+
+s
+
+a
+
+n
+
+s
+
+a
+
+n
+
+s
+
+97
+
+100
+
+115
+
+97
+
+100
+
+115
+
+97
+
+100
+
+115
+
+97
+
+100
+
+115
+
+n
+
+256
+
+n
+
+256
+
+a
+
+257
+
+n
+
+256
+
+a
+
+258
+
+a
+
+257
+
+n
+
+s
+
+a
+
+256
+
+259
+
+257
+
+a
+
+258
+
+Compressed file
+
+(97)
+
+(97)(100)
+
+(97)(100)(256)
+
+(97)(100)(256)(97)(115)
+
+Figure 2. Compression of the word ananas with the algorithm LZW.
+
+Character-skipping string matching algorithms
+
+There are several string matching algorithms able to skip text positions without actually inspecting
+them. These are actually the fastest algorithms. In practice, the best algorithms come from two families:
+BM and BDM algorithms.
+
+The BM family of text searching algorithms proceed by sliding a window of length m over the text.
+The window is a potential occurrence of the pattern in the text. The text inside the window is checked
+against the pattern usually from right to left (although not always). If the whole window matches then
+an occurrence is reported. To shift the window, a number of criteria are used, which try to balance the
+cost to compute the shift with the amount of shifting obtained. Two main techniques are used.
+
+Occurrence heuristic: pick a character in the window and shift the window forward the minimum
+amount necessary to align the selected text character with the same character in the pattern.
+Horspool [33] uses the mth window character and Sunday [34] uses the (m + 1)th (actually
+outside the window). These methods need a table d that for each character gives its last
+occurrence in the pattern (the details depend on the versions). The Simpliﬁed BM (SBM) method
+[3] uses the character at the position which failed while checking the window, which needs a
+larger table indexed by window position and character.
+
+Match heuristic: if the pattern was compared from right to left, some part of it has matched the text
+in the window, so we precompute the minimum shift necessary to align the part that matched
+with a previous pattern area. This requires a table of size m that for each pattern position gives
+that last occurrence of Pi...m in P1...m−1. This is used in the original BM method [3].
+
+The case of multiple patterns is handled by building d tables that permit the minimum jump over
+the set of all the patterns. This table is usually built over more than one character to enable larger
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+LZGREP: A BOYER–MOORE STRING MATCHING TOOL
+
+1113
+
+shifts [35]. An alternative is to extend the original BM method [36]. A trie is built over the set of
+reversed patterns, and instead of comparing the text window and the pattern right-to-left, the window
+characters are used to enter the trie of patterns. The trie nodes have the precomputed shifts.
+
+The BDM family gives better algorithms than the BM family when the pattern is long or the alphabet
+is small. Some prominent members of this family are BDM itself [37], Backward Nondeterministic
+DAWG Matching (BNDM) [38] and Backward Oracle Matching (BOM) [39]. Multipattern versions
+of these algorithms include MultiBDM [1] and Set BOM (SBOM) [2].
+
+Currently, the fastest single-pattern matching algorithms are Horspool and BOM. In the case of
+multipattern matching, the best in practice are the method of Wu and Manber (WM) [35] and SBOM.
+
+DECOMPRESSING AND SEARCHING
+
+Before getting into the direct search algorithms developed, let us study in some depth which would
+be the best option if we decided to decompress the text and then search it. This would be our main
+competitor.
+
+Our experiments, in the whole paper, measure user plus system time over an Intel PIV 1.6 GHz,
+with 256 MB RAM and local disk, running Linux RedHat 8.0, compiling using gcc 3.2 and full
+optimization. We have used two 10 MB texts: WSJ is English text obtained from 1987 Wall Street
+Journal articles (from TREC-3 [40]), while DNA is Homo Sapiens DNA obtained from Genbank
+(www.ncbi.nlm.nih.gov). Patterns were randomly chosen from the text, averaging over 100 patterns.
+
+WSJ was compressed to 38.75% of its original size using compress and 33.57% using gzip. DNA, on
+
+the other hand, was compressed to 27.91% of its original size using compress and 30.43% with gzip.
+
+Note that, if we are willing to apply a decompress-then-search approach, then there is no reason to
+use an LZ78/LZW format. Rather, LZ77 is faster to decompress (although for some types of text LZW
+compresses better). Since our goal is to provide a free tool, we have chosen gzip/gunzip as our LZ77
+compressor (gzip produces ﬁles with .gz extension). Likewise, we have chosen compress/uncompress
+as our LZW compressor (compress produces ﬁles with .Z extension). The source code of these two
+programs are freely available, and they are the most popular in the Unix world. Our aim is to modify the
+decompressor so that it performs pattern matching on the uncompressed text instead of outputting it.
+
+There exist several versions of uncompress, all of which handle the same .Z format. Moreover,
+gunzip is able to decompress this format as well. Interestingly, among all the variants we found, gunzip
+was the fastest. The reason is that uncompress obtains the characters of a block in reverse order, and
+then has to output them reversed again so as to get the correct order. On the other hand, gunzip obtains
+them in reverse order and stores them in reverse order, so the output can be made directly with a
+machine instruction.
+
+In order to uncompress LZ77, on the other hand, gunzip stores the text already uncompressed and,
+given a new block, copies the referenced text substring at the end of the uncompressed text. This is
+faster than decompressing LZW format.
+
+We have modiﬁed the decompression code of gunzip, both for LZW and for LZ77. These are called
+DW and D77 in our experiments. Over each format, we have implemented different plain text search
+algorithms over the uncompressed buffer. Unlike a usual decompression work, we do not write the
+buffer to the output, but rather use it for searching.
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+1114
+
+G. NAVARRO AND J. TARHIO
+
+We have implemented the best two search algorithms we are aware of: BM-Horspool [33] and BOM
+[39], so as to obtain techniques DW-BM, D77-BM, DW-BOM and D77-BOM. We have also tried
+Knuth–Morris–Pratt (KMP) algorithm [41] over LZW, obtaining DW-KMP. Although KMP algorithm
+by itself is far from being competitive, it examines text characters in a forward-only fashion, always
+advancing. This is interesting because there is no need to actually write the uncompressed characters
+in the buffer. On the other hand, LZ77 needs to write the buffer for uncompressing, so there was no
+advantage in combining it with KMP.
+
+In order to simulate the behavior of zgrep, we also implemented DW-grep and D77-grep, which
+output the buffer and use it as an input to grep. We used, however, agrep [42] rather than GNU grep, as
+it was faster.
+
+Besides implementing different search algorithms, we have also included some alternatives that
+evaluate how good these schemes are: DW-decode (just decoding the LZW compressed ﬁle and
+following the referencing chains), DW-nosearch (just uncompressing the LZW ﬁle in memory, without
+searching), and D77-nosearch (just uncompressing the LZ77 ﬁle in memory, without searching).
+Note that DW-decode is a lower bound to any decompress-then-search algorithm on LZW compressed
+text, DW-nosearch is a lower bound to any such algorithm that writes the uncompressed text before
+searching it (this excludes DW-KMP, for example) and D77-nosearch is a lower bound to any algorithm
+that searches LZ77 compressed text.
+
+Figure 3 compares the different approaches. D77-BOM is always the best decompress-then-search
+choice. It is only slightly over its lower bound, D77-nosearch (and usually below DW-nosearch).
+It also beats DW-KMP, which on WSJ improves upon DW-nosearch (and hence any other DW-based
+competitor). However, D77-BOM is clearly slower than DW-decode, which means that there is hope
+for improving upon it with a direct search algorithm. Finally, note that the D-grep approaches are
+popular because they are easily implemented, yet they are far from competitive.
+
+BM-SIMPLE: A SIMPLE BM TECHNIQUE
+
+Consider Figure 4, where we have plotted a hypothetical window approach to a text compressed using
+LZ78/LZW. Each LZ78/LZW block is formed by a line and a ﬁnal box. The box represents the ﬁnal
+explicit character c of the block b = (s, c), while the line represents the implicit characters, that is, a
+text that has to be obtained by resorting to previous referenced blocks (s, then the block referenced by
+s and so on).
+
+Trying to apply a pure BM in this case may be costly, because we need to access the characters
+‘inside’ the blocks (the implicit ones). A character at distance i to the last character of a block needs
+to go i blocks backward in the referencing chain, as each new LZ78/LZW block consists of a previous
+one concatenated with a new letter.
+
+Therefore, we prefer to start by considering the explicit characters in the window. To maximize the
+
+shifts, we go from the rightmost to the leftmost. We precompute a table
+
+B(i, c) = min({i} ∪ {i − j, 1 ≤ j ≤ i ∧ Pj = c})
+
+which gives the maximum safe shift, given that at window position i the text character is c (this is
+similar to the SBM table, and can be easily computed in O(m2 + mσ ) time). Note that the shift is zero
+if the pattern matches that window position.
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+LZGREP: A BOYER–MOORE STRING MATCHING TOOL
+
+1115
+
+D77 approaches on 10 MB of WSJ
+
+D77 approaches on 10 MB of WSJ
+
+)
+e
+m
+
+i
+t
+ 
+
+m
+e
+t
+s
+y
+s
++
+r
+e
+s
+u
+(
+ 
+
+U
+P
+C
+
+ 
+f
+o
+ 
+s
+d
+n
+o
+c
+e
+s
+
+)
+e
+m
+
+i
+t
+ 
+
+m
+e
+t
+s
+y
+s
++
+r
+e
+s
+u
+(
+ 
+
+U
+P
+C
+
+ 
+f
+o
+ 
+s
+d
+n
+o
+c
+e
+s
+
+ 0.5
+
+ 0.45
+
+ 0.4
+
+ 0.35
+
+ 0.3
+
+ 0.25
+
+ 0.2
+
+ 0.15
+
+ 0.5
+
+ 0.45
+
+ 0.4
+
+ 0.35
+
+ 0.3
+
+ 0.25
+
+ 0.2
+
+ 0.15
+
+D77-nosearch
+D77-BM
+D77-BOM
+D77-grep
+
+)
+e
+m
+
+i
+t
+ 
+
+m
+e
+t
+s
+y
+s
++
+r
+e
+s
+u
+(
+ 
+
+U
+P
+C
+
+ 
+f
+o
+ 
+s
+d
+n
+o
+c
+e
+s
+
+ 0
+
+ 20
+
+ 40
+
+ 60
+
+ 80
+
+ 100
+
+pattern length (m)
+
+D77 approaches on 10 MB of DNA
+
+D77-nosearch
+D77-BM
+D77-BOM
+D77-grep
+
+)
+e
+m
+
+i
+t
+ 
+
+m
+e
+t
+s
+y
+s
++
+r
+e
+s
+u
+(
+ 
+
+U
+P
+C
+
+ 
+f
+o
+ 
+s
+d
+n
+o
+c
+e
+s
+
+ 0
+
+ 20
+
+ 40
+
+ 60
+
+ 80
+
+ 100
+
+ 0.5
+
+ 0.45
+
+ 0.4
+
+ 0.35
+
+ 0.3
+
+ 0.25
+
+ 0.2
+
+ 0.15
+
+ 0.5
+
+ 0.45
+
+ 0.4
+
+ 0.35
+
+ 0.3
+
+ 0.25
+
+ 0.2
+
+ 0.15
+
+D77-nosearch
+D77-BM
+D77-BOM
+D77-grep
+
+ 0
+
+ 20
+
+ 40
+
+ 60
+
+ 80
+
+ 100
+
+pattern length (m)
+
+DW approaches on 10 MB of DNA
+
+DW-decode
+DW-nosearch
+DW-BM
+DW-BOM
+DW-KMP
+DW-grep
+
+ 0
+
+ 20
+
+ 40
+
+ 60
+
+ 80
+
+ 100
+
+pattern length (m)
+
+pattern length (m)
+
+Figure 3. Comparison among decompress-then-search approaches, over LZ77
+
+and LZW formats, for WSJ and DNA texts.
+
+Figure 4. A window approach over LZ78/LZW compressed text. Black boxes are the explicit characters at the end
+
+of each block, while the lines are the implicit text that is represented by a reference.
+
+T
+
+P
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+1116
+
+G. NAVARRO AND J. TARHIO
+
+6
+
+3
+
+5
+
+2
+
+4
+
+1
+
+7
+
+T
+
+P
+
+7
+
+3
+
+6
+
+2
+
+5
+
+1
+
+4
+
+T
+
+P
+
+Figure 5. Evaluation orders for the simple algorithm. We use the left one.
+
+As soon as one of the explicit characters permits a non-zero shift, we shift the window. Otherwise,
+we have to consider the implicit characters. When unfolding a block, we obtain a new text character
+(right to left) for each step backward in the referencing chain. For each such character, if we obtain a
+non-zero shift we immediately advance the window and restart the whole process with a new window.
+On the other hand, if after having considered all the characters we have not obtained a non-zero shift,
+then we can report an occurrence of the pattern at the current window position. The window can then
+be advanced by one.
+
+The order in which blocks should be unfolded is not immediate, in particular with respect to the last
+block. On the one hand, the last block can yield good shifts. On the other hand, it is costly to reach
+its relevant characters, as it can only be unfolded from right to left. We consider two choices: we can
+unfold the blocks right to left but leave the last block for the end, or we can start with the last block
+and then unfold the others right to left. Figure 5 illustrates the evaluation orders. In practice the ﬁrst
+approach is usually better, so we stick to it.
+
+The algorithm can be applied on-line, that is, reading the compressed ﬁle block by block from disk.
+We read zero or more blocks until the last block read ﬁnishes ahead of the window, then apply the
+previous procedure until we can shift the window and start again. For each block read we store its last
+character, the block it references and its length (the latter is not available in the compressed ﬁle but
+computed on the ﬂy). We also keep the current position in the uncompressed text.
+
+On the other hand, the LZW format of compress speciﬁes the maximum number of bits, x, used for a
+backward reference. Once 2x blocks have been processed, it still continues generating blocks but these
+cannot be referenced later. For the same reason, once we surpass the 2x blocks, we do not store their
+information during the search until a mark is found in the compressed ﬁle indicating the start of a new
+buffer of blocks.
+
+Note that it is possible that the pattern is totally contained in a block, in which case the above
+algorithm will unfold the block to compare its internal characters against the pattern. It is clear that the
+method is efﬁcient only if the pattern is not too short compared to the block length.
+
+A slight improvement we can make to this scheme is a kind of ‘skip-loop’: instead of delaying the
+shifting until we read enough blocks, try to shift with the explicit character of each new block read.
+This is in practice like considering the explicit characters in left to right order. It performs more and
+shorter shifts but resorts less to previously stored characters. In practice using this skip-loop is always
+convenient.
+
+BM-MULTICHAR: MULTICHARACTER BM
+
+BM-simple, deﬁned in the previous section, is expected to fail to produce good shifts when the
+alphabet is small (for example, DNA). Multicharacter techniques, consisting in shifting by q-tuples
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+LZGREP: A BOYER–MOORE STRING MATCHING TOOL
+
+1117
+
+of characters instead of by one character, have been successfully applied to search uncompressed DNA
+[43]. These techniques effectively increase the alphabet size and produce longer shifts in exchange for
+slightly more costly comparisons.
+
+We have attempted such an approach for our problem. We select a number q and build the shift tables
+considering q-grams. For instance, for the pattern ‘abcdefg’, the 3-gram ‘cde’ considered at the
+last position yields a shift of two, while ‘xxx’ yields a shift of ﬁve. Once the pattern is preprocessed
+we can shift using text q-grams instead of text characters. That is, if the text window is x1x2 . . . xm
+we try to shift using the q-grams xm−q+1 . . . xm, then xm−q . . . xm−1, etc. until x1 . . . xq. If none of
+these q-grams produces a positive shift, then the pattern matches the window. The preprocessing takes
+O(m2 + mσ q ) time.
+The method is applied to the same LZ78/LZW encoding as follows. At search time, we do not store
+the last character of each block, but instead its last q-gram. This last q-gram is computed on the ﬂy, the
+format of the compressed ﬁle is the same as before. To compute it, we take the referenced block, strip
+the ﬁrst character of its ﬁnal q-gram and append the extra character of the new block. Then, the basic
+method is used except we shift using the whole q-grams.
+
+One complication appears when the block is shorter than q. In this case the best choice is to pad its
+q-gram with the last character of the block that appears before it (if this is done all the time then the
+previous block does have a complete q-gram, except for the ﬁrst blocks of the text). However, we must
+be careful when this short block is referenced, since only the characters that really belong to it must be
+taken from its last q-gram.
+Finally, if q is not very small, the shift tables can be very large (O(σ q ) size). We have used
+hashing from the q-grams to an integer range 0 . . . N − 1 to reduce the size of the tables and to lower
+the preprocessing time to O(m2 + mN ). This makes it necessary to have an explicit character-wise
+checking of possible matches, which is required anyway because we cannot efﬁciently check the ﬁrst
+q − 1 characters of the pattern.
+We have implemented this technique using q = 4 (which is appropriate to store the q-gram in a
+word of our machine), and N = 1017, which was experimentally found to be appropriate. We use the
+skip-loop improvement.
+
+BM-BLOCKS: SHIFTING BY COMPLETE BLOCKS
+
+We now present an elegant alternative to BM-multichar that is especially suited to the LZW
+compression format.
+
+The idea is that, upon reading a new block, we could shift using the whole block. However, we
+
+cannot have a B(i, b) table with one entry for each possible block b. Instead, we precompute
+
+J (i, (cid:3)) = max({j, (cid:3) ≤ j < i ∧ Pj−(cid:3)+1...j = Pi−(cid:3)+1...i} ∪ {j, 0 ≤ j < (cid:3) ∧ P1...j = Pi−j+1...i})
+
+that tells, for a given pattern substring of length (cid:3) ending at i, the ending point of its closest previous
+occurrence in P (a partial occurrence trimmed at the beginning of the pattern is also valid). The J
+table can be computed in O(m2) time by the simple trick of going from (cid:3) = 0 to (cid:3) = m and using
+J (∗, (cid:3) − 1) to compute J (∗, (cid:3)), so that for all the cells of the form J (i,∗) there is only one backward
+traversal over the pattern.
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+1118
+
+G. NAVARRO AND J. TARHIO
+
+b r
+
+P
+
+J(last(r),|b |)r
+
+last(r)
+
+Figure 6. Using the whole LZ78/LZW block to shift the window. If its last occurrence in P is ahead, we use J
+
+until ﬁnding the adequate occurrence.
+
+Now, for each new block read br = (s, c), we compute the endpoint of its last occurrence in P ,
+last(r). This is accomplished as follows. We start by considering last(s), that is, the last position where
+the referenced block appears in P . We check whether Plast(s)+1 = c, in which case last(r) = last(s)+1.
+If this is not the case, we need to obtain the previous occurrence of bs in P , but this is also the previous
+occurrence of a pattern substring ending at last(s). So we can use the J table to obtain all the following
+occurrences of bs inside P , until we ﬁnd one that is followed by c (and then this is the last occurrence
+of br = bs c in P ) or we conclude that last(r) = 0.
+Once we have computed the last occurrence of each block inside P , we can use the information to
+shift the window. However, it is possible that the last occurrence of a block br inside P is indeed after
+the current position of br inside the window. In BM-simple this is solved by computing B(i, c), that
+is, the last occurrence of c inside P before position i. This may require too much effort in our case.
+We note that we can use J again in order to ﬁnd the previous occurrences of br inside P until we ﬁnd
+one that is at the same position of br in the window or before. If it is at the same position we cannot
+shift, otherwise we displace the window. Figure 6 illustrates this situation.
+
+The blocks covered by the window are checked one by one, from right to left (excluding the last one
+whose endpoint is not inside the window). As soon as one allows a shift, the window is advanced and
+the process restarted. If no shift is possible, the last block is unfolded until we obtain the contained
+block that corresponds exactly to the end of the window and make a last attempt with it. If all the
+shifting attempts fail, the window position is reported as a match and shifted in one. We do not attempt
+the alternative of unfolding the latter block ﬁrst, because in this case the internal blocks are much
+cheaper to process than the ﬁnal block.
+
+As before, we use a skip-loop technique. We have tried alternatives to obtain larger shifts (namely,
+BM-complete [30]), as well as to avoid repeated inspections of J before displacing the window.
+Yet, none of them has been competitive.
+
+DIRECT SEARCHING FOR SINGLE PATTERNS
+
+We compare now the best alternative of each kind, in order to obtain a recommendation on which
+is the best technique for compressed pattern matching. Alternative direct search algorithms, not
+based on BM [20,25] were already shown to be 30% slower than our approach in earlier work
+[30]. Those experiments were performed on non-standard compression formats that resembled LZ78.
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+LZGREP: A BOYER–MOORE STRING MATCHING TOOL
+
+1119
+
+Searching 10 MB of WSJ
+
+Searching 10 MB of DNA
+
+)
+e
+m
+
+i
+t
+ 
+
+m
+e
+t
+s
+y
+s
++
+r
+e
+s
+u
+(
+ 
+
+U
+P
+C
+
+ 
+f
+o
+
+ 
+s
+d
+n
+o
+c
+e
+s
+
+ 0.5
+
+ 0.45
+
+ 0.4
+
+ 0.35
+
+ 0.3
+
+ 0.25
+
+ 0.2
+
+ 0.15
+
+ 0.1
+
+D77-BOM
+DW-decode
+BM-simple
+BM-multichar
+BM-blocks
+
+)
+e
+m
+
+i
+t
+ 
+
+m
+e
+t
+s
+y
+s
++
+r
+e
+s
+u
+(
+ 
+
+U
+P
+C
+
+ 
+f
+o
+
+ 
+s
+d
+n
+o
+c
+e
+s
+
+ 0
+
+ 20
+
+ 40
+
+ 60
+
+pattern length (m)
+
+ 80
+
+ 100
+
+ 0.5
+
+ 0.45
+
+ 0.4
+
+ 0.35
+
+ 0.3
+
+ 0.25
+
+ 0.2
+
+ 0.15
+
+ 0.1
+
+D77-BOM
+DW-decode
+BM-simple
+BM-multichar
+BM-blocks
+
+ 0
+
+ 20
+
+ 40
+
+ 60
+
+pattern length (m)
+
+ 80
+
+ 100
+
+Figure 7. Comparison between decompress-then-search and direct searching.
+
+Therefore, we do not believe that it is worth porting non-BM algorithms to the format of compress, as
+we already know that these are not competitive.
+
+Figure 7 shows the results. On English text, the best choice is clearly BM-simple. This algorithm
+takes 8–20% less time than D77-BOM, the best decompress-then-search approach (which is already
+much better than zgrep). Moreover, it is usually better than DW-decode, thus no decompress-thensearch 
+algorithm on LZW can possibly beat it. Other more sophisticated search techniques do not
+work well on English text, being even worse than D77-BOM. The latter is also unbeaten for very short
+patterns (m = 5).
+On DNA, on the other hand, the alphabet is much smaller and BM-simple does not perform well
+except for rather long patterns (m ≥ 70). However, the best is, almost always by far, BM-multichar,
+which usually beats DW-decode as well. This shows that no decompress-then-search algorithm on
+LZW could beat BM-multichar. BM-blocks, although elegant, is only interesting in special cases.
+However, note that BM-blocks is the fastest for m = 10. Overall, our techniques take 30%–50% less
+time than D77-BOM, the best decompress-then-search approach. Again, the latter is by far the fastest
+for m = 5.
+We note that the best algorithm depends on the machine. For example, in our previous work [30],
+BM-blocks was better than BM-multichar on DNA text.
+The case m = 5 deserves a special mention. None of our direct search algorithms have worked well
+on it, D77-BOM being by far the best choice. The reason is that ﬁve is smaller than the length of most
+blocks (the average block length is 10–12). Therefore, we must ‘unroll’ many blocks because in many
+cases the window is completely inside a block. For patterns of length 10 or more there is almost always
+at least one explicit character inside the text window.
+
+MULTIPATTERN MATCHING
+
+Let us now consider the case where we want to search for several patterns P 1, . . . , P r simultaneously,
+in order to report all their occurrences. We show how the algorithms developed for single patterns can
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+1120
+
+G. NAVARRO AND J. TARHIO
+
+be extended to handle multiple patterns. We start by considering the decompress-then-search approach
+and then seek for better alternatives.
+We have considered the cases of searching for r = 10–150 patterns simultaneously. Actually, we
+have extended our experiments up to r = 1000 patterns, but we do not show them because none of our
+direct search approaches can compete for r > 150. Also, as this time the search times are much higher,
+the overhead posed by the decompression of different formats is less important than in the case of a
+single pattern.
+
+Decompressing and searching
+
+The best multipattern search algorithms on plain text are WM [35] and SBOM [2] (these are the natural
+extensions of BM and BOM, respectively). So we have created decompress-then-search variants called
+DW-WM, D77-WM, DW-SBOM and D77-SBOM. For the same reason we tried KMP for single
+patterns, we have considered DW-AC, its multipattern extension based on Aho-Corasick (AC) [44].
+We remark that DW-AC does not require writing the uncompressed text in memory.
+
+To simulate the behavior of zgrep, we use again agrep instead of GNU grep. However, since agrep
+also uses the WM algorithm, the difference between D-grep and D-WM is just the use of a pipe in the
+ﬁrst case versus a direct memory buffer in the second. Thus, as one can expect, D-WM was consistently
+better than D-grep. We therefore omit the experiments on D-grep.
+Figure 8 compares all the search algorithms, for r = 10 and r = 100. D77-WM is the best on
+WSJ, while on DNA the best performance is disputed between D77-SBOM and DW-AC. The latter is
+preferable when m is small compared to r. These result remain similar up to r = 1000 at least.
+As can be seen, there is not a clear simple winner as in the case of single patterns. Hence, in order to
+compare against direct search methods, we have created a ﬁctitious algorithm called ‘D-BEST’, which
+is the best over the decompress-then-search algorithms we have tried. In the sequel we examine direct
+search approaches.
+
+Simple and multicharacter BM
+
+The ﬁrst problem when trying to extend the window approach of BM-simple is that different patterns
+may have different lengths. So let us align them to the right and choose the window length of the
+shortest pattern, as illustrated in Figure 9.
+
+The simplest way to extend BM-simple to handle multiple patterns is to deﬁne table B(i, c) so that
+
+it takes into account all the patterns, that is
+
+B(i, c) = min
+k∈1...r
+
+min({i} ∪ {i − j, 1 ≤ j ≤ i ∧ P k
+
+j = c})
+
+where for simplicity we consider patterns truncated to the window length in this formula.
+
+This way, B(i, c) lets us shift the window by the minimum amount permitted amongst the patterns
+we search for, which guarantees that no occurrence will be missed. So we read the characters as for
+BM-simple, until either B(i, c) (cid:10)= 0 for some character c read at window position i, or we read all
+the window. In the latter case, we must still check all our patterns against the text window one by
+one in order to report occurrences, because (1) we may have left out some parts of the patterns due
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+LZGREP: A BOYER–MOORE STRING MATCHING TOOL
+
+1121
+
+Decompress and search on 10 MB of WSJ and 10 patterns
+
+Decompress and search on 10 MB of DNA and 10 patterns
+
+)
+e
+m
+
+i
+t
+ 
+
+m
+e
+t
+s
+y
+s
++
+r
+e
+s
+u
+(
+ 
+
+U
+P
+C
+
+ 
+f
+o
+ 
+s
+d
+n
+o
+c
+e
+s
+
+ 1
+
+ 0.9
+
+ 0.8
+
+ 0.7
+
+ 0.6
+
+ 0.5
+
+ 0.4
+
+ 0.3
+
+ 0.2
+
+ 10
+
+D77-WM
+DW-WM
+D77-SBOM
+DW-SBOM
+DW-AC
+
+ 20
+
+ 30
+
+ 40
+
+ 50
+
+ 60
+
+ 70
+
+ 80
+
+ 90
+
+ 100
+
+pattern length (m)
+
+D77-WM
+DW-WM
+D77-SBOM
+DW-SBOM
+DW-AC
+
+ 1
+
+ 0.9
+
+ 0.8
+
+ 0.7
+
+ 0.6
+
+ 0.5
+
+ 0.4
+
+ 0.3
+
+ 0.2
+
+ 10
+
+)
+e
+m
+
+i
+t
+ 
+
+m
+e
+t
+s
+y
+s
++
+r
+e
+s
+u
+(
+ 
+
+U
+P
+C
+
+ 
+f
+o
+ 
+s
+d
+n
+o
+c
+e
+s
+
+)
+e
+m
+
+i
+t
+ 
+
+m
+e
+t
+s
+y
+s
++
+r
+e
+s
+u
+(
+ 
+
+U
+P
+C
+
+ 
+f
+o
+ 
+s
+d
+n
+o
+c
+e
+s
+
+ 20
+
+ 30
+
+ 40
+
+ 50
+
+ 60
+
+ 70
+
+ 80
+
+ 90
+
+ 100
+
+pattern length (m)
+
+Decompress and search on 10 MB of WSJ and 100 patterns
+
+Decompress and search on 10 MB of DNA and 100 patterns
+
+ 1.6
+
+ 1.4
+
+ 1.2
+
+ 1
+
+ 0.8
+
+ 0.6
+
+ 0.4
+
+ 0.2
+
+ 10
+
+D77-WM
+DW-WM
+D77-SBOM
+DW-SBOM
+DW-AC
+
+)
+e
+m
+
+i
+t
+ 
+
+m
+e
+t
+s
+y
+s
++
+r
+e
+s
+u
+(
+ 
+
+U
+P
+C
+
+ 
+f
+o
+ 
+s
+d
+n
+o
+c
+e
+s
+
+ 20
+
+ 30
+
+ 40
+
+ 50
+
+ 60
+
+ 70
+
+ 80
+
+ 90
+
+ 100
+
+pattern length (m)
+
+ 1.6
+
+ 1.4
+
+ 1.2
+
+ 1
+
+ 0.8
+
+ 0.6
+
+ 0.4
+
+ 0.2
+
+D77-WM
+DW-WM
+D77-SBOM
+DW-SBOM
+DW-AC
+ 20
+ 30
+
+ 10
+
+ 40
+
+ 50
+
+ 60
+
+ 70
+
+ 80
+
+ 90
+
+ 100
+
+pattern length (m)
+
+Figure 8. Comparison among multipattern decompress-then-search approaches.
+
+T
+
+P 1
+
+P 2
+
+P i
+
+P r
+
+Figure 9. A window approach for multipattern matching over LZ78/LZW compressed text.
+
+It is a generalization of Figure 4.
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+1122
+
+G. NAVARRO AND J. TARHIO
+
+to truncation, and (2) table B gives minimum shifts over the set of patterns, so no occurrence of any
+particular pattern is guaranteed.
+
+An efﬁciency problem of BM-simple is that, as explained, even if we have read a sequence of
+characters that do not match any of our patterns, it might be that table B does not let us shift the
+window. Imagine for example that we have patterns abab and baba, and read any text window formed
+by a combination of a’s and b’s, say bbaa. Since B(i, a) = B(i, b) = 0 for any i, we will always verify
+those text windows. We studied several alternatives to alleviate this problem. They are all based on
+more precisely tracking which patterns may match. They rarely improve upon BM-simple, and when
+they do, they lose against decompress-then-search competitors anyway.
+We also adapt the idea of shifting using q-grams rather than simple characters, as for BM-multichar.
+We still use q = 4 and N = 1017. With more patterns we also tried larger N values (and also larger q),
+but we obtained no improvement in doing that, up to r = 1000.
+
+Shifting by complete blocks
+
+We try to adapt the idea of BM-blocks to multiple patterns. However, this turns out to be rather difﬁcult.
+With a single pattern P we can compute the last occurrence of a text block inside P , by considering
+the candidate position given by the referenced block and then iterating using table J (i, (cid:3)) until ﬁnding
+that last occurrence. Then, if the last occurrence happens to be ahead of the block, J (i, (cid:3)) is used again
+to ﬁnd previous occurrences.
+
+With multiple patterns, the last occurrence of the referenced block is still a single window position,
+but it may appear in several patterns at that same position. Finding which of them can be extended
+by the last character of the current block can be a time-consuming task. The same can be said about
+moving from such a set of positions to the ‘previous’ set of positions, which might also appear in
+several patterns.
+
+What we need is a data structure where every different substring of every pattern is represented at a
+single place, so as to store at that place the last occurrence position in the pattern set. The natural choice
+is a trie data structure where we store not only the patterns, but also every sufﬁx of every pattern, that
+i...m, for 1 ≤ k ≤ r and 1 ≤ i ≤ m. Since the trie data structure stores one node
+is, the set of strings P k
+for each preﬁx of each string stored, it follows that there will be one node for each preﬁx of each sufﬁx
+of every pattern or, which is the same, one node for each substring of each pattern in the set.
+
+Figure 10 gives an example for the pattern set formed by four words: ‘para’, ‘pare’, ‘hola’
+and ‘arar’. We have inserted the patterns and their sufﬁxes (as shown in the top part of the ﬁgure).
+We have numbered the nodes as they were created when inserting the pattern sufﬁxes in the trie.
+The dotted arrows are the so-called sufﬁx links, connecting the node representing substring aw to that
+representing substring w, where a is a single character.
+
+On top of each node we have drawn a list of numbers. These are the ﬁnal positions where the
+substring w represented by the node appears in some pattern of the set. We also include ﬁnal positions
+(that is, lengths) of pattern preﬁxes that match a sufﬁx of w. The lists are stored in decreasing order
+and without repetitions. Although we draw a hyphen to separate full occurrences of w in the patterns
+from sufﬁxes of w that match pattern preﬁxes, it is easy to distinguish them anyway because the former
+cannot be smaller than |w| and the latter are smaller than |w|.
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+LZGREP: A BOYER–MOORE STRING MATCHING TOOL
+
+1123
+
+para
+ara
+ra
+a
+
+4,3,2,1
+
+5
+
+4
+
+13
+
+1
+
+14
+
+3
+
+21
+
+2
+
+18
+
+1
+
+1
+
+4,3,2
+
+8
+
+pare
+are
+re
+e
+
+hola
+ola
+la
+a
+
+arar
+rar
+ar
+r
+4,3 -
+
+1
+
+a
+
+e
+
+l
+
+a
+
+r
+
+r
+
+7
+
+4
+
+11
+
+3
+
+16
+
+4 - 1
+
+20
+
+3 - 2
+
+3
+4 - 2
+
+24
+
+r
+
+o
+
+a
+
+l
+
+a
+
+a
+
+e
+
+4,3,2
+
+6
+
+2
+
+15
+
+4 - 1
+
+22
+
+3
+
+19
+
+2 - 1
+
+2
+
+4,3 - 1
+
+9
+
+4
+
+12
+
+r
+
+a
+
+a
+
+e
+
+4 -
+
+2
+
+23
+
+4 - 1
+
+17
+
+4 - 3,1
+
+4
+
+4
+
+10
+
+a
+
+e
+
+h
+
+l
+
+o
+
+p
+
+r
+
+0
+
+Figure 10. A trie data structure built over the sufﬁxes indicated on top, plus some additional
+
+information needed by the algorithm.
+
+In Figure 10, the list of node six (‘ar’) is 4, 3, 2, which means that it appears in some pattern of
+the set ﬁnishing at those positions. It has a sufﬁx link to node 8 (‘r’). Node seven (‘ara’) occurs at
+positions four and three, but also its sufﬁx of length one is a preﬁx of some pattern in the set (‘arar’).
+It is easy to build the trie by ﬁrst inserting each full pattern and then its shorter sufﬁxes, adding
+the sufﬁx links at the same time. The lists of full substring occurrences are also created at the time
+we insert the sufﬁxes of each pattern. Lastly, the ﬁnal parts of the lists, of node sufﬁxes that match
+pattern preﬁxes, is computed by a level-wise traversal over the trie. Note that all the sufﬁxes of w that
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+1124
+
+G. NAVARRO AND J. TARHIO
+
+are preﬁxes of a pattern are also sufﬁxes of aw that are preﬁxes of a pattern. So, to compute the ﬁnal
+section of the list for a node representing aw, we use the sufﬁx link to retrieve the ﬁnal section of the
+list for the node representing w. The only extra action needed is to add |w| to the list if w itself is a
+preﬁx of some pattern. This is easily known by checking whether the node representing string w has
+|w| in its list of full occurrences.
+This trie is used to replace table J (i, (cid:3)) as follows. For each new block we ﬁrst ﬁnd whether it is a
+substring of some pattern, by ﬁnding out which node it corresponds to. The ﬁrst empty block clearly
+corresponds to the root of the trie (which represents the empty string). For a new block b = (s, c),
+we ﬁnd out the trie node ns corresponding to block s, and see if one can follow by an edge labeled c.
+If we can, then the child node nb corresponds to b, otherwise b is not a substring of any pattern.
+If there is such a node nb, then we can ﬁnd all the ﬁnal positions where b occurs inside any pattern,
+in the list associated to node nb. This list is conveniently sorted in decreasing order so we can ﬁnd the
+largest useful position, that is, the one not exceeding the position of b in the current window. With this
+information we can determine whether a shift is possible or not.
+
+The above technique must be slightly complicated to account for partial matches, that is, for cases
+where block b does not occur inside any pattern, but its sufﬁx matches a pattern preﬁx. For each
+block, we do not only store its corresponding trie node, but also an indication telling us whether the
+block appears completely or just its sufﬁx appears as a preﬁx. If b = (s, c) and s appears partially,
+then b can only appear partially. To ﬁnd its appropriate node nb, we try to descend from ns by c.
+We can descend only if the appropriate edge exists and the child node is a preﬁx of some pattern
+(that is, if it represents string w, then |w| must appear in its list). If we can descend, we are done
+and this is a partial occurrence for b. If we cannot, it still might be that we can ﬁnd a proper node
+by following sufﬁx links from bs and trying to descend by character c, under the same condition of
+arriving at a node that is a pattern preﬁx. If we ﬁnally arrive at the root node and still cannot descend
+by c, then we associate the root node to b, and can shift the window until completely surpassing
+block b. A similar process is followed if ns is a complete occurrence for s, but we cannot ﬁnd a
+descendant by character c. Since b cannot have a complete occurrence, we use the same mechanism of
+following sufﬁx links in order to ﬁnd a partial occurrence. Note that if block b turns out to have only
+partial occurrences, then its occurrences in the pattern set correspond only to the last part of the list of
+node nb.
+
+The rest of the algorithm is the same as for BM-blocks on single patterns.
+
+DIRECT SEARCHING FOR MULTIPLE PATTERNS
+
+Figure 11 compares the different approaches to searching for multiple patterns. The curves omitted
+fall outside the plots. On WSJ, BM-simple is the only technique that beats D-BEST. It always does so
+for 10 patterns, while for 100 patterns it wins for m > 70. On DNA, BM-multichar and BM-blocks
+are the only ones beating D-BEST for 10 patterns. BM-multichar wins for m ≥ 15, while BM-blocks
+wins for m = 10. On 100 patterns, D-BEST is unbeaten.
+Note that, although the BM-blocks idea is elegant, the overhead for constructing and managing
+the trie quickly becomes dominant as m grows (the construction takes time O(rm2)). However, the
+algorithm is rather attractive for a small number of short patterns, r = m = 10, on DNA text. This is
+the only point where BM-multichar could not beat D-BEST.
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+LZGREP: A BOYER–MOORE STRING MATCHING TOOL
+
+1125
+
+Searching for 10 patterns on 10 MB of WSJ
+
+Searching for 10 patterns on 10 MB of DNA
+
+D-BEST
+BM-simple
+BM-multichar
+BM-blocks
+
+)
+e
+m
+
+i
+t
+ 
+
+m
+e
+t
+s
+y
+s
++
+r
+e
+s
+u
+(
+ 
+
+U
+P
+C
+
+ 
+f
+o
+
+ 
+s
+d
+n
+o
+c
+e
+s
+
+ 20
+
+ 30
+
+ 40
+
+ 50
+
+ 60
+
+ 70
+
+ 80
+
+ 90
+
+ 100
+
+pattern length (m)
+
+ 1.2
+
+ 1
+
+ 0.8
+
+ 0.6
+
+ 0.4
+
+ 0.2
+
+ 0
+
+ 10
+
+D-BEST
+BM-simple
+BM-multichar
+BM-blocks
+
+ 20
+
+ 30
+
+ 40
+
+ 50
+
+ 60
+
+ 70
+
+ 80
+
+ 90
+
+ 100
+
+pattern length (m)
+
+Searching for 100 patterns on 10 MB of WSJ
+
+Searching for 100 patterns on 10 MB of DNA
+
+D-BEST
+BM-simple
+BM-multichar
+BM-blocks
+
+)
+e
+m
+
+i
+t
+ 
+
+m
+e
+t
+s
+y
+s
++
+r
+e
+s
+u
+(
+ 
+
+U
+P
+C
+
+ 
+f
+o
+ 
+s
+d
+n
+o
+c
+e
+s
+
+ 20
+
+ 30
+
+ 40
+
+ 50
+
+ 60
+
+ 70
+
+ 80
+
+ 90
+
+ 100
+
+pattern length (m)
+
+ 1.6
+
+ 1.4
+
+ 1.2
+
+ 1
+
+ 0.8
+
+ 0.6
+
+ 0.4
+
+ 0.2
+
+ 10
+
+D-BEST
+BM-multichar
+BM-blocks
+
+ 20
+
+ 30
+
+ 40
+
+ 50
+
+ 60
+
+ 70
+
+ 80
+
+ 90
+
+ 100
+
+pattern length (m)
+
+)
+e
+m
+
+i
+t
+ 
+
+m
+e
+t
+s
+y
+s
++
+r
+e
+s
+u
+(
+ 
+
+U
+P
+C
+
+ 
+f
+o
+
+ 
+s
+d
+n
+o
+c
+e
+s
+
+)
+e
+m
+
+i
+t
+ 
+
+m
+e
+t
+s
+y
+s
++
+r
+e
+s
+u
+(
+ 
+
+U
+P
+C
+
+ 
+f
+o
+ 
+s
+d
+n
+o
+c
+e
+s
+
+ 1.2
+
+ 1
+
+ 0.8
+
+ 0.6
+
+ 0.4
+
+ 0.2
+
+ 0
+
+ 10
+
+ 1.6
+
+ 1.4
+
+ 1.2
+
+ 1
+
+ 0.8
+
+ 0.6
+
+ 0.4
+
+ 0.2
+
+ 10
+
+Figure 11. Comparison among multipattern search approaches.
+
+The above experiment does not clearly show which is the range of r values where each algorithm is
+useful. Figure 12 shows those ranges in more detail. It is shown that there is a minimum m value where
+BM-simple beats D-BEST on English text, and that this value becomes more stringent as r grows.
+On DNA, there are minimum and maximum values among which BM-multichar beats D-BEST, and
+the space among them also narrows as r grows. It is rather clear that our methods are no longer useful
+for more than 150 search patterns. There are, however, several applications where the areas in which
+we have succeeded are of interest.
+
+LZGREP: A DIRECT COMPRESSED TEXT SEARCH TOOL
+
+Using the best direct search algorithms developed, we built a compressed text search tool called LZgrep
+(available from www.dcc.uchile.cl/∼gnavarro/software), with the aim of replacing the simpler but
+slower zgrep. LZgrep can search ﬁles compressed with Unix compress (an LZW compressor) and
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+1126
+
+G. NAVARRO AND J. TARHIO
+
+)
+
+m
+
+(
+ 
+
+h
+t
+g
+n
+e
+l
+ 
+n
+r
+e
+t
+t
+a
+p
+
+ 100
+ 90
+ 80
+ 70
+ 60
+ 50
+ 40
+ 30
+ 20
+ 10
+
+Ranges of interest for m on WSJ
+
+min m for BM-simple
+
+ 20
+
+ 40
+
+ 80
+
+ 60
+ 100
+number of patterns (r)
+
+ 120
+
+ 140
+
+)
+
+m
+
+(
+ 
+h
+t
+g
+n
+e
+l
+ 
+n
+r
+e
+t
+t
+a
+p
+
+ 100
+ 90
+ 80
+ 70
+ 60
+ 50
+ 40
+ 30
+ 20
+ 10
+
+ 10
+
+Ranges of interest for m on DNA
+
+min m for BM-multichar
+max m for BM-multichar
+
+ 20
+
+ 40
+
+ 30
+ 50
+number of patterns (r)
+
+ 60
+
+ 70
+
+Figure 12. The ranges of m and r values where our algorithms are superior to the
+
+decompress-then-search approach.
+
+with Unix gzip (an LZ77 compressor), both of which are in the public domain. In order to use the
+best algorithm, we resort at times to a decompress-then-search approach, especially for multipattern
+searches and necessarily on LZ77.
+
+For the sake of replacing zgrep, we have to be as compatible as possible with Gnu grep. In particular,
+grep handles regular expressions, which we have not addressed. If LZgrep receives such unsupported
+patterns or is requested to use an unsupported option, it simply invokes zgrep. This guarantees that
+LZgrep is faster than zgrep whenever possible, and at the same time ensures its full functionality.
+
+The main difference in the behavior of the search algorithms when we simulate grep is that we do
+not have to output the text positions that match, but rather the contents of the text lines that contain
+an occurrence of the pattern(s). Therefore, upon ﬁnding an occurrence, we uncompress the current
+line by accessing the contiguous blocks ahead and behind until we uncompress a whole line. Then we
+send the uncompressed line to the standard output and shift the window to the beginning of the next
+line.
+
+Other differences in the search behavior can be obtained through the search options of grep. One of
+the main changes in the search algorithms made to accommodate search options was that we remember,
+for each block, the number of newline characters inside it and the byte offset of the ﬁrst newline
+character with respect to the beginning of the block. This is easily computed for each new block read.
+The options and usage can be obtained by running LZgrep without arguments. We mention here only
+
+those functionalities that deserve some note on their implementation.
+
+Print several lines preceding and following an occurrence: we avoided uncompressing text lines
+
+more than once by storing the last uncompressed lines.
+
+Print the byte offset of each line reported, counting from the beginning of the ﬁle: this is obtained by
+remembering the byte offset of the current block and adjusting it as we uncompress the text that has to
+be shown.
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+LZGREP: A BOYER–MOORE STRING MATCHING TOOL
+
+1127
+
+Count the number of matching lines rather than output them: instead of uncompressing the
+surrounding blocks in order to ﬁnd the next newline character, we skip all the blocks without newlines
+that follow, and position the window right after the ﬁrst newline of the next block.
+
+Ignore upper/lower case: this is elegantly handled in the LZW format, by changing the meaning of
+the initial default blocks 0–255, so that block codes corresponding to upper case letters are mapped
+to their lower case versions. The result is that the uncompressed text will be seen as all lower case.
+Any search pattern is mapped to lower case too.
+
+Print the line numbers of the lines output: this is handled by keeping the current line number, thanks
+
+to the information maintained on the newlines inside blocks.
+
+Output the lines that do not contain occurrences: this requires a rather inefﬁcient handling, which
+includes decompressing most of the ﬁle, so we opted for not implementing this option, but just
+switching to zgrep.
+
+It is rather difﬁcult to choose the best search algorithm as the default. For example, we have seen
+that, depending on the text type (English or DNA), the correct option changes. Worse than that, there is
+no easy way to determine which is the type of the text we are going to search. By reading the ﬁrst bytes
+of the compressed ﬁle we can establish that it was compressed using LZ77 or LZW, but nothing else.
+Hence we have chosen the defaults to be the search algorithms that, with higher probability, would
+behave reasonably well on different types of texts.
+
+On LZW, for single pattern matching we use BM-simple. For multipattern matching we use BMsimple 
+until 10 patterns, DW-WM until 100 patterns and DW-SBOM for more than 100 patterns.
+On LZ77, for single patterns we use D77-BOM. For multipattern matching we use D77-WM until
+100 patterns, and D77-SBOM for more than 100 patterns.
+
+In case the algorithm chosen is not the best for a particular purpose, and also in order to ease the use
+of LZgrep for research purposes, we added an option that permits choosing any of the algorithms we
+have considered in this work.
+
+CONCLUSIONS
+
+We have presented several practical algorithms for direct searching of single and multiple patterns
+on LZW compressed text. Most of the research on this topic is more theoretical and involved.
+Our algorithms are much simpler and, in practice, faster than previous work. There exist some
+competitive practical alternatives on other compression formats, but these formats have not (yet) been
+popularized enough to make these alternatives interesting to a wide audience.
+
+Our goal was the development of a widely applicable compressed text search tool. This is of great
+interest in order to maintain all the user’s ﬁles usually in compressed form, uncompressing them
+only when necessary. The growing gap between CPU and disk times makes this idea more and more
+appealing as technology evolves. In order to support this scenario in a form that is comfortable for
+general use, it is imperative to be able to search the compressed ﬁles directly without the need to
+manually uncompress them before the search.
+
+Such a tool, zgrep, exists at this moment in the form of a very simple script that uncompresses the
+text and sends it to a pattern matching software, grep. We have shown that it is possible to be up to
+50% faster than zgrep, by searching the compressed text directly without decompression.
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+1128
+
+G. NAVARRO AND J. TARHIO
+
+As a result, we have developed LZgrep, a free program§ designed to replace zgrep. LZgrep solves
+a signiﬁcant subset of the search problems addressed by grep, namely exact single and multiple
+pattern searching, and it resorts to zgrep in case of an unsupported search problem. This ensures
+full functionality and at the same time improved performance in the most common cases. We note
+that, although we have focused on the LZW format, we have in passing obtained decompress-
+then-search algorithms for the more popular LZ77 format that are much faster than zgrep, because
+we avoid the overhead of communication between two unrelated programs (the decompressor and
+grep). These capabilities are also incorporated into LZgrep, which makes it appealing to search LZ77
+compressed ﬁles as well.
+
+Note that several environments currently exist that intercept all the communication to the ﬁle system
+so as to store the ﬁles in compressed form in a way that is transparent to the user. A text search is
+naturally solved by decompressing the ﬁle (by means of reading it from disk) and then searching it.
+Tools like LZgrep could be incorporated into those environments in order to provide a more efﬁcient
+native search over the compressed search.
+
+It would be interesting to extend LZgrep to support more sophisticated search problems, in particular
+approximate searching and regular expression searching. In the former case, we have considered a
+promising search algorithm based on direct multipattern search on compressed text [45], which we
+adapted for our case. However, it turned out to be non-competitive when we compared it against welltuned 
+versions of the decompress-then-search approach (in the original paper they showed superiority
+against the equivalent of zgrep, based on agrep). For regular expression searching, an algorithm already
+exists [28], and it is also possible to reduce the problem mainly to multipattern searching [46]. Yet, for
+the same reasons of approximate searching, we do not believe that these would be practical against a
+well-tuned competitor. Thus, ﬁnding a more practical solution to this problem remains an open issue.
+Finally, we must keep up to date with the best developments in plain text searching, so as to adapt
+them to compressed text searching, and also to use them on the uncompress-then-search portions of
+LZgrep. There are some recent promising algorithms for multipattern searching [47].
+
+ACKNOWLEDGEMENTS
+
+We thank Marcos Rojas (University of Chile) and Carlos Avendano-P´erez (INAOEP, Mexico), for their help in
+implementing LZgrep.
+
+REFERENCES
+
+1. Crochemore M, Rytter W. Text Algorithms. Oxford University Press: Oxford, 1994.
+2. Navarro G, Rafﬁnot M. Flexible Pattern Matching in Strings. Cambridge University Press: Cambridge, 2002.
+3. Boyer RS, Moore JS. A fast string searching algorithm. Communications of the ACM 1977; 20(10):762–772.
+4. Bell T, Cleary J, Witten I. Text Compression. Prentice-Hall, 1990.
+5. Ziv J, Lempel A. A universal algorithm for sequential data compression. IEEE Transactions on Information Theory 1977;
+
+23:337–343.
+
+§Use of it for commercial advantage requires explicit permission from the authors.
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+LZGREP: A BOYER–MOORE STRING MATCHING TOOL
+
+1129
+
+6. Ziv J, Lempel A. Compression of individual sequences via variable length coding. IEEE Transactions on Information
+
+Theory 1978; 24:530–536.
+
+7. Welch TA. A technique for high performance data compression. IEEE Computer Magazine 1984; 17(6):8–19.
+8. Burrows M, Wheeler D. A block sorting lossless data compression algorithm. Technical Report 124, Digital Equipment
+
+Corporation, 1994.
+
+9. Amir A, Benson G. Efﬁcient two-dimensional compressed matching. Proceedings of the 2nd IEEE Data Compression
+
+Conference (DCC’92). IEEE Press, 1992; 279–288.
+
+10. Huffman D. A method for the construction of minimum-redundancy codes. Proceedings of the I.R.E. 1952; 40(9):1090–
+
+1101.
+
+11. Moffat A. Word-based text compression. Software Practice and Experience 1989; 19(2):185–198.
+12. Moura E, Navarro G, Ziviani N, Baeza-Yates R. Fast and ﬂexible word searching on compressed text. ACM Transactions
+
+on Information Systems 2000; 18(2):113–139.
+
+13. Witten I, Moffat A, Bell T. Managing Gigabytes (2nd edn). Morgan Kaufmann: New York, 1999.
+14. Navarro G, Moura E, Neubert M, Ziviani N, Baeza-Yates R. Adding compression to block addressing inverted indexes.
+
+Information Retrieval 2000; 3(1):49–77.
+
+15. Manber U, Wu S. Glimpse: A tool to search through entire ﬁle systems. Technical Report 93–34, Department of Computer
+
+Science, University of Arizona, 1993.
+
+16. Manber U. A text compression scheme that allows fast searching directly in the compressed ﬁle. ACM Transactions on
+
+Information Systems 1997; 15(2):124–136.
+
+17. Shibata Y, Matsumoto T, Takeda M, Shinohara A, Arikawa S. A Boyer–Moore type algorithm for compressed pattern
+matching. Proceedings of the 11th Annual Symposium on Combinatorial Pattern Matching (CPM’00) (Lecture Notes in
+Computer Science, vol. 1848). Springer, 2000; 181–194.
+
+18. Miyazaki M, Shinohara A, Takeda M. Speeding up the pattern matching machine for compressed texts. Transactions of
+
+Information Processing Society of Japan 1998; 39(9):2638–2648.
+
+19. Klein S, Shapira D. Pattern matching in Huffman encoded texts. Proceedings of the 11th IEEE Data Compression
+
+Conference (DCC’01). IEEE Press, 2001; 449–458.
+
+20. Navarro G, Rafﬁnot M. Practical and ﬂexible pattern matching over Ziv–Lempel compressed text. Journal of Discrete
+
+Algorithms 2004; 2(3):347–371.
+
+21. Klein S, Shapira D. A new compression method for compressed matching. Proceedings of the 10th IEEE Data Compression
+
+Conference (DCC’00). IEEE Press, 2000; 400–409.
+
+22. Kida T, Shibata Y, Takeda M, Shinohara A, Arikawa S. A unifying framework for compressed pattern matching.
+Proceedings of the 6th International Symposium on String Processing and Information Retrieval (SPIRE’99). IEEE
+Computer Society Press: Los Alamitos, CA, 1999; 89–96.
+
+23. Amir A, Benson G, Farach M. Let sleeping ﬁles lie: Pattern matching in Z-compressed ﬁles. Journal of Computer and
+
+System Sciences 1996; 52(2):299–307.
+
+24. Kida T, Takeda M, Shinohara A, Miyazaki M, Arikawa S. Multiple pattern matching in LZW compressed text. Proceedings
+
+of the 8th IEEE Data Compression Conference (DCC’98). IEEE Press, 1998.
+
+25. Kida T, Takeda M, Shinohara A, Miyazaki M, Arikawa S. Shift-And approach to pattern matching in LZW compressed text.
+Proceedings of the 10th Annual Symposium on Combinatorial Pattern Matching (CPM’99) (Lecture Notes in Computer
+Science, vol. 1645). Springer, 1999; 1–13.
+
+26. Gasieniec L, Karpinksi M, Plandowski W, Rytter W. Efﬁcient algorithms for Lempel–Ziv encodings. Proceedings of the
+
+5th Scandinavian Workshop in Algorithmic Theory (SWAT’96). Springer, 1996.
+
+27. K¨arkk¨ainen J, Navarro G, Ukkonen E. Approximate string matching over Ziv–Lempel compressed text. Journal of Discrete
+
+Algorithms 2003; 1(3/4):313–338.
+
+28. Navarro G. Regular expression searching on compressed text. Journal of Discrete Algorithms 2003; 1(5/6):423–443.
+29. Farach M, Thorup M. String matching in Lempel–Ziv compressed strings. Algorithmica 1998; 20:388–404.
+30. Navarro G, Tarhio J. Boyer–Moore string matching over Ziv–Lempel compressed text. Proceedings of the 11th Annual
+Symposium on Combinatorial Pattern Matching (CPM’00) (Lecture Notes in Computer Science, vol. 1848). Springer,
+2000; 166–180.
+
+31. Miller V, Wegman M. Variations on a theme by Ziv and Lempel. Combinatorial Algorithms on Words (NATO ASI Series F,
+
+vol. 12). Springer: Berlin, 1985; 131–140.
+
+32. Fiala E, Greene D. Data compression with ﬁnite windows. Communications of the ACM 1989; 32(4):490–505.
+33. Horspool RN. Practical fast searching in strings. Software Practice and Experience 1980; 10:501–506.
+34. Sunday D. A very fast substring search algorithm. Communications of the ACM 1990; 33(8):132–142.
+35. Wu S, Manber U. A fast algorithm for multi-pattern searching. Report TR-94-17, Department of Computer Science,
+
+University of Arizona, 1994.
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+1130
+
+G. NAVARRO AND J. TARHIO
+
+36. Commentz-Walter B. A string matching algorithm fast on the average. Proceedings of the 6th International Colloquium
+on Automata, Languages and Programming (ICALP’79) (Lecture Notes in Computer Science, vol. 71). Springer, 1979;
+118–132.
+
+37. Crochemore M, Czumaj A, Ga¸sieniec L, Jarominek S, Lecroq T, Plandowski W, Rytter W. Speeding up two string matching
+
+algorithms. Algorithmica 1994; 12(4/5):247–267.
+
+38. Navarro G, Rafﬁnot M. Fast and ﬂexible string matching by combining bit-parallelism and sufﬁx automata. ACM Journal
+
+of Experimental Algorithmics (JEA) 2000; 5(4).
+
+39. Allauzen C, Crochemore M, Rafﬁnot M. Efﬁcient experimental string matching by weak factor recognition. Proceedings
+of the 12th Annual Symposium on Combinatorial Pattern Matching (CPM’01) (Lecture Notes in Computer Science,
+vol. 2089). Springer, 2001; 51–72.
+
+40. Harman D. Overview of the Third Text REtrieval Conference. Proceedings of the Third Text REtrieval Conference
+
+(TREC-3) NIST Special Publication 500-207, 1995; 1–19.
+
+41. Knuth D, Morris J, Pratt V. Fast pattern matching in strings. SIAM Journal on Computing 1977; 6(1):323–350.
+42. Wu S, Manber U. Agrep–a fast approximate pattern-matching tool. Proceedings of the USENIX Technical Conference,
+
+Berkeley, CA. USENIX Association, 1992; 153–162.
+
+43. Peltola H, Tarhio J. String matching in the DNA alphabet. Software Practice and Experience 1997; 27(7):851–861.
+44. Aho A, Corasick M. Efﬁcient string matching: An aid to bibliographic search. Communications of the ACM 1975;
+
+18(6):333–340.
+
+45. Navarro G, Kida T, Takeda M, Shinohara A, Arikawa S. Faster approximate string matching over compressed text.
+
+Proceedings of the 11th IEEE Data Compression Conference (DCC’01). IEEE Press, 2001; 459–468.
+
+46. Watson B. A new regular grammar pattern matching algorithm. Proceedings of the 4th European Symposium on Algorithms
+
+(ESA’96) (Lecture Notes in Computer Science, vol. 1136). Springer, 1996; 364–377.
+
+47. Kyt¨ojoki J, Salmela L, Tarhio J. Tuning string matching for huge pattern sets. Proceedings of the 14th Annual Symposium
+on Combinatorial Pattern Matching (CPM’03) (Lecture Notes in Computer Science, vol. 2676). IEEE Press, 2003;
+211–224.
+
+Copyright c(cid:2) 2005 John Wiley & Sons, Ltd.
+
+Softw. Pract. Exper. 2005; 35:1107–1130
+
+

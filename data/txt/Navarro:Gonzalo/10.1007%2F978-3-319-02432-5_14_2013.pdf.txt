@@ -1,0 +1,1349 @@
+Compact Querieable Representations
+
+of Raster Data(cid:4)
+
+Guillermo de Bernardo1, Sandra ´Alvarez-Garc´ıa1, Nieves R. Brisaboa1,
+
+Gonzalo Navarro2, and Oscar Pedreira1
+
+1 Databases Lab., University of A Coru˜na, Spain
+
+2 Department of Computer Science, University of Chile, Chile
+
+Abstract. In Geographic Information Systems (GIS) the attributes of
+the space (altitude, temperature, etc.) are usually represented using a
+raster model. There are no compact representations of raster data that
+provide eﬃcient query capabilities. In this paper we propose compact representations 
+to eﬃciently store and query raster datasets in main memory.
+ We experimentally compare our proposals with traditional storage
+mechanisms for raster data, showing that our structures obtain competitive 
+space performance while eﬃciently answering range queries involving
+the values stored in the raster.
+
+1
+
+Introduction
+
+The raster model is widely used to represent spatial attributes [14]. A raster is
+essentially a matrix representing a region of the space, in which the space is split
+into cells and a value of the spatial attribute is stored for each of these cells. An
+uncompressed raster representation requires much space (e.g., a 50, 000× 50, 000
+grid of integers requires around 10 GB), so it is typically stored in secondary
+memory. Compressed raster representations are mainly designed to reduce storage,
+ and are based on well-known compression techniques such as run-length
+encoding or LZW [15]. In these representations the full ﬁle must be decompressed 
+even to display a small region of the space. Some representations split
+the raster into ﬁxed size tiles and compress each tile independently, providing
+some level of direct access to regions and taking advantage of the locality of
+values to enhance compression (for example, GeoT IF F 1 images can be used to
+represent raster data and they support this partition into tiles with diﬀerent
+compression techniques including LZW).
+
+Geographic Information Systems (GIS) [16,14] routinely make use of raster
+data to represent various kinds of information. They usually need not only direct
+access to regions (e.g. to display a local map), but also need to ﬁnd the cells whose
+
+re iv eds
+
+:
+
+The original version of this chapter was 
+corrected. The Erratum to this chapter is available at DOI:
+(cid:2) GdB, NB, SAG and OP were funded by MICINN (PGE and FEDER) grants
+TIN2009-14560-C03-02, TIN2010-21246-C02-01 and CDTI CEN-20091048, and by
+Xunta de Galicia (co-funded with FEDER) ref. 2010/17. GN was founded by Millennium 
+Nucleus Information and Coordination in Networks ICM/FIC P10-024F.
+
+ The copyright line was incorrect. This has been
+
+10.1007/978-3-319-02432-5 33
+
+1 http://trac.osgeo.org/geotiff/
+O. Kurland, M. Lewenstein, and E. Porat (Eds.): SPIRE 2013, LNCS 8214, pp. 96–108, 2013.
+c(cid:2) Springer-Verlag Berlin Heidelberg 2013
+
+Compact Querieable Representations of Raster Data
+
+97
+
+value is within some range. A classic example is the visualization of pressure or
+temperature bands, which require retrieving the coordinates that have values
+within a given range. Another example is retrieving the regions of a raster with
+an altitude above a given threshold to ﬁnd zones with snow alert, or below a value
+to ﬁnd regions with risk of ﬂoods. However, usual raster representations lack
+indexing capabilities on the values stored in the raster. These representations
+need to traverse the complete raster in order to return the cells that contain a
+given value, even when the results may be restricted to a small subregion of the
+space.
+
+One solution is to consider the raster as a 3-dimensional matrix and use
+computational geometry solutions to answer all these queries as range reporting
+queries [5]. However, these solutions require superlinear space and therefore they
+are not suitable to the large datasets involved. Reading the raster row-wise and
+storing the sequence of values we could use a compressed sequence representation
+[10,9,1] to return the cells with a given value (or a range of values [10,13])
+eﬃciently, but further restricting the search to a spatial range is not eﬃciently
+handled. Furthermore, these sequence representations achieve at best the zeroorder 
+entropy space of the sequence, and this is not a signiﬁcant space reduction
+in many cases.
+
+In this paper we present several proposals that aim at providing at the same
+time a compact representation of raster data and eﬃcient support of queries involving 
+spatial windows and intervals of values. We design our structures to solve
+queries such as retrieving all the values of a given area, retrieving all the coordinates 
+with a given value, or retrieving all the entries of the raster within a spatial
+window and with values in a given range. Our structures are enhancements of
+an existing data structure called k2-tree [4], originally designed to represent
+sparse binary matrices. Our ﬁrst contribution is a variant of the k2-tree that can
+compress not only large regions of zeros but also regions of ones. This enhancement 
+allows our structure to compress eﬃciently not only sparse matrices but
+also binary images that contain large homogeneous regions. We experimentally
+compare our structure with a Linear Quadtree [8] representation showing its superiority 
+in space and even time. Our second contribution is a generalization of
+the k2-tree to represent multi-dimensional data. We call this structure a kn-tree.
+We use these new structures to provide diﬀerent representations of raster data,
+each with diﬀerent strengths. We test our proposals experimentally to demonstrate 
+their low space requirements and their ability to eﬃciently solve queries.
+Finally, we describe other application domains where our proposals could be of
+interest.
+
+2 Previous Work: The k2-tree
+
+The k2-tree [4] is a data structure for the compact representation of sparse binary
+matrices. In this paper we use its simplest variant, k=2, so the k2-tree is similar
+to a compact Quadtree [7]. It corresponds to a recursive partition of the binary
+matrix. At each partitioning step, the matrix is divided into k2 submatrices of
+
+98
+
+G. de Bernardo et al.
+
+equal size. Each submatrix is represented using a single bit: 1 if the submatrix
+contains at least one 1, or 0 otherwise. The method proceeds recursively for each
+1-child until the current submatrix is full of 0s or we reach the cells of the original
+matrix. This conceptual tree is traversed levelwise and stored in two bit arrays:
+T stores all the levels except the last one, and L stores the last level. Figure 1
+shows an example of k2-tree. In order to navigate the tree we need to build a
+rank structure over T. This structure stores a set of counters that allow us to
+compute the number of ones in the bitmap up to any position (rank1 operation)
+in constant time using sublinear space [12]. Given a value 1 at position pos in
+= rank1(T, pos) × k2 of T : L.
+T , its k2 children will start at position pos
+This property provides simple navigation over the conceptual tree using only
+the bitmaps and the additional rank structure over T . A k2-tree can solve single
+cell queries, row/column queries or general range reporting queries (i.e., report
+all the 1s in a range) using only rank operations, by visiting all the necessary
+subtrees.
+
+(cid:3)
+
+0
+0
+0
+1
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+0
+0
+0
+1
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+0
+1
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+0
+1
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+0
+1
+0
+0
+0
+0
+0
+0
+0
+1
+0
+0
+0
+0
+0
+0
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+0
+0
+0
+1
+0
+0
+0
+1
+1
+1
+0
+0
+0
+0
+0
+0
+
+0
+0
+0
+0
+0
+1
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+1
+0
+1
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+0
+0
+0
+0
+0
+1
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+1
+
+1
+
+1
+
+0
+
+1
+
+1
+
+0
+
+0
+
+1
+
+1
+
+0
+
+1
+
+0
+
+0 1
+
+0
+
+1
+
+1
+
+1
+
+0
+
+1
+
+0
+
+0 1 0 0
+
+0
+
+1
+
+0
+
+0
+
+1
+
+0
+
+1
+
+0 1
+
+0
+
+1
+
+1
+
+0
+
+0
+
+0011
+
+0011
+
+0010
+
+0010
+
+0001
+
+0010
+
+0100
+
+0010 1000
+
+0010 1010
+
+T = 1110 1101 1010 0100 0110 1001 0101 0010 1010 1100
+L = 0011 0011 0010 0010 0001 0010 0100 0010 1000 0010 1010
+
+Fig. 1. Binary matrix and its k2-tree representation, for k=2. The matrix is virtually
+expanded to the next power of k.
+
+The original k2-tree was designed as a static data structure. A dynamic variant
+of the k2-tree, called dk2-tree, also exists [3]. The dk2-tree essentially splits the
+bitmaps T and L in chunks and builds tree structures to store these chunks.
+The internal nodes of the trees store counters that replace those of static rank
+structures and allow access to speciﬁc positions in T or L. The dk2-tree provides
+the same query capabilities of the original k2-tree but allows at the same time
+update operations, including changes in the values of the cells and insertion of
+new rows/columns at the end of the matrix. See the original paper [3] for further
+details.
+
+3 Compression of Ones
+
+In this section we propose variants of the k2-tree that are able to compress
+eﬃciently these large regions of ones and zeros. We will show 2 variants: the
+
+Compact Querieable Representations of Raster Data
+
+99
+
+ﬁrst performs better when the number of ones and zeros in the matrix is not too
+diﬀerent; the second variant is designed to be used when the proportion of zeros
+and ones is very diﬀerent (without loss of generality, we will consider that the
+less frequent value is 1).
+
+The idea behind our proposals is to stop the decomposition of the binary
+matrix when a uniform region is found, be it of zeros or ones. This means that
+in our k2-tree we must discriminate among the 3 possible “colors” of a node:
+white nodes are regions of zeros, black nodes are regions of ones and gray nodes
+are internal nodes that correspond to regions with zeros and ones. With this
+information, large regions of ones can be represented using a single node, just
+like regions of zeros in the original k2-tree. The variants with compression of
+ones can be traversed like the original k2-trees, and provide in addition a way to
+ﬁnd the color of a node. Using the additional navigation rules, all the operations
+supported by original k2-trees can be implemented directly in a k2-tree with
+compression of ones. The algorithms must only be adapted to expand automatically 
+all the results that fall in the submatrix covered by a black node. We now
+propose two speciﬁc representations of the color of nodes.
+
+3.1 2-Bits Variant
+
+In this variant, we mark with a 1 all the regions that contain both zeros and
+ones (i.e., the internal or gray nodes), whereas uniform regions are assigned a 0.
+In order to tell apart white from black nodes, we create a second bitmap T
+in
+addition to T , that stores the value of each uniform region (that is, T
+contains
+a bit for each 0 in T that will store the color of that region). The navigational
+properties of the original k2-tree still hold: the children of the (gray) node at
+= rank1(T, p) × k2, because each bit set to 1
+position p will start at position p
+in T represents a gray node and only gray nodes have children. If a position p
+[rank0(T, p)] to see if it corresponds to a region
+in T is set to 0, we can check T
+of zeros or of ones. The bitmap L behaves as in original k2-trees.
+
+(cid:3)
+
+(cid:3)
+
+(cid:3)
+
+(cid:3)
+
+Figure 2 shows a k2-tree with compression of ones and the bitmaps generated
+for this variant (left). We highlight a black node and the positions where its bits
+are assigned in the bitmaps T and T
+
+(cid:3)
+
+.
+
+3.2 Unbalanced (1-5)-Bits Variant
+
+In this variant, we achieve compression of ones using the same bitmaps of the
+original k2-tree. White nodes will be represented with a 0 and gray nodes will
+be assigned a 1, exactly like in original k2-trees. Black nodes will be encoded
+as a gray node with k2 = 4 white children (i.e., they are encoded using 5 bits).
+This combination, that can not appear in the original k2-tree (gray nodes, by
+deﬁnition, represent regions with at least a 1), is used to represent regions of
+ones without the need of additional structures. Figure 2 (right) shows the bit
+distribution for this variant. To take into account regions of ones, at each step
+of the k2-tree traversal, we must check the k2 − 1 siblings of the current node to
+detect if the current node is white (the current bit is 0, but one of its siblings
+
+100
+
+G. de Bernardo et al.
+
+Fig. 2. Example of k2-trees with compression of ones
+
+is 1)2 or we are in a region of ones (the current bit is 0 and all its siblings are 0,
+meaning that the parent node was actually black).
+
+This approach will obtain worse compression than the one based on 2 bits in
+most cases. However, it may obtain better compression when there are blocks
+of ones but the zeros are much more frequent. Also, this variant will never use
+more space than the original k2-tree.
+
+Both variants of k2-trees with compression of ones can also be applied to
+dynamic k2-trees. Each bitmap used by the static representations is replaced by
+a tree structure as in the original dk2-tree, to support updates as well as access
+and rank queries.
+
+3.3 Comparison of k2-tree with Linear QuadTree
+
+The QuadTree (QT) [7] is a well-known spatial index structure for representing
+binary images. The partitioning principle of QT and k2-tree is the same. At the
+root of the tree, the matrix is partitioned into four quadrants, which correspond
+to the four children of the root. In the QT, the quadrants that are not entirely
+black or white are recursively partitioned following the same principle until we
+reach a fully black or white region or the unitary cells of the matrix. To access
+a particular position of the raster, the tree is traversed from the root to the
+leaves following the appropriate path. Depending on the distribution of black
+and white cells in the matrix, the QT can represent the binary matrix while
+saving signiﬁcant space and providing eﬃcient access.
+
+The Linear QuadTree (LQT) [8] was proposed as a representation of QTs
+without pointers that can be easily managed in secondary memory and requires
+less space than the original QTs. At each node, the branches corresponding to
+
+2 The k2 bits are contiguous, so we perform this check in constant time.
+
+Compact Querieable Representations of Raster Data
+
+101
+
+the NW, NE, SW, and SE quadrants are labelled with 0, 1, 2, and 3 respectively.
+A leaf is formed when the submatrix is full of points. LQTs assign a quadcode to
+each leaf of the QT, which describes the (4-ary) path from the root to that leaf.
+To represent the quadcode of each leaf, a digit is added for each branch that is
+traversed. An additional symbol is used to represent that a region is not further
+partitioned (i.e., the subregion covered by that branch is full of ones, i.e., it is
+a leaf). All these quadcodes are then stored in a B-Tree in secondary memory.
+To access a position of the raster, we search for its corresponding quadcode or a
+quadcode that contains it in the B-Tree.
+
+Other representations of QTs that achieve less space requirements have been
+proposed, such as the FBLQ [6] and the CBLQ [11]. However, they are designed
+mainly to represent binary images and support union, intersection and diﬀerence
+of two images, which require a full traversal of the raster.
+
+The original k2-trees cannot be used to represent a wide class of binary images
+because they do not eﬃciently compress regions of ones. Our variants of k2-tree
+with compression of ones overcome this limitation. As a proof of concept of the
+capabilities of our proposals we compare our k2-trees with LQTs.
+
+Experimental Comparison. We compare the space requirements and search
+performance of k2-trees and LQTs. Since k2-trees work in main memory, we implemented 
+in-memory versions of the LQT. To provide fair comparisons, we build
+two diﬀerent variants of LQT. The ﬁrst one (LQT-BTree) stores the quadcodes
+in a B-Tree maintained in main memory. This representation can handle modiﬁcations,
+ so we compare it with a dk2-tree. The second variant (LQT-Array)
+stores the sorted sequence of quadcodes directly in an array, and a binary search
+is used to ﬁnd them. We compare the LQT-Array with a static k2-tree with
+compression of ones. We run all our experiments on an AMD-Phenom-II X4
+955@3.2 GHz, with 8GB DDR2 RAM. The operating system is Ubuntu 9.10.
+All our implementations are written in C and compiled with gcc version 4.4.1
+with -O9 optimizations.
+
+We use ﬁve collections in our comparison. The ﬁrst three are binary images
+obtained from elevation rasters of the Digital Terrain Model MDT05 of the
+Spanish Geographic Information Center 3. A threshold is applied to each raster,
+generating a binary image with 25% of ones, corresponding to the higher values.
+The last two collections are adjacency matrices of Web graphs [2], and therefore
+diﬃcult to compress using LQTs because they are very sparse. Table 1 shows
+the space required by all the representations. Table 2 shows the average time
+needed to retrieve a cell of the matrix. To obtain this time, we run a million
+random queries in each dataset and compute the average access time.
+
+Our results show that the space required by k2-trees is an order of magnitude
+smaller than the required by our two variants of LQTs, while the access time is
+also better in most cases, particularly in static k2-trees.
+
+3 Original rasters are available for download at http://cnig.es/
+
+102
+
+G. de Bernardo et al.
+
+Table 1. Space utilization of k2-trees and LQTs (in bits per one)
+
+Dataset
+
+mdt-600
+mdt-700
+mdt-800
+
+cnr
+eu
+
+rows × cols
+3961×5881
+3841×5841
+3921×6001
+
+11,647,287
+13,732,734
+21,580,638
+325,557×325,557 3,216,152
+862,664×862,664 19,235,140
+
+#ones
+
+k2-tree
+
+LQT-Array LQT-BTree
+
+Static Dynamic
+0.04
+0.04
+0.02
+4.95
+5.86
+
+0.02
+0.02
+0.01
+3.14
+3.81
+
+0.25
+0.17
+0.11
+41.32
+49.92
+
+0.31
+0.17
+0.11
+41.46
+50.07
+
+Table 2. Time to retrieve the value of a cell of the binary matrix, in μs/query
+
+Dataset
+
+k2-tree
+
+LQT-Array LQT-BTree
+
+mdt-600
+mdt-700
+mdt-800
+
+cnr
+eu
+
+Static Dynamic
+0.86
+1.00
+0.56
+2.88
+3.85
+
+0.46
+0.50
+0.36
+0.86
+0.90
+
+1.64
+1.64
+1.64
+3.16
+3.76
+
+1.27
+1.27
+1.20
+3.06
+3.85
+
+4 Multi-dimensional k2-trees: The kn-tree
+
+The k2-tree has been applied in several contexts to the representation of binary
+relations. Intuitively, the k2-tree can be extended to solve problems of higher
+dimensionality extending its space partitioning while maintaining the representation 
+techniques used. We call the extension of the k2-tree a kn-tree.
+
+A kn-tree represents a binary n-dimensional matrix Mm1×...×mn by recursively
+partitioning it into kn n-dimensional submatrices of equal size. This partitioning
+strategy generates a conceptual tree similar to a k2-tree in which each node has
+kn children. The conceptual tree can then be represented and queried using the
+same techniques of k2-trees.
+
+Notice that a 1 in a cell of a binary matrix that has another 1 falling in
+the same submatrix does not consume any additional space in the k2-tree, but
+isolated ones induce a complete branch in the k2-tree, consuming much space.
+In other words, the k2-tree takes advantage of the proximity of the ones in the
+matrix, because paths in the conceptual tree to each of these ones can be shared
+for most of the levels. This feature becomes more important as the value of k
+increases, and also if we build a kn-tree for a high n, because each node of a
+kn-tree will have kn children that must be represented if the region represented
+contains ones and zeros. Therefore, a kn-tree may not be useful for unclustered
+data without any regularities. We will use the kn-tree as an eﬃcient method to
+represent multi-dimensional data in a way that ensures that the data is clustered
+across the diﬀerent dimensions. Particularly, we will show its application to the
+representation of raster matrices.
+
+Compact Querieable Representations of Raster Data
+
+103
+
+5 Representation of Raster Data Using k2-tree Variants
+
+In this section we design several structures for the representation of general
+raster data using the k2-tree variants we have proposed in previous sections.
+
+We assume in our proposals that the raster values have a “realistic” precision4,
+so that the number of diﬀerent values in the third dimension is not too high. We
+consider that the raster has m diﬀerent values and denote by vi the i-th diﬀerent
+value of the raster in ascending order.
+
+Our ﬁrst representation of a raster dataset consists of a collection of k2-trees
+(k2-base), one for each diﬀerent value of the raster (i.e., we build a k2-tree Ki
+that stores all the cells with value vi). A variant with compression of ones will be
+used in order to exploit the regularities of spatial attributes. This representation
+can eﬃciently answer queries asking for cells with a given value, because these
+cells are indexed in a single k2-tree. However, queries that ask for cells with
+values in a range [v(cid:4), vr] require traversing many k2-trees.
+
+We also propose an alternative representation using “accumulated” k2-trees
+(k2-acc). In this representation, each k2-tree Ki will store not the cells whose
+value is vi but all the cells whose value is smaller or equal to vi. While this
+increases the number of cells to represent in each k2-tree, it will also increase
+the clustering of ones and therefore the ability of each k2-tree to compress these
+regions. To ask for the value of a given cell in this variant, we can binary search
+the ﬁrst k2-tree that contains the desired cell of the raster. This variant also has
+an advantage when asking for cells with values within a given range, as we only
+need to query at most two k2-trees: the cells with values in the range [v(cid:4), vr] are
+the cells of Kr that do not appear in K(cid:4)−1. As a counterpart, two k2-trees must
+be queried instead of one in order to obtain the cells with a given value.
+
+Finally, we propose a k3-tree as a better representation of the raster data, as it
+is an indexed representation of the spatial coordinates and the values altogether.
+Our k3-tree stores the tuples (cid:27)x, y, z(cid:28) such that the coordinate (x, y) of the raster
+has value z. Notice that for each pair (x, y) only one z value will be set, so we
+will not ﬁnd (cubic) regions of ones in this case. Because of this, our k3-tree is
+based on the original k2-tree codes, without compression of ones. To query for
+the value of a cell in the k3-tree, we traverse all the paths found in the k3-tree for
+ﬁxed x and y values. To return all the cells with a given value, the z coordinate
+is ﬁxed and all the pairs (x, y) of the corresponding k3-tree slice are returned.
+To ask for cells with a range of values the query is similar, traversing the k3-tree
+only within the bounds given by the interval [z(cid:4), zr].
+
+5.1 Experimental Framework
+
+To test the eﬃciency of our proposals we use several real raster matrices obtained
+from the MDT05 collection. Table 3 gives details about the diﬀerent fragments
+
+4 When representing spatial attributes, in many cases the values stored can not be considered 
+as an accurate estimation of actual values (e.g. a temperature measurement
+may be given in a precision of one thousandth of a degree, but this measurement
+may only be accurate in terms of a degree or a tenth of a degree).
+
+104
+
+G. de Bernardo et al.
+
+Table 3. Raster datasets used
+
+Raster size #values Description
+Dataset
+4001 × 5841
+578 Raster 500
+mdt-500
+3841 × 5841
+472 Raster 700
+mdt-700
+mdt-medium 7721 × 11081
+978 Rasters 47,48, 72 and 73 combined
+mdt-large 48266 × 47050
+
+2142 Raster covering the region of Galicia
+
+taken. The number of diﬀerent values in each raster is also shown in the table,
+after rounding the elevation values to a precision of 1 meter.
+
+To measure query results, we ﬁrst determine a suﬃciently large number of
+queries to obtain accurate results for each type of query. Then we build a diﬀerent
+set of random queries of each type for each dataset. All the time results shown
+correspond to CPU time.
+
+5.2 Experimental Results
+
+We show the space required to represent each dataset with all our proposals. To
+provide an element of comparison we convert the rasters to GeoTIFF5 format
+using two diﬀerent sets of options. The ﬁrst, tiﬀ-plain, is a plain representation 
+without compression, that stores all the values in row order (we use 16-bit
+integers as the datatype for the representation). The second representation, tiﬀcomp,
+ is optimized for space: the image is divided in tiles of size 256 × 256 and
+each tile is compressed using a linear predictor and LZW encoding.
+
+Table 4 shows the space utilization of our proposals and the reference GeoTIFF 
+images, in bits per cell of the raster. As an additional reference, columns
+2 and 3 show the base-2 logarithm of the number of diﬀerent values in each
+raster and the zero-order entropy H0 of these values. These columns represent
+the minimum space that would be required by a representation of the raster as an
+uncompressed or entropy-compressed sequence, respectively. The k3-tree clearly
+obtains the best space utilization amongst our approaches in all the datasets,
+being very close to the compressed GeoTIFF representation and using much less
+space than the zero-order entropy. Notice that the GeoTIFF format only oﬀers,
+at best, random access to the raster data, whereas our proposals are indexed
+representations that eﬃciently solve various types of queries.
+
+Table 4. Space utilization of all approaches (in bits/cell)
+
+Dataset
+mdt-500
+mdt-700
+
+mdt-medium
+
+mdt-large
+
+log(#values) H0(values) k2-base k2-acc k3-tree tiﬀ-plain tiﬀ-comp
+1.52
+1.12
+1.52
+1.35
+
+16.01
+16.01
+16.01
+16.00
+
+9.17
+8.88
+9.93
+11.06
+
+5.43
+4.39
+5.86
+5.32
+
+2.83
+2.13
+3.06
+3.16
+
+2.30
+2.40
+2.72
+4.37
+
+1.83
+1.38
+1.77
+1.62
+
+5 http://trac.osgeo.org/geotiff/
+
+Compact Querieable Representations of Raster Data
+
+105
+
+Table 5. Retrieving the value of a single cell. Times in μs/query.
+
+Dataset
+mdt-500
+mdt-700
+
+mdt-medium
+
+mdt-large
+
+k2-base k2-acc k3-tree tiﬀ-plain tiﬀ-comp
+491.7
+461.9
+499.0
+494.8
+
+66.7
+39.6
+76.4
+415.3
+
+2.6
+2.7
+5.2
+87.9
+
+4.6
+3.0
+5.3
+11.1
+
+2.2
+1.8
+2.6
+2.8
+
+Next we compare the query times of all our proposals for some queries of interest.
+ We implement the same queries over the GeoTiﬀ images used to compress
+the rasters. We build simple algorithms on top of the libtiﬀ library6 to retrieve
+fragments from the GeoTIFF images and run each query type. This comparison
+is given as a simple sanity check, since libtiﬀ is not designed to process these
+queries7. We only aim to show that these queries are not easy to solve with the
+traditional formats.
+
+First we measure the time required to retrieve the value of a single cell of the
+raster. This operation shows the ability of the representations to provide random
+access to the raster. Table 5 shows the results obtained. The k3-tree representation 
+obtains the best results among our proposals, showing the eﬃciency of the
+multi-dimensional index in this context. The approach based on independent
+k2-trees, as expected, behaves much worse than our other proposals, since it
+has to scan the k2-trees one by one. The accumulated k2-tree approach obtains
+also good results because it can binary search the ﬁrst k2-tree that contains the
+cell. Note that the tiﬀ-plain representation should obtain much faster times, but
+libtiﬀ spends a lot of time copying chunks of the image that are useless for this
+query. On the other hand, the tiﬀ-comp representation presents poor query times
+in comparison with the uncompressed version, as not only the appropriate tile
+of the image has to be recovered but also decompressed in order to recover a
+single cell.
+
+Next we show the eﬃciency of the representations to select the cells of the
+raster that contain a speciﬁc value. The results are shown in Table 6. Not surprisingly,
+ our representations obtain much better results than the tiﬀ representations,
+ because the latter must always traverse the complete raster. In this
+case, the k2-base obtains better results, as expected, because only one k2-tree
+is accessed and the regions of the ones in the k2-tree can be decoded eﬃciently.
+The k2-acc has to access two k2-trees, essentially doubling the query time of the
+independent k2-trees. The k3-tree only needs to traverse the appropriate slice,
+but it may need to explore many more nodes that correspond to regions with
+close values.
+
+Finally, we measure the eﬃciency of window-range queries, that ask for cells
+of the raster within a spatial window and a range of values. These queries are
+widely used when processing raster data corresponding to spatial attributes (for
+
+6 http://www.libtiff.org
+7 The library libtiﬀ reads the images from disk, but we are considering only CPU
+
+time.
+
+106
+
+G. de Bernardo et al.
+
+Table 6. Retrieving all the cells with a given value. Times in ms/query.
+
+Dataset
+mdt-500
+mdt-700
+
+mdt-medium
+
+mdt-large
+
+k2-base k2-acc k3-tree tiﬀ-plain tiﬀ-comp
+221.4
+199.5
+799.0
+3,838.9 19,913.4
+
+5.8
+6.0
+13.6
+110.2 255.1
+
+3.9
+3.0
+8.2
+
+9.4
+7.3
+18.9
+196.6
+
+39.5
+37.5
+142.6
+
+instance, regions with risk of ﬂoods or snow alert may be computed from elevation 
+rasters selecting the cells with values above a threshold or in a given
+interval). In this case, the k3-tree and the k2-acc take advantage of their structure 
+to obtain the best times. The k2-acc only needs to perform a window query
+in two k2-trees, and the k3-tree can restrict the navigation of the tree in all the
+dimensions to the given bounds.
+
+Table 7. Retrieving cells inside a window and within a range of values. Times in
+μs/query.
+
+Dataset Window Range k2-base k2-acc k3-tree tiﬀ-plain tiﬀ-comp
+
+size
+
+length
+
+mdt-500
+
+mdt-700
+
+mdt-medium
+
+mdt-large
+
+10
+
+50
+
+10
+
+50
+
+10
+
+50
+
+10
+
+50
+
+10
+50
+10
+50
+10
+50
+10
+50
+10
+50
+10
+50
+10
+50
+10
+50
+
+5.9
+27.4
+10.3
+51.0
+5.9
+27.6
+10.1
+49.2
+6.4
+28.4
+9.9
+46.5
+10.5
+44.2
+13.1
+54.5
+
+1.6
+1.9
+3.6
+5.4
+1.6
+1.8
+3.6
+5.0
+2.4
+2.5
+3.7
+4.7
+3.9
+3.9
+4.6
+5.2
+
+24.5
+1.9
+24.4
+2.6
+124.0
+5.1
+124.0
+16.2
+1.6
+24.3
+24.5
+2.3
+123.7
+4.5
+123.8
+13.6
+2.0
+45.7
+2.5
+45.9
+229.2
+4.2
+228.5
+10.9
+2.2
+285.5
+2.5
+287.4
+3.2 1,021.6
+5.8
+1,009.6
+
+525.7
+525.0
+697.1
+699.5
+496.0
+493.4
+653.2
+649.9
+531.4
+533.6
+705.4
+705.4
+519.1
+545.8
+693.6
+691.9
+
+6 Conclusions
+
+We have presented several compact data structures that can represent raster
+data in reduced space, supporting not only access to random areas in the raster
+but also advanced queries involving the values stored in the raster. We compare
+our representations, based on k2-trees, with existing formats used to store and
+process raster data. Our experiments show that the k3-tree can obtain very good
+space results, being close to the compressed GeoTIFF representation. The k3tree 
+also shows competitive times in all the queries tested, being the fastest
+
+Compact Querieable Representations of Raster Data
+
+107
+
+to retrieve the value of a cell and in some window queries. The variant with
+independent k2-trees obtains the best time results to retrieve all the cells with
+a given value, but it is much slower in queries involving a range of values. The
+variant with accumulated k2-trees obtains the best results in most of the queries
+involving ranges of values. In all the queries tested the results of our proposals
+are clearly better than the representations based on GeoTIFF images.
+
+We believe that the proposed variants of the k2-tree could be used in a wider
+range of application domains. We have shown, as a proof of concept, the applicability 
+of the k2-tree with compression of ones to the representation of binary
+images. Variants of kn-tree could also be used to represent, for instance, spatiotemporal 
+raster datasets and moving region databases. Spatio-temporal raster
+datasets can be seen as a collection of rasters stored for diﬀerent time instants,
+so we can consider the time as a fourth dimension in the matrix that represents
+the raster and use a k4-tree to represent space, time and values stored. An example 
+of spatio-temporal raster is a collection of temperature rasters in diﬀerent
+days. In this example it is expected that the values stored for cells close in space
+or for the same cell along time are similar. Moving region databases represent
+regions of space that change with time. These regions can be encoded with a
+3-dimensional matrix that stores spatial coordinates covered by a region along
+time, so that cells of the matrix determine if the region covered a given position
+at a given time. In many cases, these regions are continuous and change only
+slightly between time instants (e.g., the evolution of oil spills along time will
+yield a 3-dimensional matrix with large uniform regions that will change slowly
+with time). Therefore, a k3-tree with compression of ones could exploit these
+regularities to obtain good compression results, providing also spatio-temporal
+query support.
+
+References
+
+1. Barbay, J., Gagie, T., Navarro, G., Nekrich, Y.: Alphabet partitioning for compressed 
+rank/select and applications. In: Cheong, O., Chwa, K.-Y., Park, K. (eds.)
+ISAAC 2010, Part II. LNCS, vol. 6507, pp. 315–326. Springer, Heidelberg (2010)
+2. Boldi, P., Vigna, S.: The Webgraph framework I: compression techniques. In: Proc.
+
+13th WWW, pp. 595–602 (2004)
+
+3. Brisaboa, N.R., de Bernardo, G., Navarro, G.: Compressed dynamic binary relations.
+ In: Proc. 22nd DCC, pp. 52–61 (2012)
+
+4. Brisaboa, N.R., Ladra, S., Navarro, G.: k2-Trees for compact web graph representation.
+ In: Karlgren, J., Tarhio, J., Hyyr¨o, H. (eds.) SPIRE 2009. LNCS, vol. 5721,
+pp. 18–30. Springer, Heidelberg (2009)
+
+5. Chan, T.M., Larsen, K.G., P˘atra¸scu, M.: Orthogonal range searching on the RAM,
+
+revisited. In: Proc. 27th SoCG, pp. 1–10 (2011)
+
+6. Chang, H.K., Chang, J.W.: Fixed binary linear quadtree coding scheme for spatial
+
+data. In: Proc. 9th VCIP, vol. 2308, pp. 1214–1220 (1994)
+
+7. Finkel, R.A., Bentley, J.L.: Quad trees: A data structure for retrieval on composite
+
+keys. Acta Informatica 4, 1–9 (1974)
+
+8. Gargantini, I.: An eﬀective way to represent quadtrees. Communications of the
+
+ACM 25(12), 905–910 (1982)
+
+108
+
+G. de Bernardo et al.
+
+9. Golynski, A., Munro, J.I., Rao, S.S.: Rank/select operations on large alphabets: a
+
+tool for text indexing. In: Proc. 17th SODA, pp. 368–373 (2006)
+
+10. Grossi, R., Gupta, A., Vitter, J.S.: High-order entropy-compressed text indexes.
+
+In: Proc. 14th SODA, pp. 841–850 (2003)
+
+11. Lin, T.W.: Set operations on constant bit-length linear quadtrees. Pattern Recognition 
+30(7), 1239–1249 (1997)
+
+12. Munro, J.I.: Tables. In: Chandru, V., Vinay, V. (eds.) FSTTCS 1996. LNCS,
+
+vol. 1180, pp. 37–42. Springer, Heidelberg (1996)
+
+13. Navarro, G.: Wavelet trees for all. In: K¨arkk¨ainen, J., Stoye, J. (eds.) CPM 2012.
+
+LNCS, vol. 7354, pp. 2–26. Springer, Heidelberg (2012)
+
+14. Rigaux, P., Scholl, M., Voisard, A.: Spatial databases - with applications to GIS.
+
+Elsevier (2002)
+
+15. Welch, T.A.: A technique for high-performance data compression. Computer 17(6),
+
+8–19 (1984)
+
+16. Worboys, M., Duckham, M.: GIS: A Computing Perspective, 2nd edn. CRC Press,
+
+Inc. (2004)
+
+

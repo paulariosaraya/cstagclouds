@@ -1,0 +1,2758 @@
+1
+
+8
+1
+0
+2
+
+ 
+l
+u
+J
+ 
+
+5
+
+ 
+ 
+]
+L
+P
+.
+s
+c
+[
+ 
+ 
+
+1
+v
+2
+3
+1
+2
+0
+
+.
+
+7
+0
+8
+1
+:
+v
+i
+X
+r
+a
+
+Gradual Liquid Type Inference
+
+NIKI VAZOU, University of Maryland, USA
+ÉRIC TANTER, University of Chile, Chile
+DAVID VAN HORN, University of Maryland, USA
+Refinement types allow for lightweight program verification by enriching types types with logical predicates.
+Liquid typing provides a decidable refinement inference mechanism that is convenient but subject to two
+major issues: (1) inference is global and requires top-level annotations, making it unsuitable for inference of
+modular code components and prohibiting its applicability to library code, and (2) inference failure results in
+obscure error messages. These difficulties seriously hamper the migration of existing code to use refinements.
+This paper shows that gradual liquid type inference–a novel combination of liquid inference and gradual
+refinement types–addresses both issues. Gradual refinement types, which support imprecise predicates that
+are optimistically interpreted, can be used in argument positions to constrain liquid inference so that the global
+inference process effectively infers modular specifications usable for library components. Dually, when gradual
+refinements appear as the result of inference, they signal an inconsistency in the use of static refinements.
+Because liquid refinements are drawn from a finite set of predicates, in gradual liquid type inference we can
+enumerate the safe concretizations of each imprecise refinement, i.e. the static refinements that justify why a
+program is gradually well-typed. This enumeration is useful for static liquid type error explanation, since the
+safe concretizations exhibit all the potential inconsistencies that lead to static type errors.
+
+We develop the theory of gradual liquid type inference and explore its pragmatics in the setting of Liquid
+Haskell. To demonstrate the utility of our approach, we develop an interactive tool, GuiLT, for gradual liquid
+type inference in Liquid Haskell that both infers modular types and explores safe concretizations of gradual
+refinements. We report on the use of GuiLT for error reporting and discuss a case study on the migration of
+three commonly-used Haskell list manipulation libraries into Liquid Haskell.
+
+1 INTRODUCTION
+Refinement types [Freeman and Pfenning 1991] allow for lightweight program verification by
+decorating existing program types with logical predicates. For instance, the type {x:Int | 0 < x}
+denotes strictly positive integer values and can be used to validate at compile time the absence of
+division-by-zero errors by refining the type of division:
+
+(/) :: Int → {x: Int | 0 < x} → Int
+A major challenge with refinement types is to support decidable automatic checking and inference.
+To this end, liquid types restrict refinement predicates to decidable theories [Rondon et al. 2008]. The
+type {x:Int | k} describes integer values refined with some predicate k, that is automatically solved
+based on unifying the constraints generated at each use of x, resulting in a concrete refinement drawn
+from a finite domain of template refinements. The attractiveness of liquid types for programmers
+is usability. Verification only requires specification of top-level functions, while all intermediate
+types can be automatically inferred and checked.
+
+It has long been recognized that automatic type inference makes error reporting very challenging 
+[Wand 1986], resulting in severe usability problems. In particular, at an ill-typed function
+application, the system should decide whether to blame the function definition or the client; the
+particular choice will unfortunately and inevitably expose some of the internals of the inference
+procedure on to the user. The situation is even worse with liquid type inference, because refinement
+verification is more involved than standard Hindley-Milner style unification. The difficulty of
+
+Authors’ addresses: Niki Vazou, University of Maryland, Dept. of Computer Science, 8223 Paint Branch Drive, College Park,
+Maryland, 20742, USA; Éric Tanter, University of Chile, Computer Science Department (DCC), Santiago, Chile; David Van
+Horn, University of Maryland, Dept. of Computer Science, 8223 Paint Branch Drive, College Park, Maryland, 20742, USA.
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+1:2
+
+Niki Vazou, Éric Tanter, and David Van Horn
+
+understanding error messages from liquid inference in turn makes it really hard to progressively
+migrate non-refined code to refined code, e.g. from Haskell to Liquid Haskell [Vazou et al. 2014b].
+For instance, consider the following function divIf that either inverts its argument x if it is
+positive, or inverts 1-x otherwise:
+
+divIf x = if isPos x then 1/x else 1/(1-x)
+
+The function relies on an imported function isPos of type Int → Bool. If we want to give divIf a
+refined type, liquid inference starts from the signature:
+
+divIf :: x:{ Int | kx } → {o:Int | ko }
+
+and solves the predicate variables kx and ko based on the use sites. However, without any uses of
+divIf in the considered source code, and for reasons we will clarify in due course, liquid inference
+infers the useless refinements:
+
+divIf :: x:{ Int | false } → {o:Int | false }
+
+The false refinement on the argument means that divIf is dead code, since liquid type inference
+relies on a closed world assumption; and divIf has, at inference time, no clients.
+Conversely, if the code base at inference time includes a “positive” client call divIf 1, the inferred
+precondition would be 0 < x, triggering a type error in the definition of divIf due to the lack of
+information about isPos. This hard-to-predict and moving blame is not unique to liquid type
+inference; it frequently appears in type inference engines, yielding hard-to-debug error messages.
+A key contribution of this paper is to recognize that, in such situations, treating the inferred
+refinement as an unknown refinement — in the sense of gradual typing [Siek and Taha 2006] —
+allows us to eliminate the closed world assumption, as well as globally explain liquid type errors.
+Specifically, we adapt the gradual refinement types of Lehmann and Tanter [2017] to the setting of
+liquid type inference, yielding gradual liquid type inference. Programmers can introduce gradual
+refinements such as {x: Int | ?} and inference exhaustively searches for safe concretizations (SCs
+for short), i.e. the concrete refinements that can replace each occurrence of a gradually-refined
+variable to make the program well-typed. These SCs can then be used to understand liquid type
+errors and assist in migrating programs to adopt liquid types.
+
+Contributions. This paper makes the following contributions:
+
+• We give a semantics and inference algorithm for gradual liquid types (§ 4), by exploiting the
+abstract interpretation approach to gradual language design [Garcia et al. 2016]. We prove that
+inference is correct and satisfies the static criteria for gradual languages [Siek et al. 2015]. The
+latter result is, to the best of our knowledge, novel for a gradual inference system.
+• We implement gradual liquid type inference in GuiLT, as an extension of Liquid Haskell (§ 5).
+The implementation integrates a number of optimizations and heuristics in order to be applicable
+to existing Haskell libraries.
+• GuiLT takes as input a Haskell program annotated with gradual refinements and generates an
+interactive program that presents all valid static choices to interpret each separate occurrence
+of an unknown refinement, if any. The user can explore suggested predicates and decide which
+ones to use so that their program is well-typed (§ 6).
+• We use GuiLT for user-guided migration of three existing Haskell libraries (1260 LoC) to Liquid
+Haskell (§ 7), demonstrating that gradual liquid type inference can feasibly be supported and
+used interactively for program migration.
+The essence of the novelty of our approach—that gradual inference based on abstract interpretation 
+can be fruitfully used for error reporting and program migration—is not restricted to
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+Gradual Liquid Type Inference
+
+1:3
+
+refinement types. We conjecture that the principles of gradual types can be used for type error
+explanation in further typing systems.
+
+This paper proceeds as follows. We first provide an informal overview of liquid type inference,
+gradual refinement types, and gradual liquid type inference (§ 2). Next, we formally establish the
+necessary background on liquid types and gradual refinements (§ 3), before presenting the main
+results (§ 4–7). Finally, we discuss related work (§ 8) and conclude (§ 9). Auxiliary definitions as
+well as proofs of theorems can be found in Appendix A. Source code for GuiLT is available at:
+
+https://github.com/ucsd-progsys/liquidhaskell/tree/gradual
+
+2 BACKGROUND AND OVERVIEW
+We start by recalling the basic notions of refinement types (§ 2.1), their decidable fragment known
+as liquid types (§ 2.2), and recent work on gradual refinements (§ 2.3). Then (§ 2.4) we combine
+gradual and liquid types to build a usable interactive inference procedure that can be used for both
+error explanation and program migration.
+
+2.1 Refinement Types
+To explain refinement type checking, assume the below type signatures for the example of § 1:
+
+isPos :: x:Int → {b:Bool | b ⇔ 0 < x}
+divIf :: Int → Int
+
+With these specifications, divIf is well-typed because the positive restriction in the precondition
+of (/) is provably satisfied. Refinement type checking proceeds in three steps, described below.
+
+Step 1: Constraint Generation. Based on the code and the specifications, refinement subtyping
+constraints are generated; for our example, two subtyping constraints are generated, one for
+each call to (/). They stipulate that, in the environment with the argument x and the boolean
+branching guard b, the second argument to (/) (i.e. v = x and v = 1-x, resp.) is safe, i.e. it respects
+the precondition 0 < v.
+b:{b ⇔ 0 < x ∧ b}
+⪯ {v | 0 < v}
+b:{b ⇔ 0 < x ∧ ¬b} ⊢ {v | v = 1-x} ⪯ {v | 0 < v}
+
+⊢ {v | v = x}
+
+For space, we write {v | p} to denote {v:t | p} when the type t is clear; we omit the refinement 
+variables from the environment, simplifying x:{x | p} to x:{p}, and we skip uninformative
+refinements such as x:{true}.
+In both constraints the branching guard b is refined with the result refinement of isPos: b ⇔ 0
+< x. Also, the environment is strengthened with the value of the condition in each branch: b in the
+then branch, ¬ b in the else branch.
+
+Step 2: Verification Conditions. Each subtyping constraint is reduced to a logical verification
+condition (VC), that validates if, assuming all the refinements in the environment, the refinement
+on the left-hand side implies the one on the right-hand side. For instance, the two constraints above
+reduce to the following VCs.
+
+b ⇔ 0 < x ∧ b ⇒ v = x ⇒ 0 < v
+b ⇔ 0 < x ∧ ¬b ⇒ v = 1-x ⇒ 0 < v
+
+Step 3: Implication Checking. Finally, an SMT solver is used to check the validity of the generated
+VCs, and thus determine if the program is well-typed. Here, the SMT solver determines that both
+VCs are valid, thus divIf is well-typed.
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+1:4
+
+Niki Vazou, Éric Tanter, and David Van Horn
+
+2.2 Liquid Types
+When not all refinement types are spelled out explicitly, one can use inference. For instance, the
+well-typedness of divIf crucially relies on the guard predicate, as propagated by the refinement
+type of isPos. We now explain how liquid typing [Rondon et al. 2008] infers a type for divIf in
+case isPos is an imported, unrefined function. Liquid types introduce refinement type variables,
+known as liquid variables, for unspecified refinements. As in § 1, the type of divIf is assigned the
+liquid variables kx and ko for the input and the output refinements, resp.:
+
+divIf :: x:{ Int | kx } → {o:Int | ko }
+
+After generating subtyping constraints as in § 2.1, the inference procedure attempts to find a
+solution for the liquid variables such that all the constraints are satisfied. If no solution can be
+found, the program is deemed ill-typed.
+
+Step 1: Constraint Generation. After introduction of the liquid variables, the following subtyping
+
+constraints are generated for divIf.
+
+⊢ {v | v = x } ⪯ {v | 0 < v}
+x:{kx }, b:{b}
+x:{kx }, b:{¬b} ⊢ {v | v = 1-x} ⪯ {v | 0 < v}
+Step 2: Constraint Solving. Liquid inference then solves the liquid variables k so that the subtyping
+constraints are satisfied. The solving procedure takes as input a finite set of refinement templates
+Q⋆ abstracted over program variables. For example, the template set Q⋆ below describes ordering
+predicates, with ⋆ ranging over program variables.
+Q⋆ = {0 < ⋆, 0 ≤ ⋆, ⋆ < 0, ⋆ ≤ 0, ⋆ < ⋆, ⋆ ≤ ⋆}
+Next, for each liquid variable, the set Q⋆ is instantiated with all program variables in scope, to
+generate well-sorted predicates. Instantiation of Q⋆ for the liquid variables kx and ko leads to the
+following concrete predicate candidates.
+
+Qx = { 0 < x, 0≤ x, x <0, x ≤ 0 }
+Qo = { 0 <o, 0≤o, o <0, o ≤ 0, o < x, x <o, . . . }
+Finally, inference iteratively computes the strongest solution for each liquid variable that satisfies
+the constraints. It starts from an initial solution that maps each variable to the logical conjunction of
+
+all the instantiated templates A = {kx (cid:55)→ Qx , ko (cid:55)→ Qo }. It then repeatedly filters out predicates
+
+of the solution until all constraints are satisfied.
+
+In our example, the initial solution includes the predicates 0 < x and x < 0 is contradictory, the
+conjunction of solutions implies false, so both liquid variables are solved to false. As discussed in § 1,
+this inferred as false, solution is based on a closed world assumption and is practically useless. With
+client code that imposes additional constraints, the inferred solution can be more useful, though
+the reported errors can be hard to interpret.
+
+2.3 Gradual Refinement Types
+We observe that we can exploit gradual typing in order to assist inference and provide better support
+for error explanation and program migration. Instead of interpreting an unspecified refinement as
+a liquid variable, let us use the unknown gradual refinement { Int | ? } for the argument type of
+divIf [Lehmann and Tanter 2017].
+divIf :: x:{ Int | ? } → Int
+
+This gradual precondition specifies that for each usage occurrence of the argument x, there must
+exist a concrete refinement (which we call a safe concretization, SC) for which the (non-gradual)
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+Gradual Liquid Type Inference
+
+1:5
+
+program type checks. Key to this definition is that the refinement that exists need not be unique to
+all occurrences of the identifier. Gradual refinement type checking proceeds as follows.
+
+Step 1: Constraint Generation. First, we generate the subtyping constraints derived from the
+
+definition of divIf that now contain gradual refinements.
+
+x:{?}, b:{b} ⊢ {v | v = x } ⪯ {v | 0 < v}
+x:{?}, b:{¬b} ⊢ {v | v = 1-x} ⪯ {v | 0 < v}
+Step 2: Gradual Verification Conditions. Each subtyping reduces to a VC, where each gradual
+refinement such as x:{?} translates intuitively to an existential refinement (∃ p. p x). The solution
+of these existentials are the safe concretizations (SCs) of the program. Here, we informally use
+∃? p to denote such existentials over predicates, and call the corresponding verification conditions
+gradual VCs (GVCs). For example, the GVCs for divIf are the following.
+(∃? pthen. pthen x) ∧ b ⇒ v=x ⇒ 0 < v
+(∃? pelse. pelse x) ∧ ¬b ⇒ v=1-x ⇒ 0 < v
+Step 3: Gradual Implication Checking. Checking the validity of the generated GVCs is an open
+problem. In the divIf example, we can, by observation, find the SCs that render the GVCs valid:
+pthen x (cid:55)→ 0 < x and pelse x (cid:55)→ x ≤ 0.
+More importantly, we can present these solutions to the user as the conditions under which
+divIf is well-typed. We use the SCs to explain to the user that for divIf to type check under a
+static type, the gradual precondition ? should be replaced with a refinement that implies 0 < x in
+the then branch and x ≤ 0 in the else branch. Since such a refinement cannot exist, we use SCs to
+explain to the user that the ? cannot be replaced in the type of divIf, unless the user modifies the
+code (here, strengthen the postcondition of isPos, as in § 2.1).
+
+Our goal is to find an algorithmic procedure that solves GVCs. Lehmann and Tanter [2017]
+describe how GVCs over linear arithmetic can be checked, while Courcelle and Engelfriet [2012]
+describe a more general logical fragment (monadic second order logic) with an algorithmic decision
+procedure. Yet, in both cases we lose the justifications, i.e. the SCs, and thus the opportunity to use
+such SCs for error explanation and migration assistance.
+
+2.4 Gradual Liquid Type Inference
+To algorithmically solve GVCs we can exhaustively search for SCs in the finite predicate domain of
+liquid types. In between constraint generation and constraint solving, gradual liquid type inference
+concretizes the constraints by instantiating gradual refinements with each possible liquid template.
+Step 1: Constraint Generation. Constraint generation is performed exactly like gradual refinement
+
+types, leading to the constraints of § 2.3 for the divIf example.
+
+Step 2: Constraint Concretization. We exhaustively generate all the possible concretizations of
+the constraints. For example, x:{?} can be concretized to any predicate from the Qx set of § 2.2,
+yielding |Qx|2 = 16 concrete constraint sets, among which the following two:
+(1) Concretization for pthen x (cid:55)→ 0 < x, pelse x (cid:55)→ 0 < x:
+
+x:{0<x}, b:{b} ⊢ {v | v = x } ⪯ {v | 0 < v}
+x:{0<x}, b:{¬b} ⊢ {v | v = 1-x} ⪯ {v | 0 < v}
+
+(2) Concretization for pthen x (cid:55)→ 0 < x, pelse x (cid:55)→ x ≤ 0:
+
+b:{b} ⊢ {v | v = x } ⪯ {v | 0 < v}
+x:{0<x},
+x:{x≤0}, b:{¬b} ⊢ {v | v = 1-x} ⪯ {v | 0 < v}
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+1:6
+
+Niki Vazou, Éric Tanter, and David Van Horn
+
+Step 3: Constraint Solving. After concretization, liquid constraint solving finds out the valid ones.
+In our example, the constraint 1 above is invalid while 2 is valid. Out of the 16 concrete constraints,
+only two are valid, with pthen x (cid:55)→ 0 < x and pelse x (cid:55)→ x ≤ 0 or pelse x (cid:55)→ x < 0. Thus, divIf
+type checks and also the inference provides to the user the SCs of pthen and pelse as an explanation
+of type checking.
+
+Application to Error Explanation. The contradictory solutions of the gradual refinement of the
+argument indicates to the user that the code cannot statically type check. The user needs to edit
+either the code or the refinement types. For example, the code can be fixed by providing a precise
+type for isPos (following § 2.1) or by restricting divIf’s domain to positive numbers (rendering the
+else branch as dead code).
+
+Unlike current liquid type inference, our algorithm does not assume a closed world, since the
+SCs it provides do not depend on call sites of the functions. Thus, the output of the algorithm is
+modular: it explains the code contradictions that lead to type errors but these contradictions are
+generated in the function definition and do not rely on the arguments of function calls.
+
+Importantly, gradual liquid types are used for error explanation using the language of contradictions 
+in refinement predicates that the user understands. In this example, the output of our
+algorithm informs the user that the program cannot type check because the same refinement
+should be solved to 0 < x in the then branch and to x < 0 in the else branch, which is impossible.
+This explanation is much more informative than the current liquid type algorithm, which would,
+generate a type error either in the definition of divIf or at its call sites, following the closed world
+assumption, as discussed in § 1.
+
+In § 6 we use gradual liquid types to explain to the user the infamous off-by-one bug. Since the
+algorithm is exhaustively searching all potential solutions, it is exponentially slow on the number
+of potential solutions. Yet, in § 7 we show that we can apply our technique on real Haskell code
+due to the three following reasons:
+• Our algorithm is a modular, per-function analysis. Thus inference time depends on the size of
+• Our implementation is user interactive, thus the exponential complexity is not a problem in
+practice, since our algorithm runs in the background while expecting the user input. Once a SC
+is found, the system presents it to the user, while looking for the next SCs in the background.
+• Finally, in § 5 we discuss further technical optimizations that make our theoretically-exponential
+
+the analyzed function, and not on the size of the whole codebase to be type checked.
+
+algorithm tractable and usable in practice.
+In § 4 we formalize the inference steps and prove the correctness and the gradual criteria of
+our algorithm. Various implementation considerations necessary for the algorithm to scale are
+described in § 5. We report on its use for error explanation and program migration in § 6 and § 7.
+
+3 LIQUID TYPES AND GRADUAL REFINEMENTS
+We briefly provide the technical background required to describe gradual liquid types. We start
+with the semantics and rules of a generic refinement type system (§ 3.1) which we then adjust to
+describe both liquid types (§ 3.2) and gradual refinement types (§ 3.3).
+
+3.1 Refinement Types
+
+Syntax. Figure 1 presents the syntax of a standard functional language with refinement types, λe
+.
+R
+The expressions of the language include constants, lambda terms, variables, function applications,
+conditionals, and let bindings. Note that the argument of a function application needs to be
+syntactically a variable, as must the condition of a conditional; this normalization is standard in
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+Gradual Liquid Type Inference
+
+1:7
+
+Constants
+
+c
+
+Values v
+e
+
+Expressions
+
+Predicates
+
+p
+
+::= ∧ | ¬ | = |
+. . .
+true | false
+|
+0, 1,−1, . . .
+|
+::= c | λx .e
+::= v | x | e x
+|
+|
+|
+::= e
+
+if x then e else e
+let x = e in e
+let x:t = e in e
+
+b
+t
+
+Basic Types
+Types
+| Γ, x:t
+Environment
+Γ
+| σ ,(x, e)
+Substitution σ
+Constraint C ::= Γ ⊢ {v:b | p}
+
+::= int | bool
+::= {x:b | p} | x:t → t
+::= ·
+::= ·
+
+|
+
+Γ ⊢ {v:b | p} ⪯ {v:b | p}
+
+Fig. 1. Syntax of λe
+R.
+
+Typing
+
+Γ ⊢ e:t
+
+Γ(x) = {v:b | _}
+Γ ⊢ x:{v:b | v = x}
+
+T-Var-Base
+
+Γ(x) is a function type
+
+Γ ⊢ x:Γ(x)
+
+T-Var
+
+Γ ⊢ c:ty(c)
+
+T-Const
+
+Γ ⊢ e:te
+
+Γ ⊢ t
+Γ ⊢ e:t
+
+Γ ⊢ te ⪯ t
+
+T-Sub
+
+Γ, x:tx ⊢ e:t
+
+Γ ⊢ x:tx → t
+
+Γ ⊢ λx .e:(x:tx → t)
+
+T-Fun
+
+Γ ⊢ y:tx
+
+Γ ⊢ e:(x:tx → t)
+Γ ⊢ e y:t[y/x]
+Γ ⊢ ex :tx
+
+T-App
+
+Γ, x:tx ⊢ e:t
+
+Γ ⊢ let x = ex in e:t
+
+Γ ⊢ t
+
+T-Let
+
+fresh x′
+Γ ⊢ x:{v:bool | _}
+
+Γ1 (cid:17) Γ, x′:{v:bool | x}
+Γ1 ⊢ e1:t
+
+Γ2 (cid:17) Γ, x′:{v:bool | ¬x}
+Γ ⊢ t
+
+Γ2 ⊢ e2:t
+
+Γ ⊢ if x then e1 else e2:t
+Γ ⊢ ex :tx
+
+Γ, x:tx ⊢ e:t
+
+Γ ⊢ t
+Γ ⊢ let x:tx = ex in e:t
+
+Γ ⊢ tx
+
+T-If
+
+T-Spec
+
+Γ ⊢ t ⪯ t
+
+S-Fun
+
+Γ ⊢ t
+
+Sub-Typing
+
+isValid(Γ ⊢ {v:b | p1} ⪯ {v:b | p2})
+
+Γ ⊢ {v:b | p1} ⪯ {v:b | p2}
+
+S-Base
+
+Γ ⊢ tx2 ⪯ tx1
+Γ, x:tx2 ⊢ t1 ⪯ t2
+Γ ⊢ x:tx1 → t1 ⪯ x:tx2 → t2
+
+Well-Formedness
+
+isValid(Γ ⊢ {v:b | p})
+
+Γ ⊢ {v:b | p}
+
+W-Base
+
+Γ ⊢ tx
+
+Γ, x:tx ⊢ t
+
+Γ ⊢ x:tx → t
+
+W-Fun
+
+Fig. 2. Static Semantics of λe
+
+R. (Types colored in blue need to be inferred.)
+
+λe
+R
+
+refinement types as it simplifies the formalization [Rondon et al. 2008]. There are two let binding
+forms, one where the type of the bound variable is inferred and one where it is explicitly declared.
+types include base refinements {x:b | p} where b is a base type (int or bool) refined with the
+logical predicate p. A predicate can be any expression e, which can refer to x. Types also include
+dependent function types x:tx → t, where x is bound to the function argument and can appear in
+the result type t. As usual, we write b as a shortcut for {x:b | true} and tx → t as a shortcut for
+x:tx → t when x does not appear in t.
+
+Denotations. Following Knowles and Flanagan [2010], each type of λe
+R
+
+denotes a set of expressions.
+The denotation of a base refinement includes all expressions that either diverge or evaluate to base
+values that satisfy the associated predicate. We write |= e to represent that e is (operationally) valid
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+1:8
+and e ⇓ to represent that e terminates:
+
+|= e (cid:17) e (cid:44)→⋆ true
+
+Niki Vazou, Éric Tanter, and David Van Horn
+
+e ⇓ (cid:17) ∃v.e (cid:44)→⋆ v
+
+where · (cid:44)→⋆ · is the reflexive, transitive closure of the small-step reduction relation. Denotations
+are naturally extended to function types and environments (as sets of substitutions).
+
+[|{x:b | p}|] (cid:17){e | ⊢ e : b, if e ⇓ then |= p[e/x]}
+[|x:tx → t |] (cid:17){e | ∀ex ∈ [|tx|].e ex ∈ [|t[ex/x]|]}
+
+[|Γ|] (cid:17){σ | ∀x:t ∈ Γ .(x, e) ∈ σ ∧ e ∈ [|σ · t |]}
+
+Static semantics. Figure 2 summarizes the standard typing rules that characterize whether an
+expression belongs to the denotation of a type [Knowles and Flanagan 2010; Rondon et al. 2008].
+Namely, e ∈ [|t|] iff ⊢ e:t. We define three kinds of relations 1. typing, 2. subtyping, and 3. wellformedness.
+
+(1) Typing: Γ ⊢ e:t iff ∀σ ∈ [|Γ|].σ · e ∈ [|σ · t|].
+
+Rule T-Var-Base refines the type of a variable with its exact value. Rule T-Const types a
+constant c using the function ty(c) that is assumed to be sound, i.e. we assume that for each
+constant c, c ∈ [|ty(c)|]. Rule T-Sub allows to weaken the type of a given expression by subtyping,
+discussed below. Rule T-If achieves path sensitivity by typing each branch under an environment
+strengthened with the value of the condition. Finally, the two let binding rules T-Let and T-Spec
+only differ in whether the type of the bound variable is inferred or taken from the syntax. Note
+that the last premise, a well-formedness condition, ensures that the bound variable does not
+escape (at the type level) the scope of the let form.
+Rule S-Base uses the relation isValid(·) to check subtyping on basic types; we leave this relation
+abstract for now since we will refine it in the course of this section. Knowles and Flanagan
+[2010] define subtyping between base refinements as:
+isValid(Γ ⊢ {x:b | p1} ⪯ {x:b | p2})
+
+∀σ ∈ [|Γ, x:b|].if |= σ · p1 then |= σ · p2
+
+(2) Subtyping: Γ ⊢ t1 ⪯ t2 iff ∀σ ∈[|Γ|], e ∈[|σ · t1|]. e ∈[|σ · t2|].
+
+iff
+
+This definition makes checking undecidable, as it quantifies over all substitutions. We come
+back to decidability below.
+(3) Well-Formedness: Rule W-Base overloads isValid(·) to refer to well-formedness on base refinements.
+ A base refinement {x:b | p} is well-formed only when p is typed as a boolean:
+
+isValid(Γ ⊢ {x:b | p})
+
+iff
+
+Γ, x:b ⊢ p:bool
+
+Inference. In addition to being undecidable, the typing rules in Figure 2 are not syntax directed:
+several types do not come from the syntax of the program, but have to be guessed—they are
+colored in blue in Figure 2. These are: the argument type of a function (Rule T-Fun), the common
+(least upper bound) type of the branches of a conditional (Rule T-If), and the resulting type of let
+expressions (Rules T-Let and T-Spec), which needs to be weakened to not refer to variable x in
+order to be well-formed. Thus, to turn the typing relation into a type checking algorithm, one needs
+to address both decidability of subtyping judgments and inference of the aforementioned types.
+
+3.2 Liquid Types
+Liquid types [Rondon et al. 2008] provide a decidable and efficient inference algorithm for the
+typing relation of Figure 2. For decidability, the key idea of liquid types is to restrict refinement
+predicates to be drawn from a finite set of predefined, SMT-decidable predicates q ∈ Q.
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+Gradual Liquid Type Inference
+
+1:9
+
+Infer :: Env → Expr → Quals → Maybe Type
+Infer ˆΓ ˆe Q = A <*> ˆt
+
+where
+
+A = Solve C A0
+(ˆt, C) = Cons ˆΓ ˆe
+
+:: Env → Expr → (Maybe Type, [Cons])
+
+Cons
+Solve :: [Cons] → Sol → Maybe Sol
+
+Fig. 3. Liquid Inference Algorithm (Cons and Solve are defined in [Material 2018]).
+
+ˆp
+
+Syntax. The syntax of liquid predicates, written ˆp, is:
+True
+Predicate, with q ∈ Q
+Conjunction
+Liquid Variable
+Solution
+
+::= true
+|
+q
+|
+ˆp ∧ ˆp
+|
+κ
+| A, κ (cid:55)→ q
+A ::= ·
+
+A liquid predicate can be true (true), an element from the predefined set of predicates (q), a
+conjunction of predicates ( ˆp ∧ ˆp), or a predicate variable (κ), called a liquid variable. A solution A
+is a mapping from liquid variables to a set of elements of Q. The set q represents a variable-free
+liquid predicate using true for the empty set and conjunction to combine the elements otherwise.
+Checking. When all the predicates in Q belong to SMT-decidable theories, validity checking of λe
+:
+isValid(Γ ⊢ {x:b | p1} ⪯ {x:b | p2}) which quantifies over all embeddings of the typing environment,
+R
+can be SMT automated in a sound and complete way. Concretely, a subtyping judgment Γ ⊢ {x:b |
+ˆp1} ⪯ {x:b | ˆp2} is valid iff under all the assumptions of Γ, the predicate ˆp1 implies the predicate ˆp2.
+
+isValid(Γ ⊢ {x:b | ˆp1} ⪯ {x:b | ˆp2})
+
+isSMTValid({ ˆp | x:{x:b | ˆp} ∈ Γ} ⇒ ˆp1 ⇒ ˆp2)
+
+iff
+
+Inference. The liquid inference algorithm, defined in Figure 3, first applies the rules of Figure 2
+using liquid variables as the refinements of the types that need to be inferred and then uses an
+iterative algorithm to solve the liquid variable as a subset of Q [Rondon et al. 2008] (steps 1 and 2
+of § 2.2).
+More precisely, given a typing environment ˆΓ, an expression ˆe, and the fixed set of predicates Q,
+the function Infer ˆΓ ˆe Q returns the type of the expression ˆe under the environment ˆΓ, if it exists,
+or nothing otherwise. It first generates a template type ˆt and a set of constraints C that contain
+liquid variables in the types to be inferred. Then it generates a solution A that satisfies all the
+constraints in C. Finally, it returns the type ˆt in which all the liquid variables have been substituted
+by concrete refinements from the mapping in A.
+The function Cons ˆΓ ˆe uses the typing rules in Figure 2 to generate the template type Just ˆt
+of the expression ˆe, i.e. a type that potentially contains liquid variables, and the basic constraints
+that appear in the leaves of the derivation tree of the judgment ˆΓ ⊢ ˆe:ˆt. If the derivation rules
+fail, then Cons ˆΓ ˆe returns Nothing and an empty constraint list. The function Solve C A uses the
+decidable validity checking to iteratively pick a constraint in c ∈ C that is not satisfied, while such
+a constraint exists, and weakens the solution A so that c is satisfied. The function A <*> ˆt applies
+the solution A to the type ˆt, if both contain Just values, otherwise returns Nothing. Here and in the
+following, we pose: A0 = λκ.Q.
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+1:10
+
+Niki Vazou, Éric Tanter, and David Van Horn
+The algorithm Infer ˆΓ ˆe Q is terminating and sound and complete with respect to the typing
+
+relation ˆΓ ⊢ ˆe:ˆt as long as all the predicates are conjunctions of predicates drawn from Q.
+
+3.3 Gradual Refinement Types
+to include
+Gradual refinement types [Lehmann and Tanter 2017] extend the refinements of λe
+imprecise refinements like x > 0 ∧ ?. While they describe the static and dynamic semantics of
+R
+gradual refinements, inference is left as an open challenge. Our work extends liquid inference to
+gradual refinements, therefore we hereby summarize their basics.
+
+Syntax. The syntax of gradual predicates in λ
+
+is
+
+˜p
+G
+
+˜p
+
+::= p
+|
+
+p ∧ ?
+
+Precise Predicate
+Imprecise Predicates, where p is local
+
+A predicate is either precise or imprecise. The syntax of an imprecise predicate p ∧ ? allows for
+a static part p. Intuitively, with the predicate x > 0 ∧ ?, x is statically (and definitely) positive,
+but the type system can optimistically assume stronger, non-contradictory requirements about x.
+To make this intuition precise and derive the complete static and dynamic semantics of gradual
+refinements, Lehmann and Tanter [2017] follow the Abstracting Gradual Typing methodology
+(AGT) [Garcia et al. 2016]. Following AGT, a gradual refinement type (resp. predicate) is given
+meaning by concretization to the set of static types (resp. predicates) it represents. Defining this
+concretization requires introducing two important notions.
+
+Specificity. First, we say that p1 is more specific than p2, written p1 ⪯ p2, iff p2 is true when p1 is:
+
+p1 ⪯ p2 (cid:17) ∀σ . if |= σ · p1 then |= σ · p2
+
+Locality. Additionally, in order to prevent imprecise formulas from introducing contradictions—
+which would defeat the purpose of refinement checking—Lehmann and Tanter [2017] identify the
+need for the static part of an imprecise refinement to be local. Using an explicit syntax p(x) to
+explicitly declare the variable x refined by the predicate p, a refinement is local if there exists a
+value v for which p[v/x] is true; and this, for any (well-typed) substitution that closes the predicate:
+
+isLocal(p(x)) (cid:17) ∀σ ,∃v . |= σ · p[v/x]
+
+Concretization. Using specificity and locality, the concretization function γ(·) maps gradual
+
+predicates to the set of the static predicates they represent.
+
+γ(p(x))
+γ((p ∧ ?)(x))
+
+(cid:17) {p}
+(cid:17) {p′ | p′ ⪯ p, isLocal(p′(x))}
+
+A precise predicate concretizes to itself (singleton), while an imprecise predicate denotes all the
+local predicates more specific than its static part. This definition extends naturally to types and
+environments.
+
+γ({x:b | ˜p})
+γ(x: ˜tx → ˜t)
+γ( ˜Γ)
+
+(cid:17) {{x:b | p} | p ∈ γ( ˜p(x))}
+(cid:17) {x:tx → t | tx ∈ γ( ˜tx), t ∈ γ(˜t)}
+(cid:17) {Γ | x:t ∈ Γ iff x:˜t ∈ ˜Γ, t ∈ γ(˜t)}
+
+The denotations of gradual refinement types are similar to those from § 3.1. The denotation of
+a base imprecise gradual refinement {x:b | p ∧ ?} includes all (gradually-typed) expressions that
+satisfy at least p.
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+Gradual Liquid Type Inference
+
+1:11
+Type Checking. Figure 2 is used “as is” to type gradual expressions ˜Γ ⊢ ˜e:˜t, save for the fact that
+isValid(·) holds if there exists a
+
+the validity predicate must be lifted to operate on gradual types.
+justification, by concretization, that the static judgment holds. Precisely:
+
+˜
+
+˜
+
+isValid( ˜Γ ⊢ ˜t1 ⪯ ˜t2) (cid:17)∃Γ ∈ γ( ˜Γ), t1 ∈ γ( ˜t1), t2 ∈ γ( ˜t2).isValid(Γ ⊢ t1 ⪯ t2)
+
+isValid( ˜Γ ⊢ ˜t) (cid:17)∃Γ ∈ γ( ˜Γ), t ∈ γ(˜t).isValid(Γ ⊢ t)
+
+˜
+
+4 GRADUAL LIQUID TYPES
+We now formalize the combination of liquid type inference and gradual refinements to later use
+gradual liquid types for both error explanation and program migration. We extend the work of
+Lehmann and Tanter [2017] by adapting the liquid type inference algorithm to the gradual setting.
+To do so, we apply the abstract interpretation approach of AGT [Garcia et al. 2016] to lift the Infer
+function (defined in § 3.2) so that it operates on gradual liquid types.
+
+Below is the syntax of predicates in λ
+
+, a gradual liquid core language whose predicates are
+gradual predicates where the static part of an imprecise predicate is a liquid predicate, with the
+additional requirement that it is local (def. in § 3.3).
+
+ˇp
+GL
+
+ˇp ::= ˆp
+
+| ˆp ∧ ?
+
+Precise Liquid Predicate
+Imprecise Liquid Predicate, where ˆp is local
+
+ˇp
+GL
+
+The elements of λ
+we write ? as a shortcut for the imprecise predicate true ∧ ?.
+ˇInfer using AGT (§ 4.1), we provide an algorithmic characterization of
+as the basis for our implementation. We present the properties that
+
+are both gradual and liquid; i.e. expressions ˇe could also be written as ˜ˆe. Also,
+ˇInfer ˇΓ ˇe Q so that it returns a type ˇt such that ˇΓ ⊢ ˇe:ˇt. After deriving
+ˇInfer (§ 4.3), which serves
+
+Our goal is to define
+
+ˇInfer satisfies in § 4.4.
+
+4.1 Lifting Liquid Inference
+ˇInfer using the abstracting gradual typing methodology [Garcia et al. 2016].
+We define the function
+In general, AGT defines the consistent lifting of a function f as: ˜f ˜t = α({f t
+| t ∈ γ(˜t)}), where α
+is the sound and optimal abstraction function that, together with γ, forms a Galois connection.
+The question is how to apply this general approach to the liquid type inference algorithm. We
+answer this question via trial-and-error.
+
+Try 1. Lifting Infer. Assume we lift Infer in a similar manner, i.e. we pose
+ˇInfer ˇΓ ˇe Q = α({Infer Γ e Q | Γ ∈ γ(ˇΓ), e ∈ γ(ˇe)})
+
+ˇInfer is too strict: it rejects expressions that should be accepted. Consider for
+This definition of
+instance the following expression ˇe that defines a function f with an imprecisely-refined argument:
+
+// onlyPos :: {v: Int | 0 < v} → Int
+// check :: Int → Bool
+let f :: x :{ Int | ?} → Int
+
+f x = if check x then onlyPos x else onlyPos (-x)
+
+in f 42
+
+There is no single static expression e ∈ γ(ˇe) such that the definition of f above type checks. For
+any Q we will get Infer {} e Q = Nothing which denotes a type inference failure. This behavior
+ˇInfer the gradual argument of f needs to be concretized before
+occurs because by the definition of
+calling Infer, which breaks the flexibility programmers expect from gradual refinements (this
+example is based on the motivation example of Lehmann and Tanter [2017]). One expects that
+ˇInfer {} ˇe Q should simply return Int. A similar scenario appears in Garcia et al. [2016], where
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+1:12
+
+Niki Vazou, Éric Tanter, and David Van Horn
+
+lifting the typing relation as a whole would be too imprecise and instead the lifted typing relation
+is defined by lifting the type functions and predicates used to define typing. Here, as described in
+§ 3.2, Infer calls the functions Cons and Solve, which in turn calls the function isValid. Which of
+these functions should we lift? Since Cons is merely an algorithmic definition of the typing rules, it
+is not affected by the gradualization of the system, thus does not require lifting. On the contrary,
+Solve is calling isValid that operates on gradual refinements. To get a precise inference system we
+first attempted to lift isValid.
+
+Try 2. Lifting isValid. To our surprise, using gradual validity checking (the lifting of isValid,
+§ 3.3) leads to an unsound inference algorithm! This is because, soundness of static inference
+implicitly relies on the property of validity checking that if two refinements p1 and p2 are right-
+hand-side valid, then so is their conjunction, i.e.:
+and
+⇒
+
+isValid(Γ ⊢ {v:b | p} ⪯ {v:b | p2})
+
+isValid(Γ ⊢ {v:b | p} ⪯ {v:b | p1})
+
+isValid(Γ ⊢ {v:b | p} ⪯ p1 ∧ p2)
+
+But this property does not hold for gradual validity checking, because for any logical predicate q, it
+is true that (q ⇒ p1 ∧ q ⇒ p1) implies (q ⇒ p1 ∧ p2), but (∃q.(q ⇒ p1)) ∧ (∃q.(q ⇒ p1)) does not
+imply that ∃q.(q ⇒ p1 ∧ p2).
+Try 3. Lifting Solve. Let us try to lift Solve:
+ˇSolve A ˇC = {Solve A C | C ∈ γ( ˇC)}
+
+where ˇC denotes a gradual constraint (from Figure 1). This approach is successful and leads to a
+provably sound and complete inference algorithm (§ 4.4).
+ˇSolve, we do not appeal to abstraction. This is because we can
+
+Note that in the definition of
+
+directly define
+
+ˇInfer to consider all produced solutions instead.
+
+ˇInfer ::
+ˇEnv → ˇExpr → Quals → Set Type
+ˇInfer ˇΓ ˇe Q = {ˇt′ | Just ˇt′ <- A <*> ˇt, A ∈
+
+where (ˇt, ˇC) = Cons ˇΓ ˇe
+
+ˇSolve A0
+
+ˇC}
+
+First, function Cons derives the typing constraints ˇC, and if successful, the template type ˇt (step 1
+ˇSolve to concretize and solve all the derived constraints (steps 2
+of § 2.4).1 Next, we use the lifted
+and 3 of § 2.4, resp.). By keeping track of the concretizations that return non-Nothing solutions, we
+derive the safe concretizations of § 2. Finally, we apply each solution to the template gradual type,
+yielding a set of inferred types. We do not explicitly abstract the set of inferred types back to a
+single gradual type. Adding abstraction by exploiting the abstraction function defined by Lehmann
+and Tanter [2017] is left for future work.
+
+The core of the gradual inference algorithm is a combination of the liquid and gradual refinement
+type systems. Yet, as we exposed by the failing attempt to lift isValid, this combination was not
+trivial, since blind application of the AGT [Garcia et al. 2016] methodology could lead to unsound
+inference. In § 4.4, we prove that our algorithm is sound and in § 5 we discuss an optimized
+implementation and its applications. The applications discussed in § 6 and § 7 make explicit use of
+the inferred set in order to assist users in understanding errors and migrating programs.2
+
+1Note that Cons is unchanged from the static system, because it only depends on the structure of the types, and not on the
+refinements themselves.
+2In standard gradual typing, the set of static types denoted by a gradual type can be infinite, hence abstraction is definitely
+required. In contrast, here the structure of types is fixed, and the set of possible liquid refinements, even if potentially large,
+is finite. We can therefore do without abstraction. We discuss implementation considerations in § 6.
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+Gradual Liquid Type Inference
+
+1:13
+
+4.2 When Does Gradual Liquid Inference Fail?
+Given the flexibility induced by gradual refinements, at this point the reader might wonder when an
+actual type inference failure can occur. First, as we will formally prove later in this section, gradual
+liquid inference is a conservative extension of liquid inference, and therefore, in the absence of
+imprecise refinements, gradual liquid inference fails exactly when standard liquid inference fails.
+More crucially, in presence of imprecise refinements, gradual inference only succeeds when there
+exist possible justifications for each individual occurrences of gradually-refined variables. Said
+otherwise, gradual liquid inference fails when there exists at least one occurrence of a graduallyrefined 
+variable for which there does not exist any valid concretization.
+
+Consider the example below:
+
+// onlyPos :: {v:Int | 0 < v} → Int
+f :: x:{Int | x <= 0 ∧ ?} → Int
+f x = onlyPos x
+
+Each valid concretization of the imprecise refinement x <= 0 ∧ ? should imply the precondition
+of onlyPos, namely 0 < v. This however contradicts the static part of the imprecise refinement,
+x <= 0. Therefore, gradual liquid inference fails for this program.
+
+4.3 Algorithmic Concretization
+ˇInfer algorithmic, we need to define an algorithmic concretization function of a set of
+To make
+constraints, γ( ˇC). We do so, by using the the finite domain of predicates Q.
+Recall the concretization of gradual predicates: γ((p ∧ ?)(x)) (cid:17) {p′ | p′ ⪯ p, isLocal(p′(x))}. In
+general, this function cannot be algorithmically computed, since it ranges over the infinite domain
+of predicates. In gradual liquid refinements, the domain of predicates is restricted to the powerset of
+the finite domain Q. We define the algorithmic concretization function γQ( ˇp(x)) as the intersection
+of the powerset of the finite domain Q with the gradual concretization function.
+
+γQ( ˇp(x)) (cid:17) 2Q ∩ γ( ˇp(x))
+
+Concretization of gradual predicates reduces to (decidable) locality and specificity checking on the
+elements of Q.
+
+γQ(( ˆp ∧ ?)(x)) (cid:17) { ˆp
+
+′ | ˆp
+
+′ ∈ 2Q
+
+, ˆp
+
+′ ⪯ ˆp, isLocal( ˆp
+
+′(x))}
+
+We naturally extend the algorithmic concretization function to typing environments, constraints,
+and list of constraints.
+
+γQ(ˇΓ) (cid:17) { ˆΓ | x:ˆt ∈ ˆΓ iff x:ˇt ∈ ˇΓ, ˆt ∈ γQ(ˇt)}
+
+γQ(ˇΓ ⊢ ˇt1 ⪯ ˇt2) (cid:17) { ˆΓ ⊢ ˆt1 ⪯ ˆt2 | ˆΓ ∈ γQ(ˇΓ), ˆti ∈ γQ( ˇti)}
+
+γQ(ˇΓ ⊢ ˇt) (cid:17) { ˆΓ ⊢ ˆt | ˆΓ ∈ γQ(ˇΓ), ˆt ∈ γQ(ˇt), }
+γQ( ˇC) (cid:17) { ˆC | c ∈ ˆC iff ˇc ∈ ˇC, ˆc ∈ γQ(ˇc)}
+
+We use γQ(·) to define an algorithmic version of
+
+ˇSolve:
+
+ˇSolve A ˇC = {Solve A ˆC |
+
+ˆC ∈ γQ( ˇC)}
+
+which in turn yields an algorithmic version of
+
+ˇInfer.
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+1:14
+
+Niki Vazou, Éric Tanter, and David Van Horn
+
+4.4 Properties of Gradual Liquid Inference
+We prove that the inference algorithm ˇInfer satisfies the the correctness criteria of Rondon
+et al. [2008], as well as the static criteria for gradually-typed languages [Siek et al. 2015].3 The
+corresponding proofs can be found in supplementary material [Material 2018].
+
+4.4.1 Correctness of Inference. The algorithm ˇInfer is sound, complete, and terminates.
+Theorem 4.1 (Correctness). Let Q be a finite set of predicates from an SMT-decidable logic, ˇΓa
+
+gradual liquid environment, and ˇe a gradual liquid expression. Then
+• Termination
+• Soundness If ˇt ∈
+• Completeness If
+
+ˇInfer ˇΓ ˇe Q, then ˇΓ ⊢ ˇe:ˇt.
+ˇInfer ˇΓ ˇe Q = ∅, then ∄ˇt . ˇΓ ⊢ ˇe:ˇt.
+
+ˇInfer ˇΓ ˇe Q terminates.
+
+The proof of termination is straightforward from the careful definition of the
+
+ˇInfer algorithm.
+Soundness and completeness rely on the property that a constraint is gradually valid iff there exists
+isValid(A · ˇc) iff ∃ˆc ∈ γQ(ˇc).isValid(A · ˇc)). We use this
+a concrete solution that renders it valid (i.e.
+property to prove soundness by the definition of the algorithm and completeness by contradiction.
+We note that, unlike the Infer algorithm that provably returns the strongest possible solution, it is
+ˇInfer ˇΓ ˇe Q with the rest of the types that
+not clear how to relate the set of solutions returned by
+satisfy ˇΓ ⊢ ˇe:ˇt.
+
+˜
+
+4.4.2 Gradual Typing Criteria. Siek et al. [2015] list three criteria for the static semantics of
+ˇInfer algorithm satisfies. These criteria require the gradual type
+a gradual language, which the
+system (i) is a conservative extension of the static type system, (ii) is flexible enough to accommodate
+the dynamic end of the typing spectrum (in our case, unrefined types), and (iii) supports a smooth
+connection between both ends of the spectrum.
+
+(i) Conservative Extension. The gradual inference algorithm ˇInfer coincides with the static
+algorithm Infer on terms that only rely on precise predicates. More specifically, if Infer infers a
+ˇInfer returns only that type, for the same term. Conversely, if a term is
+static type for a term, then
+not typeable with Infer, it is also not typeable with
+
+ˇInfer.
+
+Theorem 4.2 (Conservative Extension). If Infer ˆΓ ˆe Q = Just ˆt, then
+
+ˇInfer ˆΓ ˆe Q = {ˆt}.
+
+Otherwise,
+
+ˇInfer ˆΓ ˆe Q = ∅.
+
+ˇInfer a n d the concretization function.
+
+The proof follows by the definition of
+(ii) Embedding of imprecise terms. We then prove that given a well-typed unrefined term (i.e. simply-
+typed), refining all base types with the unknown predicate ? yields a well-typed gradual term. This
+property captures the fact that it is possible to “import” a simply-typed term into the gradual liquid
+setting. (In contrast, this is not possible without gradual refinements: just putting true refinements
+to all base types does not yield a well-typed program.)
+To state this theorem, we use ts to denote simple types (b and ts → ts) and similarly es and Γs
+The ⌈·⌉ function turns simple types into gradual liquid types by introducing the unknown
+
+for terms and environments. The simply-typed judgment is the standard one.
+
+predicate on every base type (and naturally extended to environments and terms):
+
+⌈b⌉ = {v:b | ?}
+
+⌈t1 → t2⌉ = x:⌈t1⌉ → ⌈t2⌉
+
+Theorem 4.3 (Embedding of Unrefined Terms). If Γs ⊢ es:ts, then
+
+ˇInfer ⌈Γs⌉ ⌈es⌉ Q (cid:44) ∅.
+
+3Because this work focuses on the static semantics, i.e. the inference algorithm, we do not discuss the dynamic part of the
+gradual guarantee, which has been proven for gradual refinement types [Lehmann and Tanter 2017].
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+Gradual Liquid Type Inference
+
+1:15
+
+Let ts denote the unrefined version of the gradually refined type ˇt. We first prove that for any
+gradual type ˇt with only local refinement both Γ ⊢ ˇt ⪯ ⌈ts⌉ and Γ ⊢ ⌈ts⌉ ⪯ ˇt hold. Then, we prove
+that if Γs ⊢ es:ts, then ⌈Γs⌉ ⊢ ⌈es⌉:⌈ts⌉. Finally, we use completeness of the inference algorithm to
+prove theorem 4.3.
+For the expression ⌈es⌉, the inference algorithm will generate a set of refinement types, all of
+which have the structure of ts. The liquid algorithm infers types with strongest postconditions and
+the gradual inference algorithm is not generating any fresh ?, so, the inference returns all valid
+types with shape ts with the dynamic refinements instantiated to all valid local predicates and
+for each instantiation, the unknown refinements are solved following the principle of strongest
+postconditions.
+
+(iii) Static Gradual Guarantee. Finally, the solid foundations for gradualization based on abstract
+interpretation allow us to effectively satisfy the gradual guarantee, which we believe was never
+proved for any gradual inference work. The gradual guarantee stipulates that typeability is monotonic 
+in the precision of type information. In other words, making type annotations less precise
+cannot introduce new type errors.
+
+We first define the notion of precision in terms of algorithmic concretization:
+Definition 4.4 (Precision of Gradual Types). ˇt1 is less precise than ˇt2, written as ˇt1 ⊑ ˇt2, iff
+
+γQ(ˇt1) ⊆ γQ(ˇt2).
+Precision naturally extends to type environments and terms.
+
+Theorem 4.5 (Static Gradual Guarantee). If ˇΓ1 ⊑ ˇΓ2 and ˇe1 ⊑ ˇe2, then for every ˇt1i ∈
+
+ˇInfer ˇΓ2 ˇt2 Q.
+ˇInfer ˇΓ1 ˇe1 Q there exists ˇt1i ⊑ ˇt2i so that ˇt2i ∈
+ˇInfer ˇΓ1 ˇe1 Q, then the algorithm inferred a solution
+The intuition of the proof is that since ˇt1i ∈
+For a given term and type environment, the theorem ensures that, for every inferred type, the
+
+of the unknown refinements. We prove that this solution is also inferred for ˇe1.
+algorithm infers a less precise type when run on a less precise term and environment.
+
+5 IMPLEMENTATION
+ˇInfer as GuiLT, an extension to Liquid Haskell [Vazou et al. 2014a] that takes a
+We implemented
+Haskell program annotated with gradual refinement specifications and returns an .html interactive
+file that lets the user explore all safe concretizations.
+
+Concretely, GuiLT uses the existing API of Liquid Haskell to implement the three steps of gradual
+liquid type checking steps described in § 2.4 (and formalized in § 4): 1) First, GuiLT calls the Liquid
+Haskell API to generate subtyping constraints that contain both liquid variables and imprecise
+predicates. 2) Next, it calls the liquid API to collect all the refinement templates. The templates are
+used to map each occurrence of imprecise predicates in the constraints to a set of concretizations.
+These concretizations are combined to generate the possible concretizations of the constraints.
+3) Finally, using Liquid Haskell’s constraint solving it decides the validity of each concretized
+constraint, while all the safe concretizations SCs are interactively presented to the user.
+The implementation of GuiLT closely follows the theory of § 4, apart from a syntactic detail (we
+use ?? instead of ? to denote the unknown part of a refinement), and several practical adjustments
+that we discuss here and are crucial for real-world applicability.
+
+Templates. To generate the refinement templates we use Liquid Haskell’s existing API. The
+generated templates consist of a predefined set of predicates for linear arithmetic (v [< | ≤ | > | ≥
+| = | (cid:44)] x), comparison with zero (v [< | ≤ | > | ≥ | = | (cid:44)] 0) and length operations (len v[≥ | >]0,
+len v = len x, v = len x, v = len x + 1), where v and x respectively range over the refinement
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+1:16
+
+Niki Vazou, Éric Tanter, and David Van Horn
+
+Fig. 4. GuiLT GUI for error explanation of incompatible indexing.
+
+variable and any program variable. Application-specific templates are automatically abstracted
+from user-provided specifications and the user can explicitly define custom templates. For instance,
+assume a user defined data type Tree a and an uninterpreted function size :: Tree a → Int. If
+the user writes a specification x: Tree a → {v:Int | v < size x}, then the template v < size x
+is generated where v and x respectively range over the refinement variable and any program
+variable.
+
+Depth. For completeness in the theory, we check the validity of any solution, including all
+possible conjunctions of elements of Q, which is not tractable in practice. The implementation uses
+an instantiation depth parameter that is 1 by default, meaning each ?? ranges over single templates.
+At depth 2, ?? ranges over conjunctions of (single) templates, etc.
+
+Sensibility Checking. Each ?? can be instantiated with any templates that are local and specific.
+The implementation uses the SMT solver to check both. As an optimization, we perform a syntactic
+locality check to reject templates that are “non-sensible”, for instance, syntactic contradictions
+of the form x < v && v < x. As a heuristic, we further filter out as non-sensible type-directed
+instantiations of the templates that, based on our experience, a user would not write, such as
+arithmetic operations on lists and booleans (e.g. x < False)—although potentially correct in Haskell
+through overloading.
+
+Locality Checking. To encode Haskell functions (e.g. len) in the refinements, Liquid Haskell
+is using uninterpreted SMT functions [Vazou et al. 2018]. As Lehmann and Tanter [2017] note,
+locality checking breaks under the presence of uninterpreted functions. For instance, the predicate
+0 < len i is not local on i, because ∃i. 0 < len i is not SMT valid due to a model in which len is
+always negative. To check locality under uninterpreted functions we define a fresh variable (e.g.
+leni) for each function application (e.g. len i). For instance, 0 < len i is local on i because under
+the new encoding ∃leni. 0 < leni is SMT valid.
+
+Partitions. A critical optimization for efficiency is that after generation and before solving, the set
+of constraints is partitioned based on the constraint dependencies so that each partition is solved
+independently. Two constraints depend on each other when they contain the same liquid variable
+or when they contain different variables (e.g. k1 and k2) that depend on each other (e.g. x:{k1} ⊢
+{v|true}⪯{v|k2}). That way, we reduce the number of ?? that appear in each set of independent
+constraints and thus the number of concretization combinations that need to be checked (which
+increases exponentially with the number of ?? accounting for all combinations of all concretizations).
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+Gradual Liquid Type Inference
+
+1:17
+
+Fig. 5. GuiLT GUI for liquid types exploration.
+
+6 APPLICATION I: ERROR EXPLANATION
+We illustrate how GuiLT can be used interactively for error explanation. Consider the list indexing
+function (!!) in Haskell:
+
+!! 0 = x
+
+(x:_)
+(_:xs) !! i = xs!!(i - 1)
+_
+
+!! _ = error "Out of Bounds!"
+
+Indexing is 0-based and signals a runtime error for length xs <= i. Now consider a client indexing
+a list by its length:
+
+client = [1 , 2, 3] !! 3
+
+Refinement types can be used to impose a false precondition on the error function and detect the
+out-of-bound crash:
+
+error :: {i:String | false} → a
+
+But when the two above incompatible definitions coexist is the error due to the definition of indexing,
+or to the client of indexing?
+This question of who is to blame has no definitive answer in the general case. Gradual liquid type
+inference is helpful to explore possible resolutions of the error and decide for a suitable solution.
+To do so, we transform the statically ill-typed program into a gradually well-typed program by
+giving an imprecise refinement as a precondition to the indexing function:
+
+(!!) :: xs:[a] → {i:Int | ?? } → a
+
+Using GuiLT, we can explore all potential predicates that can be substituted for ??. Among the
+candidates are both 0 <= i < len xs and 0 < i <= len xs. While the former induces a type error
+in the client, the latter induces a type error in the definition of (!!).
+
+Figure 4 was generated after running GuiLT on the above specification and code. The result of
+GuiLT is an .html file where each user specified ?? is turned into a colored button. Pressing a ??
+button once highlights all of its usage occurrence, using different colors for each ?? (Figure 4(left)).
+Pressing it again presents all safe concretizations to scroll through (Figure 4(right)). In the indexing
+example, three gradual constraints are generated: 1) for the recursive call of indexing, 2) for the
+unreachable (due to the false precondition) error call, and 3) for the client. Unsurprisingly, the SCs
+for the recursive call and the client include the incompatible 0 <= i < len xs and 0 < i <= len xs,
+respectively. Interestingly, the unreachable constraint enjoys many SCs including 0 <= i <= len xs
+and one given in the right of Figure 4, i.e. i < len xs && i == 0, since the case of indexing 0 from
+a non-empty list is covered in the first case of the indexing function.
+The user explores all SCs with the << and >> buttons. In the example, the three SCs are independent,
+but in many cases SCs can depend on each other (e.g. dependencies in function preconditions). In
+such cases, pressing a navigation button changes the values of all the dependent occurrences.
+When the goal is to replace the ?? with a concrete refinement, going through all SCs can be
+overwhelming. In the example, there are 22, 10, and 13 SCs for the unreachable, client, and recursive
+calls, respectively. To accommodate the user, GuiLT generates an alternative interactive .out.html
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+1:18
+
+Niki Vazou, Éric Tanter, and David Van Horn
+
+Depth # ?
+1
+1
+
+1
+2
+
+Occs Cands
+[3]
+[12*]
+[68*]
+[3]
+
+Sens
+[11*]
+[38*]
+
+Local
+[11*]
+[34*]
+
+Spec
+[11*]
+[34*]
+
+Parts
+3/12
+3/12
+
+# γ
+11*
+34*
+
+SCs
+[8,0,6]
+
+[22,10,13]
+
+Sols
+0
+0
+
+Time (s)
+0.47
+4.91
+
+Table 1. Quantitative Evaluation of the Indexing Example
+
+file by which the user can replace the ?? with any SC and observe the generated refinement errors.
+In Figure 5-left the ?? is replaced with the concrete refinement 0 <= i < len xs, generating an
+error at the client site. Pressing >>, the user explores the next concrete refinement, where 0 < i
+<= len xs generates an error in the recursive case of indexing (Figure 5-right). This exposes all the
+concretizations of ?? that render at least one constraint safe (here 22).
+
+Gradual types for Error Explanation. This interactive replacement of ?? allows the user to try all
+the possible concretizations inferred by the algorithm. For each selection the associated type errors
+are generated and highlighted. This process is effective for two major reasons:
+(1) Provide all error locations: The inference algorithm does not arbitrarily blame one program
+location based on one inferred predicate, instead the user navigates via all the potential error
+locations. Thus, during navigation the user can observe all potential sources of program errors.
+(2) Predicate Synthesis: Moreover, the user does not have to come up with the refinements, since the
+inference procedure synthesizes them. It is only up to the user to pick the adequate refinement
+that she chooses as the desired specification—which could be fully static, or imprecise.4
+Quantitative Evaluation. Table 1 summarizes a quantitative evaluation of the indexing example.
+We run GuiLT with instantiation depth (Depth) 1 and 2, i.e. the size of the conjunctions of the
+templates we consider (§ 5). The # ? column gives the number of imprecise refinements (as added
+by the user) and Occs gives the number each ?? appearing in the generated constraints. Column
+Cands denotes the candidate (i.e. well-typed) templates for each occurrence (§ 5). In the example, for
+depth 2, 68 templates are generated for each occurrence (i.e. [68, 68, 68] simplified as 68* for space).
+Then, GuiLT decides how many of the templates are sensible (Sens), local (Local), and specific
+(Spec); here, 38, 34, and 34, respectively. We note that all the local templates are specific, when the
+static part of the gradual refinement is true (i.e. true && ??, simplified as ??). Moreover, note that
+most non-local solutions were filtered out by the sensibility check. The constraints were split in 12
+partitions (Parts), out of which 3 contained gradual refinements and had to be concretized. Each
+partition had 34 concretizations (# γ) out of which 22, 10, and 13 were safe concretizations (SCs),
+respectively. None of these concretizations was common for all the occurrences of the ??, thus the
+GuiLT reports 0 static solutions (Sols), as expected. Finally, the running time of GuiLT was 4.91 sec.
+In short, we observe how the implementation optimizations, as discussed in § 5, allow for possible
+error reporting using gradual liquid types. With depth of 2 and 3 occurrences of the ? each with 68
+candidates, the exponential inference algorithm would need to run 683 times. In practice, we filter
+the candidates to 34 and since each occurrence appears in a different partition, we only run the
+algorithm 34∗ 3 times. Next, we use these metrics to evaluate GuiLT as a possible tool for migrating
+three standard Haskell list libraries to Liquid Haskell.
+
+7 APPLICATION II: MIGRATION ASSISTANCE
+As a second application, we use GuiLT’s error reporting GUI from § 6 to assist the migration of
+commonly used Haskell libraries to Liquid Haskell. Inter-language migration to strengthen type
+
+4For sound imprecise refinements, runtime support for gradual refinements is needed, as described by Lehmann and Tanter
+[2017]. Implementing such support in Liquid Haskell is an interesting perspective, outside the scope of this work.
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+Gradual Liquid Type Inference
+
+1:19
+
+safety guarantees is one of the main motivations for gradual type systems [Tobin-Hochstadt and
+Felleisen 2006]. Our study confirms that gradual liquid type inference provides an effective bridge
+to migrate programs written in a traditional polymorphic functional language like Haskell to a
+stronger discipline with refinement types as provided by Liquid Haskell.
+
+Benchmarks. We used GuiLT to migrate three interdependent Haskell list libraries:
+• GHC.List: provides commonly used list functions available at Haskell’s Prelude,
+• Data.List: defines more sophisticated list functions, e.g. list transposing, and
+• Data.List.NonEmpty: lifts list functions to a non-empty list data type.
+Migration Process. A library consists of a set of function imports and definitions. Each function
+comes with its Haskell type and may be assigned to a gradual refinement type during migration.
+Migration is complete when, if possible, all functions are given fully-static refinement types, and
+type check under Liquid Haskell. The process proceeds in four steps:
+Step 1: run Liquid Haskell to generate a set of type errors,
+Step 2: fix the errors by manually inserting gradual refinements (??),
+Step 3: use GuiLT to replace ?? with an automatically generated SC, and
+Step 4: go back to Step 1 until no type errors are reported.
+
+This process is iterative and interactive since refinement errors propagate between imported
+
+and client libraries and it is up to the user to decide how to resolve these errors.
+
+Step 1: At the beginning of the migration process the source files given to Liquid Haskell have
+no refinement type specifications. Still, there are two sources5 of refinement type errors: 1) failure
+to satisfy imported functions preconditions, e.g. in § 6 the error function assumes the false
+precondition and 2) incomplete patterns, i.e. a pattern-match that might fail at runtime, e.g. scanr’s
+result is matched to a non-empty list.
+
+scanr _ q []
+scanr f q (x:xs) =
+
+= [q]
+
+f x q : qs where qs@(q:_) = scanr f q xs
+
+Each time Step 1 is reiterated, new type errors can occur as a consequence of new function
+preconditions added in the following steps.
+Step 2: The insertion of gradual refinements (??) is left to the user; they can add ?? either in the
+preconditions of defined functions or postconditions of imported functions, thereby resolving the
+type errors of Step 1. If the user places redundant ??, then they will be solved to the True static
+refinement. If the user misses some ??, type errors will remain.
+Step 3: Once the program gradually typechecks, the user explores the generated SCs, and chooses
+which one to replace ?? with. In our benchmarks, often, the decision is trivial since only one SC
+coincides for all occurrences of the gradually-refined variable.
+
+Step 4: Depending on the refinement inserted at Step 3, new errors might appear in the current
+
+or imported libraries; there are three possible scenarios:
+
+(a) If the user refined the precondition of a function (e.g. head requires non-empty lists), then a
+type error might be generated at clients of the function both inside and outside the library;
+(b) If the user refined the post-condition of a function (e.g. scanr always returns non-empty
+(c) If the user refined the postcondition of an imported function upon which the function to
+be verified relies, then the imported function’s specification may not be satisfied by its
+
+lists), then no error can be generated;
+
+5Termination checking, by default activate in Liquid Haskell, is a third source of type errors in programs without any
+refinement type specifications. To simplify our case study we deactivated termination checking.
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+2nd
+
+3rd
+
+errorEmp
+scanr
+scanr1
+head
+tail
+last
+init
+fold1
+foldr1
+(!!)
+cycle
+maximum
+minimum
+
+maximumBy
+minimumBy
+transpose
+genIndex
+
+[1]
+[4]
+[4,6]
+[1]
+[1]
+[2]
+[3]
+[3]
+[1]
+[4,4]
+[2]
+[3]
+[3]
+
+[3]
+[3]
+[3]
+[6,6]
+
+[[5]]
+[6*]
+
+[12*,5*]
+[[5]]
+[[5]]
+[5*]
+[5*]
+[5*]
+[[5]]
+[5*,10*]
+
+[5*]
+[5*]
+[5*]
+
+[5*]
+[5*]
+[12*]
+[2*,5*]
+
+[[4]]
+[5*]
+[5*,4*]
+[[4]]
+[[4]]
+[4*]
+[4*]
+[4*]
+[[4]]
+[4*,9*]
+[4*]
+[4*]
+[4*]
+
+1/4
+1/5
+1/5
+1/3
+1/5
+2/4
+2/8
+2/5
+1/2
+4/9
+2/6
+2/4
+2/4
+
+[4]
+[625]
+[2.5M]
+
+[4]
+[4]
+4*
+
+[16,4]
+[4,16]
+[4]
+36*
+4*
+
+[4,16]
+[4,16]
+
+[0]
+[125]
+N/A
+[1]
+[1]
+[4,1]
+[16,1]
+[1,16]
+[1]
+
+[4,1]
+[1,16]
+[1,16]
+
+[12,24,36,36]
+
+0
+1
+N/A
+1
+1
+1
+1
+1
+1
+6
+1
+1
+1
+
+[4*]
+[4*]
+[5*]
+[1*,4*]
+
+2/5
+2/5
+2/11
+6/12
+
+[16,4]
+[16,4]
+[25,5]
+
+4*
+
+[16,1]
+[16,1]
+[0,4]
+
+[3,4,4,1,1,4]
+
+1
+1
+1
+0
+
+1.00
+4.6K
+N/A
+0.70
+0.77
+1.04
+3.12
+2.41
+1.08
+7.81
+1.37
+3.38
+2.80
+
+2.24
+2.40
+51.02
+1.83
+
+Data.List (115 functions defined and verified)
+1st
+
+1
+1
+2
+1
+1
+1
+1
+1
+1
+2
+1
+1
+1
+
+1
+1
+1
+2
+
+1
+1
+2
+1
+2
+1
+1
+2
+1
+1
+1
+2
+2
+2
+2
+
+1:20
+
+Niki Vazou, Éric Tanter, and David Van Horn
+
+implementation. In this case the user can either assume the imported type (thus relying on
+gradual checking), or update and re-check the imported library.
+
+Function
+
+Rnd
+GHC.List (56 functions defined and verified)
+1st
+
+# ? Occs
+
+Cands
+
+Spec
+
+Parts
+
+# γ
+
+SCs
+
+Sols Time (s)
+
+[[12],[5]]
+
+[[6]]
+[[6]]
+
+2nd
+
+Data.List.NonEmpty (57 functions defined and verified)
+1st
+
+[[5],[6]]
+
+[[4],[5]]
+
+[4*]
+[[1]]
+[[1],4*]
+
+[9*]
+
+[[5],[1]]
+
+[5*]
+[[2]]
+[[2],5*]
+[10*]
+
+[4,1]
+[0]
+[1,3]
+[9,4,4,9]
+
+[2]
+[1]
+[1,2]
+[4]
+[1,1]
+[1]
+[1]
+[1,1]
+[1]
+[1]
+[1]
+[1,1]
+[1,1]
+[1,1]
+[1,1]
+
+fromList
+cycle
+- toList
+(!!)
+cycle
+lift
+inits
+tails
+scanl
+scanl1
+insert
+transpose
+reverse
+sort
+sortBy
+
+1.41
+1.27
+3.11
+5.96
+3.13
+2.90
+2.95
+10.22
+2.23
+1.13
+2.25
+37.48
+0.96
+1.03
+0.97
+Table 2. Evaluation of Migrations Assistance. Rnd: number of iterations to verify the function. Function:
+name of the function. # ? : number of ? inserted. Occs: times each ? is used. For each occurrence, we give the
+number of template candidates (Cands) and how many are specific (Spec). Parts: the number of partitions.
+For each partition, we give the number of concretizations (# γ ) and safe concretizations (SCs). Sols: number
+of static solutions found. Time: time in sec.
+
+4*
+[1]
+4*
+9*
+[5]
+[5]
+[5]
+[20]
+[5]
+[5]
+[5]
+[30]
+[5,4]
+[5,4]
+[5,4]
+
+2/11
+1/3
+2/3
+4/22
+1/2
+1/2
+1/5
+1/5
+1/5
+1/2
+1/5
+1/7
+2/3
+2/3
+2/3
+
+[2]
+[2]
+[2]
+[6]
+[2]
+[1]
+[2]
+[6]
+[2,3]
+[2,3]
+[2,3]
+
+[[7],[12]]
+[[5],[12]]
+[[12],[5]]
+[[12],[5]]
+
+[[6],[5]]
+[[4],[5]]
+[[5],[4]]
+[[5],[4]]
+
+[[5]]
+[[5]]
+
+[[5]]
+[[5]]
+[[5]]
+
+[[6]]
+[[6]]
+[[12]]
+
+1
+0
+1
+1
+2
+2
+2
+6
+2
+1
+2
+6
+5
+5
+5
+
+3rd
+
+Evaluation. Table 2 summarizes the migration case study; there are three subtables, one for each
+library: GHC.List, Data.List, and Data.List.NonEmpty. Within each of these tables, there is a
+row for every function which requires a refinement type to type check. Rows are collected into
+groupings of rounds (i.e. Steps 1 - 4), where round i lead to refinement type preconditions that
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+Gradual Liquid Type Inference
+
+1:21
+
+trigger type errors in the functions of round i + 1. The columns of the table have the same meaning
+as that of Table 1; all results are for depth 1.
+
+GHC.List: Liquid Haskell reported three static errors on the original version of GHC.List, i.e.
+with no user refinement type specifications. The function errorEmp is rejected as it is merely a
+wrapper around the error function; scanr and scanr1 each have incomplete patterns assuming a
+non-empty list postcondition. GuiLT performed bad at all these three initial cases. It was unable to
+generate any SC for errorEmp , since the required false precondition is non local. It required more
+than one hour to generate SCs of scanr and it timed-out in the case of scanr1. The reason for
+this is that ?? in post-conditions generated dependent set of constraints that made the partitioning
+optimization (§ 5) useless, despite its importance in the other scenarios. Yet, GuiLT was very efficient
+in the next two rounds. The specification of errorEmp introduced errors in eight functions that
+were fixed using GuiLT: in seven cases the generated SCs correspond to exactly one predicate that
+was used to replace the ??. One of these functions, fold1, was further used by two more functions
+that were interactively migrated at the third and final specification round.
+
+In short, out of the 56 functions defined, 13 required refinement type specifications, since the
+rest were typed with the true-default types generated by Liquid Haskell. GuiLT was unusable in 2
+cases, but synthesized exactly one, the correct, predicate in 10 of them. For the case of (!!), GuiLT
+generated 6 correct predicates, out of which we manually picked the most general one. The two
+cases where GuiLT was unusable are due to many dependencies within the same partition; as future
+work, we should explore whether it is possible to devise a more advanced partitioning scheme.
+
+Data.List: Migration of Data.List only required one round. Four functions errored due to
+incomplete patterns or violation of preconditions of functions imported from previously verified
+GHC.List. Unsurprisingly, GuiLT was unable to find any SCs for genIndex, a generic variant of
+(!!) that indexes lists using any integral (instead of integer) index, because it lacks arithmetic
+templates for integrals. To complete migration, the user needs to either manually provide the
+refinement type of genIndex or appropriately extend the set of templates.
+
+Data.List.NonEmpty: Migration was more interesting for the Data.List.NonEmpty library that
+manipulates the data type NonEmpty a of non-empty lists. The first round exposed that fromList
+requires the non-empty precondition. The GHC.List function cycle has a non-empty precondition,
+thus lifted to non-empty lists does not type check.
+
+cycle :: NonEmpty a → NonEmpty a
+cycle = fromList . List.cycle . toList
+
+To migrate cycle, we first gradually refined the result type of toList :: NonEmpty a → {xs:[a]
+| ??} for which GuiLT suggested the single static refinement of 0 < len xs.
+
+Verification of non-empty list indexing calls requires invariants that relate the lengths of the
+empty and non-empty lists. Similarly, GuiLT finds SCs only after predicate templates that express
+such invariants are added. In general, to aid migration on user-defined structures, GuiLT requires
+the definition of domain-specific templates.
+
+On the second round, the non-empty precondition of fromList triggers errors to eight clients
+(step 4a), all of which call functions that return (non-provably) non-empty lists. For example, inits
+lifts List.inits to non-empty lists.
+
+inits = fromList . List.inits . toList
+
+To migrate such functions, we first assume an unknown specification, for example:
+assume List.inits :: [a] → {o:[a] | ?? }
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+1:22
+
+Niki Vazou, Éric Tanter, and David Van Horn
+
+We then use GuiLT to solve the unknown specification to 0 < len o. At this point, we can either
+update the imported function with the discovered static specification and recheck the library (step
+4c), or stick to gradual checking and stay with the unknown specification for inits.
+
+The function cycle reappears in the second round, due to the new precondition of fromList.
+Since the imported List.cycle already has a precondition {i:[a] | 0 < len i}, at this round we
+further strengthened the existing precondition with the imprecise refinement:
+assume List.cycle :: i:{ [a] | 0 < len i && ?? } → {o:[a] | ?? }
+This is the only case in our experiments where we used a gradual refinement with a static part and
+thus the only case in which some local templates are rejected as non-specific (here 3 out of 4 local
+templates are not specific).
+
+Finally, we use GuiLT to derive higher-order specifications. The lift function lifts a list transformation 
+to non-empty lists, lift f = fromList . f . toList, and comes with a comment that
+“If the provided function returns an empty list, this will raise an error.”. Alerted by this comment,
+we use a ?? in higher-order position:
+
+lift :: (i :[ a] → {o :[ b] | ??}) → NonEmpty a → NonEmpty b
+
+GuiLT produces two static solutions 0 < len o and len i == len o. We choose the second, which
+leads to type errors in three clients, which are resolved in later rounds.
+
+To sum up, GuiLT indeed is aiding Haskell to Liquid Haskell migration of real libraries, since the
+user can place the initial ??s and choose from the suggested SCs, instead of writing specifications
+from scratch. Often times, there is only one possible SC coinciding to all concretizations, thus the
+choice is trivial. When no suggestions are generated, e.g. errorEmp or genIndex, the user can fall
+back to the standard verification process.
+Automatic insertion of ??s would further reduce the required user input, but is left as future work.
+Theorem 4.3 suggests a complete way to automatically insert ??s so that the migrating libraries
+gradually type check. The types suggested by this theorem are very imprecise, yet they provide a
+sound starting point, upon which one can increase precision so long as the libraries type check.
+
+8 RELATED WORK
+
+Liquid Types. Dependent types allow arbitrary expressions at the type level to express theorems
+on programs, while theorem proving is simplified by various automations ranging from tactics (e.g.
+Coq [Bertot and Castéran 2004], Isabelle [Wenzel 2016]) to external SMT solvers (e.g. F* [Swamy
+et al. 2016]). Liquid types [Rondon et al. 2008] restrict the expressiveness of the type specifications
+to decidable fragments of logic to achieve decidable type checking and inference.
+
+Gradual Refinement Types. Several refinement type systems mix static verification with runtime
+checking. Hybrid types [Knowles and Flanagan 2010] use an external prover to statically verify
+subtyping when possible, otherwise a cast is automatically inserted to defer checking at runtime.
+Soft contract verification [Nguyen et al. 2014, 2018; Tobin-Hochstadt and Horn 2012] works in the
+other direction, statically verifying contracts wherever possible, and otherwise leaving unverified
+contracts for checking at runtime. Ou et al. [2004] allow the programmer to explicitly annotate
+whether an assertion is verified at compileor 
+runtime. Manifest contracts [Greenberg et al. 2010]
+formalize the metatheory of refinement typing in the presence of dynamic contract checking.
+Lehmann and Tanter [2017] developed the first gradual refinement type system, which adheres to
+the refined criteria of Siek et al. [2015]. None of these systems support inference; on the contrary,
+because refinements can be arbitrary, inference is impossible in these systems. Here we restrict
+gradual refinements to a finite set of predicates, in order to achieve inference by adaptation of the
+liquid inference procedure.
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+Gradual Liquid Type Inference
+
+1:23
+
+Gradual Type Inference. Several approaches have been developed to combine type inference and
+gradual types. Siek and Vachharajani [2008] infer gradual types using unification, while Rastogi et al.
+[2012] exploit type inference to improve the performance of gradually-typed programs. Garcia and
+Cimini [2015] lift an inference algorithm from a core system to its gradual counterpart, by ignoring
+the unification constraints imposed by gradual types. In contrast, in gradual liquid inference
+the constraints imposed by gradual refinements cannot be ignored, since unlike Hindley-Milner
+inference, the liquid algorithm starts from the strongest solution for the liquid variables and uses
+constraints to iteratively weaken the solution. Our work is the first gradual inference work to be
+systematically derived from the static algorithm based on the Abstracting Gradual Typing approach
+(AGT) [Garcia et al. 2016], and proven to satisfy the static gradual guarantee [Siek et al. 2015].
+
+Error Reporting. Properly localizing, diagnosing and reporting type errors is a long-standing
+challenge, especially for inference algorithms. Since the seminal work of Wand [1986], which keeps
+track of all unification steps in order to help debugging, many algorithms have been proposed to
+better assist programmers. A large variety of techniques has been explored, including slicing [Haack
+and Wells 2003; Tip and Dinesh 2001], heuristics [Zhang et al. 2015], SMT constraint solving [Pavlinovic 
+et al. 2014], counter-example generation [Nguyen and Horn 2015; Seidel et al. 2016], machine
+learning [Seidel et al. 2017], and other search-based approaches, such as Seminal [Lerner et al.
+2007] and counterfactual change inference [Chen and Erwig 2018].
+
+Apart from Seidel et al. [2016], which focuses on identifying dynamic witnesses for static
+refinement type errors, none of the above approaches target refinement types. In this work, we
+uncover a novel application of gradual typing for error explanation, by observing that the notion of
+concretizations of gradual types that stem from AGT, embed useful justifications (or lack thereof)
+that can be exploited to identify refinement errors and guide migration.
+
+Gradual Program Migration. Recently, Campora et al. [2018] exploit variational typing [Chen
+et al. 2014] to assist programmers in making their program more static, by analyzing the impact of
+replacing unknown types with static types. Variational typing greatly reduces the complexity of
+exploring all possible combinations. Though the considered type system is simple, it seems likely
+that the approach could be extended to refinements and combined with our technique. This might
+be an effective way to address the scalability issues we have encountered with our implementation
+approach in certain scenarios.
+
+9 CONCLUSION
+This paper makes the novel observation that gradual inference based on abstract interpretation
+can be fruitfully exploited to assist in explaining type errors and migrating programs to a stronger
+typing discipline. We develop this intuition in the context of refinement types, yielding a novel
+integration of liquid type inference and gradual refinements. Gradual liquid type inference computes 
+possible concretizations of unknown refinements in order for a program to be well-typed. In
+addition to laying down the theoretical foundations of gradual liquid type inference, we provide
+an implementation integrated with Liquid Haskell. Thanks to a number of heuristics and optimizations,
+ the current implementation of the interactive tool GuiLT proves useful for migrating
+existing Haskell libraries to the stronger discipline of Liquid Haskell. Our experience however
+also shows that enhancing the scalability of our prototype further is necessary; we believe that
+variational typing could be particularly helpful towards that goal. Similarly, integrating prior work
+on ranking suggested type error sources would help our inference algorithm suggest the most
+relevant concretizations first. Finally, we conjecture that the idea of using gradual typing for error
+reporting and migration generalizes to other typing disciplines.
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+1:24
+
+Niki Vazou, Éric Tanter, and David Van Horn
+
+REFERENCES
+Y. Bertot and P. Castéran. 2004. Coq’Art: The Calculus of Inductive Constructions. Springer Verlag.
+John Peter Campora, Sheng Chen, Martin Erwig, and Eric Walkingshaw. 2018. Migrating Gradual Types. PACMPL (POPL) 2
+
+Sheng Chen and Martin Erwig. 2018. Systematic identification and communication of type errors. JFP 28 (2018), 2:1–2:48.
+Sheng Chen, Martin Erwig, and Eric Walkingshaw. 2014. Extending Type Inference to Variational Programs. TOPLAS 36, 1
+
+(2018), 15:1–15:29.
+
+(2014), 1:1–1:54.
+
+B. Courcelle and J. Engelfriet. 2012. Graph Structure and Monadic Second-Order Logic: A Language-Theoretic Approach (1st
+
+ed.). Cambridge University Press.
+
+Tim Freeman and Frank Pfenning. 1991. Refinement Types for ML. In PLDI.
+Ronald Garcia and Matteo Cimini. 2015. Principal Type Schemes for Gradual Programs. In POPL.
+Ronald Garcia, Alison M. Clark, and Éric Tanter. 2016. Abstracting Gradual Typing (POPL).
+Michael Greenberg, Benjamin C. Pierce, and Stephanie Weirich. 2010. Contracts Made Manifest. POPL.
+Christian Haack and Joe Wells. 2003. Type Error Slicing in Implicitly-Typed Higher-Order Languages. In ESOP. 284–301.
+K.W. Knowles and C. Flanagan. 2010. Hybrid type checking. TOPLAS.
+Nico Lehmann and Éric Tanter. 2017. Gradual Refinement Types (POPL).
+Benjamin Lerner, Matthew Flower, Dan Grossman, and Craig Chambers. 2007. Searching for Type-Error Messages. In PLDI.
+
+Supplementary Material. 2018. Technical Report: Gradual Liquid Type Inference.
+Phuc C. Nguyen and David Van Horn. 2015. Relatively complete counterexamples for higher-order programs. In PLDI.
+Phuc C. Nguyen, Sam Tobin-Hochstadt, and David Van Horn. 2014. Soft Contract Verification. In ICFP.
+Phuc C. Nguyen, Sam Tobin-Hochstadt, and David Van Horn. 2018. Soft Contract Verification for Higher-order Stateful
+
+425–434.
+
+Programs. In POPL.
+
+Xinming Ou, Gang Tan, Yitzhak Mandelbaum, and David Walker. 2004. Dynamic Typing with Dependent Types, Jean-Jacques
+
+Levy, Ernst W. Mayr, and John C. Mitchell (Eds.). IFIP.
+
+Zvonimir Pavlinovic, Tim King, and Thomas Wies. 2014. Finding minimum type error sources. In OOPSLA. 525–542.
+Aseem Rastogi, Avik Chaudhuri, and Basil Hosmer. 2012. The ins and outs of gradual type inference. In POPL.
+P. Rondon. 2012. Liquid Types. Ph.D. Dissertation. UC San Diego.
+P. Rondon, M. Kawaguchi, and R. Jhala. 2008. Liquid Types. In PLDI.
+Eric Seidel, Ranjit Jhala, and Westley Weimer. 2016. Dynamic witnesses for static type errors (or, ill-typed programs usually
+
+go wrong). In ICFP. 228–242.
+
+Eric L. Seidel, Huma Sibghat, Kamalika Chaudhuri, Westley Weimer, and Ranjit Jhala. 2017. Learning to blame: localizing
+
+novice type errors with data-driven diagnosis. OOPSLA (2017).
+
+Jeremy Siek and Walid Taha. 2006. Gradual Typing for Functional Languages. In Proceedings of the Scheme and Functional
+
+Programming Workshop. 81–92.
+
+Jeremy G. Siek and Manish Vachharajani. 2008. Gradual Typing with Unification-based Inference. In Dynamic Languages
+
+Jeremy G. Siek, Michael M. Vitousek, Matteo Cimini, and John Tang Boyland. 2015. Refined Criteria for Gradual Typing. In
+
+Symposium.
+
+SNAPL.
+
+N. Swamy, C. Hriţcu, C. Keller, A. Rastogi, A. Delignat-Lavaud, S. Forest, K. Bhargavan, C. Fournet, P. Y. Strub, M. Kohlweiss,
+
+J. K. Zinzindohoue, and S. Zanella-Béguelin. 2016. Dependent Types and Multi-Monadic Effects in F*. In POPL.
+
+Frank Tip and T. B. Dinesh. 2001. A slicing-based approach for locating type error. TOSEM 10, 1 (2001), 5–55.
+Sam Tobin-Hochstadt and Matthias Felleisen. 2006. Interlanguage migration: From scripts to programs. In DLS.
+Sam Tobin-Hochstadt and David Van Horn. 2012. Higher-order Symbolic Execution via Contracts. In OOPSLA.
+Niki Vazou, Eric L. Seidel, and Ranjit Jhala. 2014a. LiquidHaskell: Experience with Refinement Types in the Real World. In
+
+Niki Vazou, Eric L. Seidel, Ranjit Jhala, Dimitrios Vytiniotis, and Simon Peyton-Jones. 2014b. Refinement Types for Haskell.
+
+Niki Vazou, Anish Tondwalkar, Vikraman Choudhury, Ryan Scott, Ryan Newton, Philip Wadler, and Ranjit Jhala. 2018.
+
+Haskell.
+
+(2014).
+
+In PLDI.
+
+Refinement Reflection: Complete Verification with SMT. In POPL.
+
+Mitchell Wand. 1986. Finding the Source of Type Errors. In POPL.
+Makarius Wenzel. 2016. The Isabelle System Manual.
+
+Isabelle2016-1/doc/system.pdf
+
+(2016). https://www.cl.cam.ac.uk/research/hvg/Isabelle/dist/
+
+Danfeng Zhang, Andrew C. Myers, Dimitrios Vytiniotis, and Simon Peyton-Jones. 2015. Diagnosing Type Errors with Class.
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+Gradual Liquid Type Inference
+
+1:25
+
+A AUXILIARY DEFINITIONS AND PROOFS
+We now provide the full inference algorithm and prove the theorems of § 4.4.
+
+A.1 The Inference Algorithm
+ˇInfer as in § 4.4:
+We define
+ˇInfer ::
+ˇEnv → ˇExpr → Quals → [ ˇType]
+ˇInfer ˇΓ ˇe Q = { ˇt′ | Just ˇt′ <- A <*> ˇt
+
+, A ∈
+
+ˇSolve A0
+
+ˇC Q }
+
+where
+
+A0 = λκ. Q
+(ˇt, ˇC) = Cons ˇΓ ˇe
+
+ˇSolve :: Sol → [ ˇCons] → Quals → [Maybe Sol]
+ˇSolve A ˇC Q = {Solve A ˆC |
+Note that unlike [Rondon et al. 2008], for simplicity, we assume that the set of refinement predicates
+Q is not a set of templates, but an “instantiated” set of predicates. The algorithmic concretization
+on a list of constraints is defined as follows
+
+ˆC ∈ γQ( ˇC)}
+
+γQ( ˇp(x)) (cid:17) 2Q ∩ γ( ˇp(x))
+
+γQ(ˇΓ) (cid:17) { ˆΓ | x:ˆt ∈ ˆΓ iff x:ˇt ∈ ˇΓ, ˆt ∈ γQ(ˇt)}
+
+γQ(ˇΓ ⊢ ˇt1 ⪯ ˇt2) (cid:17) { ˆΓ ⊢ ˆt1 ⪯ ˆt2 | ˆΓ ∈ γQ(ˇΓ), ˆti ∈ γQ( ˇti)}
+
+γQ(ˇΓ ⊢ ˇt) (cid:17) { ˆΓ ⊢ ˆt | ˆΓ ∈ γQ(ˇΓ), ˆt ∈ γQ(ˇt), }
+γQ( ˇC) (cid:17) { ˆC | c ∈ ˆC iff ˇc ∈ ˇC, ˆc ∈ γQ(ˇc)}
+
+2008].
+
+We complete the definitions by repeating the Solve and Cons algorithms from [Rondon et al.
+The procedure Solve A ˆC repeatedly weakens the solution A until the set of constraints ˆC is
+
+satisfied, or returns Nothing.
+Solve :: Sol → [ ˆCons] → Maybe Sol
+Solve A ˆC =
+
+if exists ˆc ∈ ˆC s.t. ¬isValid(A · ˆc)
+then case Weaken ˆc A of
+Just A′ → Solve A′
+Nothing → Nothing
+
+ˆC
+
+else Just A
+
+ˆCons → Sol → Maybe Sol
+Weaken ::
+Weaken (ˆΓ ⊢ {v:b | θ · κ}) A = Just $
+
+A[κ (cid:55)→ {q|q ∈ A · κ, isValid(A · ˆΓ ⊢ {v:b | θ · q})}]
+
+Weaken ˆΓ ⊢ {v:b | p} ⪯ {v:b | θ · κ} A = Just $
+
+A[κ (cid:55)→ {q|q ∈ A · κ, isValid(A · ˆΓ ⊢ {v:b | A · p} ⪯ {v:b | θ · q})}]
+
+Weaken _ _
+
+= Nothing
+
+expression ˇe and the set of constraints that should be satisfied.
+Cons ::
+Cons ˇΓ ˇe =
+
+ˇEnv → ˇExpr → (Maybe
+
+ˇType, [ ˇCons])
+
+let (ˇt, ˇC) = Gen ˇΓ ˇe
+
+The procedure Cons ˇΓ ˇe is following the rules of Figure 2 to generate a template type of the
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+1:26
+
+Niki Vazou, Éric Tanter, and David Van Horn
+
+(ˇt, Split ˇC)
+The procedure Gen ˇΓ ˇe is using the typing rules of Figure 2 to generate a template type and a
+
+set of constraints.
+
+ˇEnv → ˇExpr → (Maybe
+
+ˇType, [ ˇCons])
+
+Gen ::
+Gen ˇΓ x
+
+= if ˇΓ(x) = {v:b | _}
+
+then (Just ˜Rvbv = x, ∅)
+else (Just ˇΓ(x), ∅)
+
+Gen ˇΓ c
+Gen ˇΓ (ˇe :: ˇt) =
+
+Gen ˇΓ (λx .ˇe) =
+
+Gen ˇΓ if x then ˇe1 else ˇe2) =
+
+= (Just ty(c), ∅)
+let (Just ˇte , ˇC) = Gen ˇΓ ˇe in
+(Just ˇt, (ˇΓ ⊢ ˇte ⪯ ˇt, ˇΓ ⊢ ˇt, ˇC))
+let Just x:ˇtx → ˇt = Fresh ˇΓ λx .ˇe in
+let (Just ˇte , ˇC) = Gen (ˇΓ, x:ˇtx ) ˇe in
+(Just (x:ˇtx → ˇt), (ˇΓ ⊢ ˇte ⪯ ˇt, ˇΓ ⊢ x:ˇtx → ˇt, ˇC))
+let (Just (x:ˇtx → ˇt), ˇC1) = Gen ˇΓ ˇe in
+let (Just ˇty , ˇC2) = Gen ˇΓ y in
+(Just ˇt[y/x],(ˇΓ ⊢ ˇtx ⪯ ˇty , ˇC1 ∪ ˇC2))
+let Just ˇt = Fresh ˇΓ if x then ˇe1 else ˇe2 in
+let (Just ˇt1, ˇC1) = Gen ˇΓ, _:{v:bool | x} ˆe1 in
+let (Just ˇt2, ˇC2) = Gen (ˇΓ, _:{v:bool | ¬x}) ˇe2 in
+(Just ˇt, (ˇΓ ⊢ ˇt, ˇΓ ⊢ ˇt1 ⪯ ˇt, ˇΓ ⊢ ˇt2 ⪯ ˇt, ˇC1 ∪ ˇC2))
+let Just ˇt = Fresh ˇΓ (let x = ˇex in ˇe) in
+let (Just ˇtx , ˇCx ) = Gen ˇΓ ˇex in
+let (Just ˇte , ˇCe ) = Gen (ˇΓ, x:ˇt) ˇe in
+(Just ˇt, (ˇΓ ⊢ ˇt, ˇΓ ⊢ ˇte ⪯ ˇt, ˇCx ∪ ˇCe ))
+let Just ˇt = Fresh ˇΓ (let x = ˇex in ˇe) in
+let (Just ˇte , ˇCe ) = Gen (ˇΓ, x:ˇt) ˇe in
+(Just ˇt, (ˇΓ ⊢ ˇtx , ˇΓ ⊢ ˇt, ˇΓ ⊢ ˇte ⪯ ˇt, ˇCx ∪ ˇCe ))
+(Nothing, ∅)
+
+Gen ˇΓ (let x:ˇtx = ˇex in ˇe) =
+
+Gen ˇΓ (let x = ˇex in ˇe) =
+
+Gen ˇΓ (ˇe y) =
+
+Gen _ _ =
+
+ˇType
+
+ˇEnv → ˇExpr → Maybe
+Fresh ::
+Fresh ˇΓ ˇe = HM type inference
+The procedure Gen is using Fresh, the Hyndler Miller, unrefined type inference algorithm to generate
+liquid type templates with fresh refinement variables for the unknown types.
+
+Finally, Split C using the well-formedness and sub-typing rules of Figure 2 to split the constraints
+
+into basic constraints.
+Split :: [ ˇCons]→ [ ˇCons]
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+Gradual Liquid Type Inference
+
+1:27
+
+= ∅
+
+Split ∅
+Split (ˇΓ ⊢ {v:b | p},C)
+Split (ˇΓ ⊢ x:ˇtx → ˇt,C)
+Split (ˇΓ ⊢ {v:b | p1} ⪯ {v:b | p2}, C)
+Split (ˇΓ ⊢ x:ˇtx1 → ˇt1 ⪯ x:ˇtx2 → ˇt2, C)
+
+= (ˇΓ ⊢ {v:b | p}, Split C)
+= Split (ˇΓ ⊢ ˇtx , ˇΓ, x:ˇtx ⊢ ˇt,C)
+= (ˇΓ ⊢ {v:b | p1} ⪯ {v:b | p2}, Split C)
+= Split (ˇΓ ⊢ ˇt2 ⪯ ˇt1, ˇΓ, x:ˇtx2 ⊢ ˇt1 ⪯ ˇt2, C)
+
+A.2 Correctness of Inference
+Next, we prove Theorem 4.1. Let Q be a finite set of predicates from SMT-decidable logic, ˇΓbe a
+gradual liquid environment, and ˇebe a gradual liquid expression.
+The proofs rely on the properties of the functions Solve and Cons. Since these two functions operate 
+on liquid types, and are ignorant of the gradual setting, we directly port the proofs from [Rondon
+2012].
+
+Lemma A.1 (Constraint Generation). Let (Just ˇt, ˇC) = Cons ˇΓ ˇe. ˇΓ ⊢ ˇe:ˇt′ iff there exists A so
+
+that ˇt′ ≡ A · ˇt and
+
+˜
+
+isValid(A · ˇC).
+
+Proof. Following Theorem 4 of Appendix A of [Rondon 2012]. Since Cons is just the algorithmic
+version of the rules of Figure 2 the theorem holds for any refinement type system with refinement
+variables, when the isValid(·) relation is exactly the same as in the premises of the rules in Figure 2.
+□
+
+Lemma A.2 (Constraint Solving). For every set of constraints ˆC and qualifiers Q,
+
+(1) Solve (λκ.Q) ˆC terminates.
+(2) If Solve (λκ.Q) ˆC = Just A then isValid(A · ˆC).
+(3) If Solve (λκ.Q) ˆC = Nothing then ˆC has no solution on Q.
+
+Proof. Theorem 6 of Appendix A of [Rondon 2012].
+
+□
+
+(1)
+(2)
+
+˜
+˜
+
+Lemma A.3 (Gradual Validity).
+isValid(A · ˇc) iff ∃ˆc ∈ γQ(ˇc).isValid(A · ˇc)
+isValid(A · ˇC) iff ∃ ˆC ∈ γQ( ˇC).isValid(A · ˇC)
+Proof.
+
+(1) By case analysis on the shape of the constraint:
+
+• ˇc ≡ ˇΓ ⊢ ˇt1 ⪯ ˇt2.
+
+˜
+
+isValid(A · ˇΓ ⊢ A · ˇt1 ⪯ A · ˇt2)
+
+∃ˆΓ ∈ γQ(ˇΓ), ˆti ∈ γQ(ˇti).isValid(A · ˆΓ ⊢ A · ˆt1 ⪯ A · ˆt2)
+
+⇔
+⇔
+
+∃ˆc ∈ γQ(ˇc).isValid(A · ˆc)
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+1:28
+
+• ˇc ≡ ˜Γ ⊢ ˜t.
+
+(2) By the definition of
+
+Niki Vazou, Éric Tanter, and David Van Horn
+
+˜
+
+isValid(A · ˇΓ ⊢ A · ˇt)
+
+⇔
+⇔
+
+∃ˆΓ ∈ γQ(ˇΓ), ˆt ∈ γQ(ˇt).isValid(A · ˆΓ ⊢ A · ˆt)
+
+∃ˆc ∈ γQ(ˇc).isValid(A · ˆc)
+
+˜
+
+isValid(·) and concretization of list of constraints.
+
+isValid(A · ˇC)
+
+˜
+∀ˇc ∈ ˇC.
+
+⇔
+˜
+isValid(A · ˇc)
+⇔
+⇔
+
+∀ˇc ∈ ˇC.∃ˆc ∈ γQ(ˇc).isValid(A · ˇc)
+
+∃ ˆC ∈ γQ( ˇC).isValid(A · ˇC)
+
+ˇInfer ˇΓ ˇe Q then ∃A so that
+
+Theorem A.4 (Soundness).
+ˇInfer ˇΓ ˇe Q, then ˇΓ ⊢ ˇe:ˇt.
+
+If ˇt ∈
+
+ˇSolve (λκ.Q) ˇC Q
+
+Proof. Since ˇt ∈
+(1)
+ˇt = A · ˇt′
+(2) Just A ∈
+(Just ˇt′, ˇC) = Cons ˇΓ ˇe
+(3)
+From (2), ∃ ˆC ∈ γQ( ˇC) so that
+(4) Just A ∈ Solve (λκ.Q) ˆC
+From (4) and Lemma A.2 we get
+
+(5)
+
+isValid(A · ˆC)
+By Lemma A.3 we get
+isValid(A · ˇC)
+
+(6)
+
+˜
+
+By (1), (3), and Theorem A.1,
+
+ˇΓ ⊢ ˇe:ˇt
+
+□
+
+□
+
+If
+
+Theorem A.5 (Completeness).
+ˇInfer ˇΓ ˇe Q = ∅, then ∄ˇt . ˇΓ ⊢ ˇe:ˇt.
+Proof. Assume that there exists ˇt so that ˇΓ ⊢ ˇe:ˇt. Then, by Lemma A.1, there exists an A so that
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+Gradual Liquid Type Inference
+(Just ˇt′, ˇC) = Cons ˇΓ ˇe
+ˇt = A · ˇt′
+isValid(A · ˇC)
+
+(1)
+(2)
+(3)
+From (3) and Lemma A.3 ∃ ˆC ∈ γQ( ˇC) so that
+(4)
+
+isValid(A · ˆC)
+
+˜
+
+From (4) and inverting 3 of Lemma A.2 we get
+
+1:29
+
+(5) Solve (λκ.Q) ˆC (cid:44) Nothing
+ˇSolve we get
+
+By the definition of
+(6) ∃A′.Just A′ ∈
+By the definition of
+
+ˇSolve (λκ.Q) ˇC Q
+
+ˇInfer we get
+
+ˇInfer ˇΓ ˇe Q (cid:44) ∅
+
+Since we reached a contradiction, there cannot exist ˇt so that ˇΓ ⊢ ˇe:ˇt.
+Theorem A.6 (Termination).
+Proof. Since both the set of constraints ˇC and the set of refinement predicates Q are finite,
+· finite times and by
+□
+
+the concretizations γQ( ˇC) are also finite. Thus,
+Theorem A.2 Solve · · terminates, thus so does
+
+ˇInfer ˇΓ ˇe Q calls Solve ·
+ˇInfer ˇΓ ˇe Q.
+
+ˇInfer ˇΓ ˇe Q terminates.
+
+□
+
+A.3 Criteria for Gradual Typing
+Finally we prove the static criteria for gradual typing.
+
+(i) Conservative Extension.
+Theorem A.7 (Conservative Extension). If Just ˆt = Infer ˆΓ ˆe Q, then
+
+Otherwise,
+
+ˇInfer ˆΓ ˆe Q = ∅.
+
+ˇInfer ˆΓ ˆe Q = {ˆt}.
+
+Proof. If Just ˆt = Infer ˆΓ ˆe Q, then there exists an A, so that
+(1)
+(2) Just A = Solve (λκ.Q) ˆC
+(3)
+γQ( ˆC).
+Thus,
+Otherwise, Infer ˆΓ ˆe Q = Nothing, because of a failure either at constraint generation or at
+□
+
+ˆt = A · ˆt′
+(Just ˆt′, ˆC) = Cons ˆΓ ˆe
+ˇSolve (λκ.Q) ˆC Q = Just A. So,
+
+Since the generated constraints ˆC contain no ?, then { ˆC} =
+
+ˇInfer ˆΓ ˆe Q = {ˆt}.
+
+solving. In either case
+
+ˇInfer will also return ∅.
+
+(ii) Embedding of Unrefined Terms.
+Definition A.8 (Unrefined Type & Terms). Unrefined types and terms represent base types and
+
+lambda calculus terms that are typed using HindleyMilner inference: ⌊Γ⌋ ⊢ ⌊e⌋:⌊t⌋.
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+1:30
+
+Niki Vazou, Éric Tanter, and David Van Horn
+
+⌊{v:b | p}⌋ = b
+⌊x:t → t⌋ = ⌊tx⌋ → ⌊t⌋
+
+⌊c⌋ = c
+
+⌊λx .e⌋ = λx .⌊e⌋
+
+⌊x⌋ = x
+⌊e x⌋ = ⌊e⌋ x
+
+⌊if x then e1 else e2⌋ = if x then ⌊e1⌋ else ⌊e2⌋
+
+⌊let x = ex in e⌋ = let x = ⌊ex⌋ in ⌊e⌋
+⌊let x:t = ex in e⌋ = let x:⌊t⌋ = ⌊ex⌋ in ⌊e⌋
+
+Definition A.9 (Imprecise Types & Terms). Imprecise types are refined with only ?. Imprecise
+
+terms only use imprecise type annotations.
+
+⌈{v:b | p}⌉ = {v:b | ?}
+⌈x:t → t⌉ = x:⌈tx⌉ → ⌈t⌉
+
+⌈c⌉ = c
+
+′where c
+
+′ = c ∧ ty(c
+
+′) = ⌈ty(c)⌉
+
+⌈λx .e⌉ = λx .⌈e⌉
+
+⌈x⌉ = x
+⌈e x⌉ = ⌈e⌉ x
+
+⌈if x then e1 else e2⌉ = if x then ⌈e1⌉ else ⌈e2⌉
+
+⌈let x = ex in e⌉ = let x = ⌈ex⌉ in ⌈e⌉
+⌈let x:t = ex in e⌉ = let x:⌈t⌉ = ⌈ex⌉ in ⌈e⌉
+
+Lemma A.10 (Well formedness of imprecise types). Γ ⊢ ⌈t⌉
+Proof. Trivial, since true always belongs to the concretization of imprecise gradual refinements.
+□
+Lemma A.11 (Imprecise Subtyping). If all of the refinements in t are local, then Γ ⊢ t ⪯ ⌈t⌉ and
+
+Γ ⊢ ⌈t⌉ ⪯ t.
+
+Proof. By induction on t.
+
+• Γ ⊢ {v:b | p} ⪯ {v:b | ?}, since {v:b | true} ∈ γ({v:b | ?}).
+• Γ ⊢ {v:b | ?} ⪯ {v:b | p}, since {v:b | p} ∈ γ({v:b | ?}).
+• Γ ⊢ x:tx → t ⪯ x:⌈tx⌉ → ⌈t⌉, since Γ ⊢ ⌈tx⌉ ⪯ tx and Γ, x:⌈tx⌉ ⊢ t ⪯ ⌈t⌉ by inductive hypothesis.
+• Γ ⊢ x:⌈tx⌉ → ⌈t⌉ ⪯ x:tx → t, since Γ ⊢ tx ⪯ ⌈tx⌉ and Γ, x:tx ⊢ ⌈t⌉ ⪯ t by inductive hypothesis.
+□
+Lemma A.12 (Imprecise Terms). If all the refinements for constants and user types are local, then
+
+if ⌊Γ⌋ ⊢ ⌊e⌋:⌊t⌋, then ⌈Γ⌉ ⊢ ⌈e⌉:⌈t⌉.
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+Gradual Liquid Type Inference
+
+1:31
+
+Proof. The proof proceeds by induction on the derivation tree of ⌊Γ⌋ ⊢ ⌊e⌋:⌊t⌋.
+
+⌈Γ⌉ ⊢ x:{v:b | ?}.
+
+• e ≡ x. By assumption, x ∈ ⌈Γ⌉.
+– If ⌈Γ⌉(x) = {v:b | _}, then ⌈Γ⌉ ⊢ x:{v:b | v = x}. By Rule T-Sub and Lemmas A.11 and A.10
+– Otherwise, ⌈Γ⌉ ⊢ x:⌈Γ(x)⌉.
+• e ≡ λx .e′. By inversion of hypothesis ⌊Γ, x:tx⌋ ⊢ ⌊e′⌋:⌊t⌋. By inductive hypothesis ⌈Γ, x:tx⌉ ⊢
+⌈e′⌉:⌈t⌉. By Lemma A.10 ⌈Γ⌉ ⊢ ⌈x:tx → t⌉. So, by rule T-Fun ⌈Γ⌉ ⊢ ⌈e⌉:⌈x:tx → t⌉.
+• e ≡ e′ x. By inversion of hypothesis ⌊Γ⌋ ⊢ ⌊e′⌋:⌊x:tx → t⌋ and ⌊Γ⌋ ⊢ ⌊x⌋:⌊tx⌋. By inductive
+hypothesis ⌈Γ⌉ ⊢ ⌈e′⌉:⌈x:tx → t⌉ and ⌈Γ⌉ ⊢ ⌈x⌉:⌈tx⌉. By rule T-App ⌈Γ⌉ ⊢ ⌈e⌉:⌈t⌉.
+• e ≡ c. By definition of ⌈c⌉ this case falls in the previous.
+• e ≡ if x then e1 else e2. By inversion of the hypothesis ⌊Γ⌋ ⊢ x:⌊{v:bool | _}⌋, ⌊Γ⌋ ⊢ ⌊e1⌋:⌊t⌋,
+and ⌊Γ⌋ ⊢ ⌊e2⌋:⌊t⌋. By inductive hypothesis ⌈Γ⌉ ⊢ x:⌈{v:bool | _}⌉, ⌈Γ⌉ ⊢ ⌈e1⌉:⌈t⌉, and ⌈Γ⌉ ⊢
+⌈e2⌉:⌈t⌉. By weakening, Lemma A.10 and the rule T-If ⌈Γ⌉ ⊢ ⌈e⌉:⌈t⌉.
+• e ≡ let x = ex in e′ By inversion of the hypothesis ⌊Γ⌋ ⊢ ⌊ex⌋:⌊tx⌋ and ⌊Γ, x:tx⌋ ⊢ ⌊e′⌋:⌊t⌋. By
+inductive hypothesis, rule T-Let, and Lemma A.10, ⌈Γ⌉ ⊢ ⌈e⌉:⌈t⌉.
+x⌋ and ⌊Γ, x:tx⌋ ⊢ ⌊e′⌋:⌊t⌋. By
+• e ≡ let x:t = ex in e By inversion of the hypothesis ⌊Γ⌋ ⊢ ⌊ex⌋:⌊t′
+hypothesis, Lemma A.11 and rule T-Sub ⌊Γ⌋ ⊢ ⌊ex⌋:⌊tx⌋. By inductive hypothesis, rule T-Spec,
+and Lemma A.10, ⌈Γ⌉ ⊢ ⌈e⌉:⌈t⌉.
+
+□
+
+Theorem A.13 (Embedding of Unrefined Terms). If all the refinements in constants and user
+
+provided specifications are local, then if ⌊Γ⌋ ⊢ ⌊e⌋:⌊t⌋, then
+
+ˇInfer ⌈Γ⌉ ⌈e⌉ Q (cid:44) ∅.
+
+Proof. Since by Lemma A.12 the theorem is proved by completeness of our inference algorithm,
+□
+
+i.e. Theorem A.5.
+
+(iii) Static Gradual Guarantee.
+
+Definition A.14 (Precision of Gradual Types). ˇt1 ⊑ ˇt2 iff γQ(ˇt1) ⊆ γQ(ˇt2).
+
+Theorem A.15 (Static Gradual Guarantee). If ˇΓ1 ⊑ ˇΓ2 and ˇe1 ⊑ ˇe2, then for every ˇt1i ∈
+
+ˇInfer ˇΓ1 ˇe1 Q there exists ˇt1i ⊑ ˇt2i so that ˇt2i ∈
+
+ˇInfer ˇΓ2 ˇt2 Q.
+
+Proof. Since ˇt1i ∈
+
+ˇInfer ˇΓ1 ˇe1 Q then ∃A so that
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+1:32
+
+Niki Vazou, Éric Tanter, and David Van Horn
+
+(1)
+(2)
+(3)
+
+ˇt1i = A · ˇt1
+Just A ∈
+(Just ˇt1, ˇC1) = Cons ˇΓ1 ˇe1
+
+ˇSolve (λκ.Q) ˇC1 Q
+
+From (2),
+(4) ∃ ˆC1 ∈ γQ( ˇC1).Just A ∈ Solve (λκ.Q) ˆC1
+Since Cons is preserves ?
+
+(5)
+(6)
+(7)
+
+(Just ˇt2, ˇC2) = Cons ˇΓ2 ˇe2
+ˇt1 ⊑ ˇt2
+ˇC1 ⊑ ˇC2
+
+By (4) and (7) we get
+ˆC1 ∈ γQ( ˇC2)
+
+(8)
+
+So,
+
+(9) Just A ∈
+
+ˇSolve (λκ.Q) ˇC2 Q
+
+By (5) and (9) we get
+(10) A · ˇt2 ∈
+By (6),(10) and since A preserves ?
+
+ˇInfer ˇΓ2 ˇe2 Q
+
+A · ˇt1 ⊑ A · ˇt2
+
+□
+
+Proceedings of the ACM on Programming Languages, Vol. 1, No. OOPSLA, Article 1. Publication date: January 2018.
+
+

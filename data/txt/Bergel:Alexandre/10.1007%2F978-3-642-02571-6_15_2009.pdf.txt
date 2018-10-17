@@ -1,0 +1,1358 @@
+Reusing and Composing Tests with Traits
+
+Stéphane Ducasse1, Damien Pollet1, Alexandre Bergel1, and Damien Cassou2
+
+1 RMoD team, INRIA Lille – Nord Europe & University of Lille 1
+
+Parc Scientiﬁque de la Haute Borne – 59650 Villeneuve d’Ascq, France
+
+2 Phoenix team, University of Bordeaux 1
+
+Building A29bis – 351, cours de la libération – 33405 Talence, France
+
+Abstract. Single inheritance often forces developers to duplicate code
+and logic. This widely recognized situation aﬀects both business code
+and tests. In a large and complex application whose classes implement
+many groups of methods (protocols), duplication may also follow the
+application’s idiosyncrasies, making it diﬃcult to specify, maintain, and
+reuse tests. The research questions we faced are (i) how can we reuse
+test speciﬁcations across and within complex inheritance hierarchies, especially 
+in presence of orthogonal protocols; (ii) how can we test interface
+behavior in a modular way; (iii) how far can we reuse and parametrize
+composable tests.
+In this paper, we compose tests out of separately speciﬁed behavioral
+units of reuse —traits. We propose test traits, where: (i) speciﬁc test cases
+are composed from independent speciﬁcations; (ii) executable behavior
+speciﬁcations may be reused orthogonally to the class hierarchy under
+test; (iii) test ﬁxtures are external to the test speciﬁcations, thus are
+easier to specialize. Traits have been successfully applied to test two
+large and critical class libraries in Pharo, a new Smalltalk dialect based
+on Squeak, but are applicable to other languages with traits.
+Keywords: Reuse, Traits, Multiple Inheritance, Tests, Unit-Testing.
+
+1 The Case
+
+One fundamental software engineering principle is to favor code reuse over code
+duplication. Reusing unit tests is important, because they are valuable executable 
+speciﬁcations that can be applied to classes in diﬀerent inheritance hierarchies.
+ How can we factor tests and reuse them to validate the conformance of
+diﬀerent classes to their common protocols? By protocol, we mean an informal
+group of methods, that is implemented orthogonally to inheritance hierarchies1.
+This is a typical situation where single inheritance hampers code reuse by forcing
+developers to copy and paste [4].
+
+Still, there are some techniques to reuse tests: one way is to write unit tests
+that are parametrized by the class they should test. This way, it is possible
+to deﬁne tests for protocols (group of methods) and interfaces and to reuse
+1 We avoid the term interface because protocols are typically of ﬁner granularity and
+implemented in a more ﬂexible way, e.g., incompletely or with naming variations.
+
+M. Oriol and B. Meyer (Eds.): TOOLS EUROPE 2009, LNBIP 33, pp. 252–271, 2009.
+c(cid:2) Springer-Verlag Berlin Heidelberg 2009
+
+Reusing and Composing Tests with Traits
+
+253
+
+them for the diﬀerent classes that implement such interfaces. Even if this does
+not seem widely used, JUnit 4.0 oﬀers a parametrized test runner to run tests
+on a collection of ﬁxtures returned by a factory method. Another approach is
+to deﬁne hook methods in the generic protocol test case, which can be overridden 
+in a test case subclass for each implementor of that protocol. Both approaches 
+have the limit that they organize tests per protocol rather than per
+implementor. This encourages to duplicate ﬁxtures —which are indeed speciﬁc
+to the implementor— across protocols, but also makes implementor-speciﬁc adjustments 
+diﬃcult: for instance, to cancel inherited tests, subclasses may have
+to deﬁne phony ones2.
+
+Traits, pure composable units of behavior[8], recently got some attention and
+have been introduced in several languages including Squeak [12], AmbientTalk
+[7], Fortress [10], the DrScheme object layer [9], Slate and Javascript3. Traits
+are groups of methods that can be reused orthogonally to inheritance. A class
+inherits from a superclass and may be composed of multiple traits.
+
+To evaluate the expressivity of traits on real case studies, several works redesigned 
+existing libraries using traits [3,5]. So far, traits have been applied to
+and used when deﬁning and designing applications. Since traits are composable
+units of behavior, the question whether traits may be successfully applied for
+testing naturally raises.
+
+The research questions that drive this paper are the following ones:
+– Are test traits reusable in practice? If each feature was tested by a separate
+trait, how much test reuse could we obtain? What is a good granularity for
+test traits that maximizes their reusability and composition?
+
+– How far should a test ﬁxture be adapted to speciﬁc requirements?
+– How far should a test be parametrized to be reusable? What is the impact
+
+on the maintainability of test code?
+
+To answer these research questions, over the last two years, we performed
+the following experiment: while designing a complete new implementation of the
+stream library of the Squeak open-source Smalltalk [5], we deﬁned test traits
+(i.e., traits that deﬁne test methods, and which can be reused by composition
+into test classes). In addition, we initiated the development of a new body of
+tests for the collection library [6], in preparation for a future complete redesign.
+We deﬁned a large body of tests and reused them using traits. In this paper, we
+report our results which are now part of the Pharo Smalltalk4.
+
+The contributions of this article show that traits are really adapted to specifying 
+and reusing tests, especially in the context of multiple inheritance. A test
+trait deﬁnes an abstraction over its test data (a ﬁxture), and a set of test methods.
+ Test traits may then be composed and adjusted to build concrete test classes
+that can parallel the domain code organization.
+
+2 And canceling tests is not easily possible with the JUnit 4.0 approach.
+3 respectively http://slate.tunes.org and http://code.google.com/p/jstraits
+4 http://www.pharo-project.org
+
+254
+
+S. Ducasse et al.
+
+The article is structured as follows: Section 2 shortly presents xUnit, and
+expose the problems we are currently facing; Section 3 describes the libraries
+we selected for our study; we then explain our experimental process (Section 4)
+and present some selected examples and situations (Section 5); in Section 6, we
+present the traits we deﬁned, and how they are reused to test the classes of
+the libraries; ﬁnally, we discuss the beneﬁts and limits of our approach, before
+exploring related work and concluding (Sections 7, 8, 9).
+
+2 Illustrating the Problem
+In this section we brieﬂy present the implementation principles of the xUnit
+frameworks, some examples of problems found in the Squeak libraries.
+
+2.1 xUnit in a Nutshell
+The xUnit family of testing frameworks originated with its Smalltalk incarnation:
+SUnit. In essence, a unit test is a short piece of code which stimulates some
+objects then checks assertions on their reaction [2,14]. The stimulated objects
+are collectively called a test ﬁxture, and unit tests that have to be executed in the
+context of a given ﬁxture are grouped with it into a test case. The framework
+automates executing the unit tests, ensuring each is run in the context of a
+freshly initialized ﬁxture.
+
+In SUnit, a test case is a subclass of TestCase which deﬁnes unit tests as
+methods, and their shared ﬁxture as state. In the example below5, we deﬁne such
+a subclass, named SetTest, with instance variables full and empty. We then deﬁne
+the method setUp, which initializes both instance variables to hold diﬀerent sets
+as a ﬁxture, and the unit test method testAdd, which checks that adding an
+element works on the empty set.
+TestCase subclass: #SetTest
+
+instanceVariableNames: ’full empty’
+
+SetTest >> setUp
+
+empty := Set new.
+full := Set with: 5 with: 6.
+
+SetTest >> testAdd
+
+empty add: 5.
+self assert: (empty includes: 5).
+
+5 Readers unfamiliar with Smalltalk might want to read the code aloud, as approximate 
+english. Message sends interleave arguments with keywords of the message
+name: receiver message: arg1 with: arg2 (the message name is message:with:). Messages 
+are sent from left to right with priorities: unary, then operator, then keyword
+messages, so that self assert: 120 = 5 factorial does not need parentheses. A dot
+separates full statements, and semi-columns cascade several messages to a single
+receiver: receiver msg1; msg2. Single quotes denote ’strings’, double quotes denote
+“comments”. #foo is a symbol, and #(a b 42) is a literal array containing #a, #b,
+and 42. Curly braces are syntactic sugar for building arrays at runtime. Square brackets 
+denote code blocks, or anonymous functions: [:param | statements]. The caret ^
+result returns from the method.
+
+Reusing and Composing Tests with Traits
+
+255
+
+2.2 Analyzing the Squeak Collection Library Tests
+As explained above, in absence of parametrized unit tests, it is not simple to reuse
+tests across hierarchies (i.e., to run tests against classes in separate hierarchies).
+Indeed, the well-known limits of single inheritance apply to tests as well, and this
+is particularly true when we want to reuse tests for protocol compliance. Since
+protocol implementations often crosscut inheritance, a developer cannot simply
+rely on inheritance and is forced to either copy and paste or use delegation [8]. In
+addition to such common problems we wanted to understand the other problems
+that may arise when programmers cannot reuse tests. We studied the Squeak
+collection library tests and we complement the problems mentioned above with
+the following points:
+Test duplication. We found redundancies in testing some features, not due
+to straight code duplication, but to duplicated test logic. The programmers
+probably were not aware of the other tests or had no means to reuse them.
+For example, the feature “adding an element in a collection after a particular 
+element in the collection” is implemented with the add:after: method in
+LinkedList and OrderedCollection. This feature is tested in LinkedListTest and
+OrderedCollectionTest.
+For example, compare the following tests:
+LinkedListTest >> test09addAfter
+
+| collection last |
+collection := LinkedList new.
+last := self class new n: 2.
+collection add: (self class new n: 1); add: last.
+self assert: (collection collect:[:e | e n]) asArray = #(1 2).
+collection add: (self class new n: 3) after: last.
+self assert: (collection collect:[:e | e n]) asArray = #(1 2 3).
+
+OrderedCollectionTest >> testAddAfter
+
+| collection |
+collection := #(1 2 3 4) asOrderedCollection.
+collection add: 88 after: 1.
+self assert: (collection = #(1 88 2 3 4) asOrderedCollection).
+collection add: 99 after: 2.
+self assert: (collection = #(1 88 2 99 3 4) asOrderedCollection).
+
+Logic duplication is a problem since it limits the impact of tests and costs
+more in maintenance.
+
+No systematic feature testing. In most of the cases, the collection tests were
+written to assess the compliance of Squeak with the ANSI standard. However,
+ instead of an overall eﬀort, the tests are the result of punctual and
+independent initiatives. The only way to assess which feature a test method
+covers, is by its name and by what messages the test method sends. As a
+consequence:
+– some features are tested only for one particular type (e.g., after: and
+after:ifAbsent: are only tested for instances of OrderedCollection in Se-
+quenceableCollectionTest);
+
+256
+
+S. Ducasse et al.
+
+– some features are tested twice for the same type, in diﬀerent classes
+(e.g., in both SequenceableCollectionTest and OrderedCollectionTest, testCopyWith 
+tests the same copying features for OrderedCollection).
+
+Testing ad hoc behavior. Since the tests were not reused, some tests ended
+up covering uninteresting implementation decisions, e.g., the default capacity 
+of newly created collections. While it would be an interesting test if it
+was generic, applied class by class it often leads to ad-hoc values being documented 
+in test methods. This practice can even be counter productive since
+tests that assume ﬁxed values will break when the value changes, and require
+unnecessary ﬁxes [14].
+
+3 Experimental Context: Two Large Libraries
+We experimented on two Smalltalk librairies structured around large hierarchies:
+streams and collections . We selected them for the following reasons: (i) they are
+complex and essential parts of a Smalltalk system, (ii) they mix subtyping with
+subclassing, (iii) they are industrial quality class hierarchies that have evolved
+over 15 years, and (iv) they have been studied by other researchers [13,6,11,4].
+We identiﬁed the problems cited above in the Squeak open-source Smalltalk
+[12]. Squeak, like all Smalltalk environments, has its own implementation of such
+libraries which are solely based on single inheritance without traits. In Squeak,
+the abstract classes Stream and Collection have around 40 and 80 subclasses,
+respectively, but many of these (like Bitmap or CompiledMethod) are specialpurpose 
+classes crafted for use in the system or in applications. Here, we only
+take into account the core classes of each hierarchy (Figures 1 and 2).
+
+3.1 Streams
+Streams are used to iterate over sequences of elements such as sequenced collections,
+ ﬁles, and network streams. Streams may be either readable (with methods
+like next and skip), or writable (with methods like write and ﬂush), or both. There
+are diﬀerent kinds of streams to read/write diﬀerent kinds of data (characters,
+bytes, pixels. . . ) and to iterate over diﬀerent kind of sequences (collection, single 
+ﬁle, compressed ﬁle, picture. . . ). This multiplicity of properties implemented
+in a single inheritance object-oriented language involves either a combinatorial
+number of classes or trade-oﬀs. Since the ﬁrst solution is hardly realizable, all
+Smalltalk dialects chose the second approach with trade-oﬀs (copy and paste, too
+many responsibilities, methods implemented too high in the hierarchy, unused
+superclass state) [5].
+
+Stream
+
+PositionableStream
+
+ReadStream
+
+WriteStream
+
+ReadWriteStream
+
+FileStream
+
+Fig. 1. The Squeak core stream hierarchy
+
+Reusing and Composing Tests with Traits
+
+257
+
+Object
+
+Collection
+
+SequenceableCollection
+
+LinkedList
+
+Set
+
+Bag
+
+PluggableSet
+
+ArrayedCollection
+
+Dictionary
+
+Interval
+
+OrderedCollection
+
+Array
+
+String
+
+Text
+
+IdentityDictionary
+
+SortedCollection
+
+ByteString
+
+Symbol
+
+PluggableDictionary
+
+Fig. 2. Some of the key collection classes in Squeak
+
+3.2 The Varieties of Collections
+In Smalltalk, when one speaks of a collection without being more speciﬁc about
+the kind of collection, he or she means an object that supports well-deﬁned protocols 
+for testing membership and enumerating elements. Here is a summary.
+All collections understand testing messages such as includes:, isEmpty and occur-
+rencesOf:. All collections understand enumeration messages do:, select:, collect:,
+detect:ifNone:, inject:into: and many more.
+
+Table 1 summarizes the standard protocols supported by most of the classes
+in the collection hierarchy. These methods are deﬁned, redeﬁned, optimized or
+occasionally even cancelled in Collection subclasses6.
+
+Large set of diﬀerent behaviors. Beyond this basic uniformity, there are many different 
+collections. Each collection understands a particular set of protocols where
+each protocol is a set of semantically cohesive methods. Table 2 presents some
+of the diﬀerent facets of collections and their implementation. For overall understanding,
+ the key point to grasp is that protocols presented in Table 1 crosscut
+the large set of diﬀerent behaviors presented in Table 2. Here is an enumeration
+of the key behaviors we can ﬁnd in the Smalltalk collection framework:
+Sequenceable: Instances of all subclasses of SequenceableCollection start from
+a ﬁrst element and proceed in a well-deﬁned order to a last element. Set, Bag
+and Dictionary, on the other hand, are not sequenceable.
+
+Sortable: A SortedCollection maintains its elements in sorted order.
+Indexable: Most sequenceable collections are also indexable. This means that
+elements of such a collection may be retrieved from a numerical index, using
+the message at:. Array is the most familiar indexable data structure with a
+ﬁxed size. LinkedLists and SkipLists are sequenceable but not indexable, that
+is, they understand ﬁrst and last, but not at:.
+
+6 Note that canceling methods in subclasses is a pattern that exists outside the
+Smalltalk world. The Java runtime cancels many methods in its collection framework 
+to express immutability by throwing UnsupportedOperationException.
+
+258
+
+S. Ducasse et al.
+
+Table 1. Standard collection protocols
+
+Protocol Methods
+accessing
+testing
+
+adding
+removing
+
+size, capacity, at: anIndex, at: anIndex put: anElement
+isEmpty, includes: anElement, contains: aBlock,
+occurrencesOf: anElement
+add: anElement, addAll: aCollection
+remove: anElement, removeAll: aCollection,
+remove: anElement ifAbsent: aBlock
+
+enumerating do: aBlock, inject: aValue into: aBinaryBlock,
+collect: aBlock, select: aBlock, reject: aBlock,
+detect: aBlock, detect: aBlock ifNone: aNoneBlock
+asBag, asSet, asOrderedCollection, asSortedCollection,
+asArray, asSortedCollection: aBlock
+with: anElement, with:with:, with:with:with:,
+with:with:with:with:, withAll: aCollection
+
+converting
+
+creation
+
+Keyed: Instances of Dictionary and its subclasses may be accessed by nonnumerical 
+indices. Any object may be used as a key to refer to an association.
+Mutable: Most collections are mutable, but Intervals and Symbols are not. An
+Interval is an immutable collection representing a range of Integers. It is
+indexable with Interval >> at:, but cannot be changed with at:put:.
+
+Growable: Instances of Interval and Array are always of a ﬁxed size. Other kinds
+of collections (sorted collections, ordered collections, and linked lists) may
+grow after creation.
+
+Accepts duplicates: A Set ﬁlters out duplicates, but a Bag will not. This
+means that the same elements may occur more than once in a Bag but
+not in a Set. Dictionary, Set and Bag use the = method provided by the
+elements; the Identity variants of these classes use the == method, which
+tests whether the arguments are the same object, and the Pluggable variants
+use an arbitrary equivalence relation supplied by the creator of the collection.
+Contains speciﬁc elements: Most collections hold any kind of element. A
+String, CharacterArray or Symbol, however, only holds Characters. An Array
+will hold any mix of objects, but a ByteArray only holds Bytes. A LinkedList
+is constrained to hold elements that conform to the Link accessing protocol,
+and Intervals only contain consecutive integers, and not any numeric value
+between the bounds.
+
+4 Experimental Process
+
+Experience with traits [4,5] shows that they eﬀectively support reuse. We identiﬁed 
+the problems of Section 2 in Squeak, a dialect of Smalltalk. Our ultimate
+
+Reusing and Composing Tests with Traits
+
+259
+
+Table 2. Some of the key behaviors of the main Squeak class collection
+
+Implementation kind
+
+Arrayed Array, String, Symbol
+Ordered OrderedCollection, SortedCollection, Text, Heap
+Hashed Set, IdentitySet, PluggableSet, Bag, IdentityBag,
+
+Dictionary, IdentityDictionary, PluggableDictionary
+
+Linked LinkedList, SkipList
+Interval
+
+Interval
+
+Sequenceable access
+
+by index Array, String, Symbol, Interval, OrderedCollection, SortedCollection
+
+not indexed LinkedList, SkipList
+
+Non-sequenceable access
+
+by key Dictionary, IdentityDictionary, PluggableDictionary
+
+not keyed Set, IdentitySet, PluggableSet, Bag, IdentityBag
+
+goal is to redesign core libraries of Squeak, favoring backward compatibility, but
+fully based on traits. Our results are available in Pharo, a fork of Squeak that
+provides many improvements, including a ﬁrst redesign of the stream library [5].
+The current paper takes place in a larger eﬀort of specifying the behavior of the
+main collection classes, as a preliminary of designing a new library.
+
+Our approach to reuse tests is based on trait deﬁnition and composition. In
+
+both cases, our experimental process iterated over the following steps:
+Protocol identiﬁcation and selection. We selected the main protocols as deﬁned 
+by the main classes. For example, we took the messages deﬁned by the
+abstract class Collection and grouped them together into coherent sets, inﬂuenced 
+by the existing method categories, the ANSI standard, and the work
+of Cook [1,6].
+
+Trait deﬁnitions. For each protocol we deﬁned some traits. As we will show
+below, each trait deﬁnes a set of test methods and a set of accessor methods
+which make the link to the ﬁxture. Note that one protocol may lead to
+multiple traits since the behavior associated to a set of messages may be
+diﬀerent: for example, adding an element to an OrderedCollection or a Set
+is typically diﬀerent and should be tested diﬀerently (we deﬁned two traits
+TAddTest, TAddForUniquenessTest for simple element addition). Now these
+traits can be reused independently depending on the properties of the class
+under test.
+
+Composing test cases from traits. Using the traits deﬁned in the previous
+steps, we deﬁned test case classes by composing the traits and specifying their
+ﬁxture. We did that for the main collection classes, i.e., often the leaves of the
+Collection inheritance tree (Figure 2). We ﬁrst checked how test traits would
+ﬁt together in one main test class, then applied the traits to other classes. For
+example, we deﬁned the traits TAddTest and TRemoveTest for adding and removing 
+elements. We composed them in the test cases for OrderedCollection.
+
+260
+
+S. Ducasse et al.
+
+Then we created the test cases for the other collections like Bag, etc. However,
+ the tests would not apply to Set and subclasses, which revealed that
+variants of the tests were necessary in this case (TAddForUniquenessTest and
+TRemoveForMultiplenessTest).
+
+5 Selected Examples
+
+We now show how we deﬁne and compose traits to obtain test case classes.
+
+5.1 Test Traits by Example
+We illustrate our approach with the protocol for inserting and retrieving values.
+One important method of this protocol is at:put:. When used on an array, this
+Smalltalk method is the equivalent of Java’s a[i] = val: it stores a value at a
+given index (numerical or not). We selected this example for its simplicity and
+ubiquity. We reused it to test the insertion protocol on classes from two diﬀerent
+sub-hierarchies of the collection library: in the SequenceableCollection subclasses
+such as Array and OrderedCollection, but also in Dictionary, which is a subclass
+of Set and Collection.
+
+First, we deﬁne a trait named TPutTest, with the following test methods:
+
+TPutTest >> testAtPut
+
+self nonEmpty at: self anIndex put: self aValue.
+self assert: (self nonEmpty at: self anIndex) == self aValue.
+
+TPutTest >> testAtPutOutOfBounds
+
+"Asserts that the block does raise an exception."
+self should: [self empty at: self anIndex put: self aValue] raise: Error
+
+TPutTest >> testAtPutTwoValues
+
+self nonEmpty at: self anIndex put: self aValue.
+self nonEmpty at: self anIndex put: self anotherValue.
+self assert: (self nonEmpty at: self anIndex) == self anotherValue.
+
+Finally we declare that TPutTest requires the methods empty, nonEmpty, anIndex,
+aValue and anotherValue.
+
+Methods required by a trait may be assimilated as the parameters of the
+traits, i.e., the behavior of a group of methods is parametrized by its associated
+required methods [8]. When applied to tests, required methods and methods
+deﬁning default values act as customization hooks for tests: to deﬁne a test
+class, the developer must provide the required methods, and he can also locally
+redeﬁne other trait methods.
+
+5.2 Composing Test Cases
+Once the traits are deﬁned, we deﬁne test case classes by composing and reusing
+traits. In particular, we have to deﬁne the ﬁxture, an example of the domain
+
+Reusing and Composing Tests with Traits
+
+261
+
+objects being tested. We do this in the composing class, by implementing the
+methods that the traits require to access the ﬁxture. Since overlap is possible between 
+the accessors used by diﬀerent traits, most of the time, only few accessors
+need to be locally deﬁned after composing an additional trait.
+
+The following deﬁnition shows how we deﬁne the test case ArrayTest to test
+
+the class Array:
+CollectionRootTest subclass: #ArrayTest
+
+uses: TEmptySequenceableTest + TIterateSequenceableTest + TIndexAccessingTest
+
++ TCloneTest + TIncludesTest + TCopyTest + TSetAritmetic
++ TCreationWithTest + TPutTest
+
+instanceVariableNames: ’example1 literalArray example2 empty collection result’
+
+ArrayTest tests Array. It uses 9 traits, deﬁnes 10 instance variables, contains
+85 methods, but only 30 of them are deﬁned locally (55 are obtained from traits).
+Among these 30 methods, 12 methods deﬁne ﬁxtures.
+
+The superclass of ArrayTest is CollectionRootTest. As explained later the class
+CollectionRootTest is the root of the test cases for collections sharing a common
+behavior such as iteration. ArrayTest deﬁnes a couple of instance variables that
+hold the test ﬁxture, and the variables are initialized in the setUp method:
+ArrayTest >> setUp
+
+example1 := #(1 2 3 4 5) copy.
+example2 := {1. 2. 3/4. 4. 5}.
+collection := #(1 -2 3 1).
+result := {SmallInteger . SmallInteger . SmallInteger . SmallInteger}.
+empty := #().
+
+We then make the ﬁxture accessible to the tests by implementing trivial but
+necessary methods, e.g., empty and nonEmpty, required by TEmptyTest:
+
+ArrayTest >> empty
+
+^ empty
+
+ArrayTest >> nonEmpty
+
+^ example1
+
+TPutTest requires the methods aValue and anIndex, which we implement by
+returning a speciﬁc value as shown in the test method testAtPut given below.
+Note that here the returned value of aValue is absent from the array stored in
+the instance variable example1 and returned by nonEmpty. This ensures that the
+behavior is really tested.
+
+ArrayTest >> anIndex
+
+^ 2
+
+ArrayTest >> aValue
+
+^ 33
+
+TPutTest >> testAtPut
+
+self nonEmpty at: self anIndex put: self aValue.
+self assert: (self nonEmpty at: self anIndex) = self aValue.
+These examples illustrate how a ﬁxture may be reused by all the composed
+traits. In the eventuality where a trait behavior would require a diﬀerent ﬁxture,
+new state and new accessors could be added to the test class.
+
+262
+
+S. Ducasse et al.
+
+The class DictionaryTest is another example of a test case class. It also uses
+a slightly modiﬁed version of TPutTest. This trait is adapted by removing its
+method testAtPutOutOfBounds, since bounds are for indexed collections and do
+not make sense for dictionaries. The deﬁnition of DictionaryTest is the following:
+CollectionRootTest subclass: #DictionaryTest
+
+uses: TIncludesTest + TDictionaryAddingTest + TDictionaryAccessingTest
+
++ TDictionaryComparingTest + TDictionaryCopyingTest
++ TDictionaryEnumeratingTest + TDictionaryImplementationTest
++ TDictionaryPrintingTest + TDictionaryRemovingTest
++ TPutTest - {#testAtPutOutOfBounds}
+
+instanceVariableNames: ’emptyDict nonEmptyDict’
+DictionaryTest uses 10 traits and deﬁnes 2 instance variables. 81 methods are
+deﬁned in DictionaryTest for which 25 are locally deﬁned and 56 are brought by
+the traits. For this class, a similar process happens. We deﬁne the setUp method
+for this class. Note that here we use a hook method classToBeTested, so that we
+can also reuse this test case class by subclassing it.
+DictionaryTest >> setUp
+
+emptyDict := self classToBeTested new.
+nonEmptyDict := self classToBeTested new.
+nonEmptyDict
+
+at: #a put: 20;
+at: #b put: 30;
+at: #c put: 40;
+at: #d put: 30.
+
+DictionaryTest >> classToBeTested
+
+^ Dictionary
+
+And similarly we redeﬁne the required methods to propose a key that is adapted
+to dictionaries:
+
+DictionaryTest >> anIndex
+
+^ #zz
+
+DictionaryTest >> aValue
+
+^ 33
+
+5.3 Combining Inheritance and Trait Reuse
+It is worth noting that we do not oppose inheritance-based and trait-based reuse.
+For example, the class CollectionRootTest uses the following traits TIterateTest,
+TEmptyTest, and TSizeTest (see Figure 3). CollectionRootTest is the root of all
+tests, therefore methods obtained from these three traits are inherited by all test
+classes. We could have deﬁned these methods directly in CollectionRootTest, but
+we kept them in traits for the following reasons:
+– Traits represent potential reuse. It is a common idiom in Smalltalk to deﬁne
+classes that are not collections but still implement the iterating protocol.
+Having separate traits at hand will increase reuse.
+
+Reusing and Composing Tests with Traits
+
+263
+
+TSizeTest
+testSizeWhenEmpty
+
+empty
+nonEmpty
+
+empty
+nonEmpty
+
+TEmptyTest
+testifEmptyifNotEmpty
+testIfEmptyDo
+
+CollectionRootTest
+
+TIterateTest
+
+collection
+expectedSizeAfterReject
+speciesClass
+
+testCollect
+testDetect
+testAllSatisfy
+
+OrderedCollectionTest
+
+T...
+
+SetTest
+
+ArrayTest
+
+...
+
+TSetArithmetic
+
+testUnion
+testIntersection
+
+Fig. 3. Test reuse by both trait composition and inheritance (the representation of
+traits shows required methods on the left and provided methods on the right)
+
+– A trait is a ﬁrst class entity. It makes the required methods explicit and
+
+documents a coherent interface.
+
+– Finally, since our plans are to design a new collection library, we will probably
+
+reuse these protocol tests in a diﬀerent way.
+
+6 Results
+
+We now present the results we obtained by reusing tests with traits. Section 6.3
+discusses the questions we faced during this work.
+
+6.1 In the Nile Stream Library
+Excluding tests, Nile is composed of 31 classes, structured around 11 traits:
+TStream, TDecoder, TByteReading, TByteWriting, TCharacterReading, TCharacterWriting,
+ TPositionableStream, TGettableStream, TPuttableStream, TGettablePositionableStream,
+ TPuttablePositionableStream. More details about the design
+of Nile may be found in the literature [5]. Nile has 18 test classes among which
+the ones listed on Table 3 use traits.
+
+The columns of Table 4 and Table 6 describe:
+
+Users: how many test case classes use each trait, either directly by composition
+
+or indirectly through both inheritance and composition;
+
+Methods: the trait balance in terms of required methods vs. provided tests5;
+Ad-hoc: deﬁned requirements or redeﬁned methods vs. overridden tests;
+Eﬀective: the number of unit tests executed during a test run that originate
+
+from the trait in column 1.
+
+For instance, TPuttableStreamTest is composed into 7 test case classes in total,
+through 4 explicit composition clauses; it requires 3 methods and provides 5 unit
+5 The small numbers indicate any additional non-test methods that the traits provide.
+
+264
+
+S. Ducasse et al.
+
+Table 3. Trait compositions in the Nile tests (only these 6 test classes use traits)
+
+Test case class
+CollectionStreamTest TGettablePositionableStreamTest
+
+Traits composed
+
+FileStreamTest
+
++ TPuttablePositionableStreamTest
+TGettablePositionableStreamTest
++ TPuttablePositionableStreamTest
+TGettableStreamTest + TPuttableStreamTest
+HistoryTest
+LinkedListStreamTest TGettableStreamTest + TPuttableStreamTest
+RandomTest
+SharedQueueTest
+
+TGettableStreamTest
+TGettableStreamTest + TPuttableStreamTest
+
+Table 4. Use, structure, adaptation, and beneﬁt of test traits in Nile
+
+Test trait
+
+TGettablePositionableStreamTest
+TGettableStreamTest
+TPositionableStreamTest
+TPuttablePositionableStreamTest
+TPuttableStreamTest
+
+2 / 4
+5 / 8
+2 / 8
+2 / 4
+4 / 7
+
+1 (cid:2) 2
+1 (cid:2) 10
+1 (cid:2) 9
+0 (cid:2) 1
+3 (cid:2) 5 +1
+
+Users Methods5 Ad-hoc
+dir. / inh.
+
+req. (cid:2) prov.
+
+Eﬀective
+mth. (cid:2) tests unit tests
+8
+80
+72
+4
+35
+
+4 (cid:2) 0
+8 (cid:2) 0
+8 (cid:2) 0
+0 (cid:2) 0
+22 (cid:2) 0
+
+tests and an auxiliary method. The test classes provide 22 deﬁnitions for its
+required methods: 3 requirements implemented in 7 test cases, plus 1 redeﬁnition
+of the auxiliary method. Overrides are to be expected since the ﬁxtures often can
+not be deﬁned in a completely abstract way; none of the tests had to be adapted,
+though, which is good. In total, the 5 tests are run for each of the 7 test cases,
+so TPuttableStream generates 35 unit tests.
+
+6.2 In the Collection Library
+The collection hierarchy is far richer than the stream hierarchy. It contains several
+behaviors, often orthogonal, that are intended to be recomposed. As previously,
+Tables 5 and 6 describe how we composed and deﬁned the test traits. The coverage 
+of the collection hierarchy is in no way complete, and we expect to deﬁne
+other traits to cover behavior, like identity vs. equality of elements, homogeneous
+collections, weak-referencing behavior. . .
+
+When writing the test traits, we decided to make do with the collection classes
+as they exist, so the traits are much less balanced than with Nile. For instance,
+TGrowableTest only applies to collections that reallocate their storage, so we
+tested it only for OrderedCollection. However this situation is due to a lack of time
+since several other collections exhibit this behavior. In contrast, TIterateTest and
+
+Reusing and Composing Tests with Traits
+
+265
+
+Table 5. Trait composition in the collection hierarchy tests
+
+BagTest
+
+CollectionRootTest
+DictionaryTest
+
+Test case class
+ArrayTest
+
+Traits composed
+TEmptySequenceableTest + TIterateSequenceableTest
++ TIndexAccessingTest + TCloneTest + TIncludesTest
++ TCopyTest + TSetAritmetic + TCreationWithTest
++ TPutTest
+TAddTest + TIncludesTest + TCloneTest + TCopyTest
++ TSetAritmetic + TRemoveForMultiplenessTest
+TIterateTest + TEmptyTest + TSizeTest
+TIncludesTest + TDictionaryAddingTest
++ TDictionaryAccessingTest + TDictionaryComparingTest
++ TDictionaryCopyingTest + TDictionaryEnumeratingTest
++ TDictionaryImplementationTest + TDictionaryPrintingTest
++ TDictionaryRemovingTest + TPutTest
+− {#testAtPutOutOfBounds}
+TEmptyTest + TCloneTest + TIncludesTest
++ TIterateSequenceableTest + TIndexAccessingTest
++ TIterateTest − {#testDo2. #testDoWithout}
+TAddTest − {#testTAddWithOccurences. #testTAddTwice}
++ TEmptyTest
+OrderedCollectionTest TEmptySequenceableTest + TAddTest + TIndexAccessingTest
+
+LinkedListTest
+
+IntervalTest
+
+SetTest
+
+StackTest
+StringTest
+SymbolTest
+
++ TIncludesTest + TCloneTest + TSetAritmetic
++ TRemoveForMultiplenessTest + TCreationWithTest
++ TCopyTest + TPutTest
+TAddForUniquenessTest + TIncludesTest + TCloneTest
++ TCopyTest + TSetAritmetic + TRemoveTest
++ TCreationWithTest − {#testOfSize} + TGrowableTest
++ TStructuralEqualityTest + TSizeTest
+TEmptyTest + TCloneTest − {#testCopyNonEmpty}
+TIncludesTest + TCloneTest + TCopyTest + TSetAritmetic
+TIncludesTest + TCloneTest − {#testCopyCreatesNewObject}
++ TCopyPreservingIdentityTest + TCopyTest + TSetAritmetic
+− {#testDiﬀerenceWithNonNullIntersection}
+
+TEmptyTest are composed by nearly all test cases, so they have a much higher
+reuse. We also had to adapt composed tests more: while the ﬁxtures are deﬁned
+abstractly, they have to be specialized for each tested class and, sometimes, we
+excluded or overrode test methods in a composition because they would not work
+in this particular test case.
+
+Table 6 shows that traits can achieve important code reuse. The presented
+results should also be interpreted with the perspective that the collection hierarchy 
+is large and that we did not cover all the classes. For example, several kind
+of dictionary (open vs. closed implementation, keeping order) exist and were not
+covered. Therefore the results are deﬁnitively encouraging.
+
+266
+
+S. Ducasse et al.
+
+Table 6. Use, structure, adaptation, and beneﬁt of test traits in the collection hierarchy
+
+Test trait
+
+TAddForUniquenessTest
+TAddTest
+TCloneTest
+TCopyPreservingIdentityTest
+TCopyTest
+TCreationWithTest
+TDictionaryAccessingTest
+TDictionaryAddingTest
+TDictionaryComparingTest
+TDictionaryCopyingTest
+TDictionaryEnumeratingTest
+TDictionaryImplementationTest
+TDictionaryPrintingTest
+TDictionaryRemovingTest
+TEmptySequenceableTest
+TEmptyTest
+TGrowableTest
+TIdentityAddTest
+TIncludesTest
+TIndexAccessingTest
+TIterateSequenceableTest
+TIterateTest
+TPutTest
+TRemoveForMultiplenessTest
+TRemoveTest
+TSizeTest
+TStructuralEqualityTest
+
+6.3 What Did We Gain?
+
+Users Methods5 Ad-hoc
+dir. / inh.
+
+req. (cid:2) prov.
+
+1 / 1
+3 / 4
+9 / 11
+1 / 1
+6 / 7
+3 / 3
+1 / 2
+1 / 2
+1 / 2
+1 / 2
+1 / 2
+1 / 2
+1 / 2
+1 / 2
+2 / 2
+6 / 13
+1 / 1
+1 / 1
+8 / 10
+3 / 3
+2 / 2
+2 / 9
+3 / 4
+2 / 3
+2 / 4
+2 / 9
+2 / 1
+
+3 (cid:2) 4
+3 (cid:2) 7
+2 (cid:2) 3
+1 (cid:2) 1
+2 (cid:2) 5
+1 (cid:2) 7
+3 (cid:2) 13
+3 (cid:2) 4
+0 (cid:2) 1
+3 (cid:2) 2
+3 (cid:2) 9
+0 (cid:2) 8
+3 (cid:2) 2 +1
+3 (cid:2) 4 +1
+3 (cid:2) 6 +3
+2 (cid:2) 8
+5 (cid:2) 3
+2 (cid:2) 1 +1
+5 (cid:2) 6
+1 (cid:2) 13
+3 (cid:2) 3
+7 (cid:2) 20 +2
+4 (cid:2) 3
+1 (cid:2) 1
+2 (cid:2) 4
+2 (cid:2) 2
+2 (cid:2) 4
+
+Eﬀective
+mth. (cid:2) tests unit tests
+4
+28
+33
+1
+35
+21
+26
+8
+2
+4
+18
+16
+4
+8
+12
+104
+3
+1
+60
+39
+6
+180
+12
+3
+16
+18
+4
+
+3 (cid:2) 0
+10 (cid:2) 1
+18 (cid:2) 0
+1 (cid:2) 0
+12 (cid:2) 0
+3 (cid:2) 0
+3 (cid:2) 0
+3 (cid:2) 0
+0 (cid:2) 0
+3 (cid:2) 0
+3 (cid:2) 0
+0 (cid:2) 1
+3 (cid:2) 0
+3 (cid:2) 0
+7 (cid:2) 0
+22 (cid:2) 0
+5 (cid:2) 1
+3 (cid:2) 0
+41 (cid:2) 0
+3 (cid:2) 2
+6 (cid:2) 0
+49 (cid:2) 6
+12 (cid:2) 1
+2 (cid:2) 1
+6 (cid:2) 0
+14 (cid:2) 0
+2 (cid:2) 0
+
+In the introduction of this paper we stated some research questions that drove
+this experiment. It is now time to revisit them.
+– Are test traits reusable in practice? If each feature was tested by a separate
+trait, how much test reuse could we obtain? What is a good granularity for
+test traits that maximizes their reusability and composition?
+
+We created 13 test classes that cover the 13 classes from the collection
+framework (Table 5). These 13 classes use 27 traits. The number of users for
+each trait ranges from 1 to 13. Globally, the traits require 29 unique selectors,
+and provide 150 test and 8 auxiliary methods.
+
+In the end, the test runner runs 765 unit tests, which means that on
+average, reuse is 4.7 unit tests run for each test written. If we do not count
+just tests but all (re)deﬁned methods, the ratio to unit tests run is still 1.8.
+
+Reusing and Composing Tests with Traits
+
+267
+
+Moreover, since the classes we selected often exhibit characteristic behavior,
+we expect that once we will cover much more cases, the reuse will increase.
+– How far should a test ﬁxture be adapted to speciﬁc requirements? We had
+to deﬁne speciﬁc test ﬁxtures. For example, to test a bag or a set we need
+diﬀerent ﬁxtures. However, we could ﬁrst share some common ﬁxtures which
+were abstracted using trait required methods, second we could share them
+between several traits testing a given protocol. It was not our intention to
+reuse test ﬁxtures optimally, though.
+
+To optimize the ﬁxture reuse, we could have followed a breadth-ﬁrst
+approach by collecting all the constraints that hold on a possible ﬁxture
+(having twice the same element, being a character...) before writing any
+tests. However, this approach makes the hypothesis that the world is closed
+and that a ﬁxture can be really shared between diﬀerent test classes. We
+took a pragmatic approach and wanted to evaluate if our approach works in
+practice. In such a context, we had to deﬁne speciﬁc ﬁxtures but we could
+share and abstract some of the behavior using required methods.
+
+– How far should a test be parametrized to be reusable? What is the impact on
+
+the maintainability of test code?
+
+In the test traits, one out of 6 methods is required. Those unique 29 requirements 
+lead to 237 implementations in the test classes to deﬁne the
+concrete ﬁxtures, but often they are trivial accessors. The diﬃculty was in
+striking a balance between reusing ﬁxtures constrained to test several aspects,
+ or deﬁning additional independent ones.
+
+7 Discussion
+Threats to validity. The collection hierarchy is complex and dense in terms of
+the represented behavior. As we showed in Section 3.2, collections possess many
+similar elementary facets: order and objects (OrderedCollection), order and characters 
+(String), no order and duplication (Bag), no order and uniqueness (Set)...
+therefore we imagine that the potential of reuse is higher than in normal domain 
+classes. Still we believe that lots of systems designed with interfaces in
+mind would beneﬁt from our approach. For example, user interface or database
+mapping frameworks also often exhibit such multiple inheritance behavior.
+Factoring test code or grouping test data? As said in the introduction, without
+traits, it is still possible to test protocols and interfaces orthogonally to classes,
+provided the test case are parametrizable, like in JUnit 4.0 (See Section 8.2).
+With this approach, test cases only test a speciﬁc protocol but are applied to
+each domain class that should respect that protocol. Alternatively, with the
+traditional approaches like JUnit, generic test code can be factored through
+inheritance or auxiliary methods.
+
+The natural question is then what is the advantage of using traits vs.
+parametrized test cases. The JUnit scheme implies that generic test code must be
+grouped with the code that passes the test data, either all in one class, or in one
+hierarchy per tested protocol. Reusing generic test code is indeed a typical case of
+
+268
+
+S. Ducasse et al.
+
+implementation inheritance: to group the tests for several protocols and one domain 
+class together, one needs either multiple inheritance or delegation and lots of
+glue code. In contrast, with test traits deﬁning the generic test code, it is possible
+to compose the tests for several protocols into a class that deﬁnes the test data
+for a single domain, thus nicely separating both generic and domain-speciﬁc parts
+of the tests code. Moreover, since the domain-speciﬁc code controls trait composition,
+ it may ignore or redeﬁne the generic test code on a case-by-case basis.
+Traits with a single use. In the current system, some test traits are not reused; for
+instance, the ones dealing with speciﬁc OrderedCollection behavior (e.g., removing
+the last element, or inserting an element at a precise position) are only used by
+OrderedCollectionTest, so we could have deﬁned the methods directly in this class.
+Whether it makes sense or not to have such speciﬁc protocol tests grouped as
+a trait is a design question —which is not speciﬁc to test traits but applies to
+using traits in general and to interface design.
+
+We believe that it still makes sense to deﬁne such cohesive test methods
+as a trait. The current collection library has a large scope but misses some
+useful abstractions; even if a trait is not reused currently, it is still a potentially
+reusable cohesive group of methods. For example, there is no collection which
+simultaneously maintains the order of elements and their uniqueness; if a new
+UniqueOrderedCollection is implemented, test traits specifying the ordering and
+uniqueness protocols will make it easy to ensure that UniqueOrderedCollection
+behaves like the familiar Set and OrderedCollection.
+The case of implementation or speciﬁc methods. When writing test traits we
+focused on public methods. In Smalltalk, since all methods are public, it is
+diﬃcult to know if one should be covered or not. Methods may be categorized
+into three groups: (i) implementation and internal representation methods, (ii)
+methods in a public interface speciﬁc to a given collection, and (iii) unrelated
+method extensions. We think that tests for the ﬁrst category are not worth
+reusing and should be deﬁned locally in the particular test case. As mentioned
+above, we believe it is worth to create a trait for the second group because it
+proactively promotes reuse. The last group of methods are convenience methods,
+so they belong to a diﬀerent library and should be tested there. For example,
+OrderedCollection >> inspectorClass should be covered by the tests for the GUI
+library —where it belongs.
+Beneﬁts for protocol/interface design. Our experience trying to identify common
+protocols highlighted a few inconsistencies or asymmetries; for instance OrderedCollection 
+>> ofSize: and Array >> new: both create a nil-initialized collection of
+the given size, but OrderedCollection >> new: creates an empty collection that can
+grow up to the given capacity. We imagine that these inconsistencies could appear 
+because the tests were not shared between several classes. Since protocol
+tests are easily reused speciﬁcations, we believe they support the deﬁnition of
+more consistent interfaces or uniform class behavior.
+
+Reusing and Composing Tests with Traits
+
+269
+
+Designing traits for tests vs. for domain classes. When designing traits for domain 
+classes (as opposed to test traits), we often found ourselves deﬁning required 
+methods that could be provided by other traits. The idea there is that
+the method names act as join points and glue between traits, propagating behavior 
+from one trait to another.
+
+However, in the context of this work, it is better to design traits with required
+methods named to avoid accidental conﬂicts with methods of other traits. This
+way, it is easier to provide speciﬁc values and behavior in the context of the
+speciﬁc collection class under test. If a value or behavior must be shared, a
+simple redirection method does the trick.
+Pluggable ﬁxtures and test traits. To support reuse between test traits, we tried
+to share ﬁxtures by making them pluggable. However, it was sometimes simpler
+to deﬁne a separate ﬁxture speciﬁc to a given protocol. Indeed, each protocol
+will impose diﬀerent constraints on the ﬁxture, and devising ﬁxtures that satisfy
+many constraints at the same time quickly becomes not practical. It is also
+important to understand how far we want to go with pluggability; for example,
+we did not use the possibility to execute a method given its name (which can
+be trivial in Smalltalk using the perform: message). We limited ourselves to
+use required methods to change collection elements, because we wanted to favor
+readability and understandability of the tests, even at the cost of potential reuse.
+
+8 Related Work
+8.1 Inheritance-Based Test Class Reuse
+The usual approach to run the same tests with several ﬁxtures is to write the
+tests in terms of an abstract ﬁxture and to redeﬁne setUp to provide various
+concrete ﬁxtures. This approach can be extended with Template/Hook Methods
+to organize and share tests within a class hierarchy; for example, the Pier and
+Magritte frameworks [15] use this approach. Their test suites total more than
+3200 SUnit tests when run, for only about 600 actual test methods deﬁned; it is
+then interesting to understand the pros and cons of the approach.
+
+The principle is the following: the test hierarchy mirrors the class hierarchy
+(e.g., MAObjectTest tests MAObject). Some tests are abstract or just oﬀer default
+values and deﬁne hook methods to access the domain classes and instances under
+test (e.g., a method actualClass returns the domain class to test, and instance and
+others return instances under test). This approach allows one to test diﬀerent
+levels of abstraction. In the leaves of the hierarchy, the tests deﬁned in the
+superclass can be reﬁned and made more precise. While this approach works
+well, it shows the following limits:
+– Sometimes, test methods have to be cancelled in subclasses.
+– When the domain exhibits multiple inheritance behavior, this approach does
+not support reuse: it exhibits the same limits as single inheritance in face of
+need for multiple inheritance reuse. Indeed, besides copy/paste or delegation,
+there is no speciﬁc mechanism to reuse tests.
+
+270
+
+S. Ducasse et al.
+
+This approach may be improved to reuse protocol tests. The idea is to deﬁne
+one test case class for each protocol and deﬁne an abstract ﬁxture. Then for
+each of the classes implementing the protocol, a subclass of the test case class
+is created and a ﬁxture is speciﬁcally deﬁned. The drawback of this approach is
+that the ﬁxture has to be duplicated in each of the speciﬁc subclasses for each
+protocol.
+
+8.2 Parametrized Test Classes in JUnit 4.0
+JUnit 4.0 provides a way to parametrize a test class intended to run a set of test
+cases over a diﬀerent data. For example, the code excerpt given below shows a
+test class that veriﬁes the interface IStack for two implementations. The method
+annotated with @Parameters must return a collection of test data objects, in
+this case instances of the stack implementations JavaStack and ArrayStack. The
+Parameterized test runner instantiates the test class and run its tests once for
+each parameter.
+
+@RunWith(Parameterized.class)
+public class IStackTest {
+
+private IStack stack;
+public IStackTest(IStack stack) { this.stack = stack; }
+@Parameters public static Collection<Object[ ]> stacks() {
+
+return Arrays.asList(new Object[ ][ ] {
+
+{ new ArrayStack() },
+{ new JavaStack() } });
+
+}
+@Test public void newStackIsEmpty() throws Exception {
+
+assertTrue(stack.isEmpty());
+
+}
+
+}
+
+When the ﬁxtures are easy to build, the parametrized test runner is thus a very
+convenient alternative to the usual xUnit approach of redeﬁning setUp in subclasses.
+ However, this is not so clear if we consider complex ﬁxtures composed
+from several interrelated domain values, like we needed in our tests, and the
+@Parameters annotation introduces a dependency from the test code to the im-
+plementations: to test a new IStack implementor, one must modify IStackTest —
+or subclass it, which is the non-parametrized approach.
+
+In contrast, test traits group the protocol-level test code in an independent
+entity, while test classes encapsulate details speciﬁc to the tested implementation 
+like building the ﬁxture. Especially, test classes control the composition of
+tests from several traits, and can deﬁne additional ad-hoc tests. This enables
+a workﬂow where the protocol can be documented by a generic test trait, and
+implementation tests can be organized in test classes that parallel the domain
+class hierarchy.
+
+Reusing and Composing Tests with Traits
+
+271
+
+9 Conclusion
+Single inheritance hampers code reuse of business and testing code. Currently,
+programming languages lack constructs that help reuse across diﬀerent unit tests.
+We propose test traits, an approach based on traits which reduces code duplication 
+and favors composition of feature testing code. Our approach is particularly
+adapted to test protocols in class hierarchies with many polymorphic classes,
+and is applicable to other trait-based languages. We applied test traits to two
+large and critical Smalltalk libraries; in average we reused each test 4.7 times.
+This experiment shows deﬁnitive advantages of our approach: test reuse across
+several classes, test composition, simple ﬁxture parametrization. We will pursue
+our eﬀort to fully cover the collection hierarchy, and we expect to get higher test
+code reuse.
+References
+1. ANSI. American National Standard for Information Systems—Programming
+
+Languages—Smalltalk, ANSI/INCITS 319-1998 (1998)
+
+2. Beck, K.: Simple Smalltalk testing: With patterns,
+
+http://www.xprogramming.com/testfram.htm
+
+3. Black, A.P., Schärli, N.: Traits: Tools and methodology. In: ICSE (2004)
+4. Black, A.P., Schärli, N., Ducasse, S.: Applying traits to the Smalltalk collection
+
+hierarchy. In: OOPSLA, vol. 38, pp. 47–64 (2003)
+
+5. Cassou, D., Ducasse, S., Wuyts, R.: Traits at work: the design of a new trait-based
+stream library. Journal of Computer Languages, Systems and Structures 35(1),
+2–20 (2009)
+
+6. Cook, W.R.: Interfaces and speciﬁcations for the Smalltalk-80 collection classes. In:
+
+OOPSLA, vol. 27, pp. 1–15. ACM Press, New York (1992)
+
+7. Dedecker, J., Van Cutsem, T., Mostinckx, S., D’Hondt, T., De Meuter, W.:
+Ambient-oriented programming in ambientTalk. In: Thomas, D. (ed.) ECOOP
+2006. LNCS, vol. 4067, pp. 230–254. Springer, Heidelberg (2006)
+
+8. Ducasse, S., Gîrba, T., Wuyts, R.: Object-oriented legacy system trace-based logic
+testing. In: European Conference on Software Maintenance and Reengineering
+(CSMR 2006), pp. 35–44. IEEE Computer Society Press, Los Alamitos (2006)
+
+9. Flatt, M., Finder, R.B., Felleisen, M.: Scheme with classes, mixins and traits. In:
+
+AAPLAS (2006)
+
+10. The Fortress language speciﬁcation,
+
+http://research.sun.com/projects/plrg/fortress0866.pdf
+
+11. Godin, R., Mili, H., Mineau, G.W., Missaoui, R., Arﬁ, A., Chau, T.-T.: Design
+of class hierarchies based on concept (Galois) lattices. Theory and Application of
+Object Systems 4(2), 117–134 (1998)
+
+12. Ingalls, D., Kaehler, T., Maloney, J., Wallace, S., Kay, A.: Back to the future: The
+story of Squeak, a practical Smalltalk written in itself. In: OOPSLA, pp. 318–326.
+ACM Press, New York (1997)
+13. LaLonde, W., Pugh, J.: Subclassing (cid:2)= Subtyping (cid:2)= Is-a. Journal of Object14.
+ Meszaros, G.: XUnit Test Patterns – Refactoring Test Code. Addison-Wesley, ReadOriented 
+Programming 3(5), 57–62 (1991)
+
+15. Renggli, L.: Magritte — Meta-described web application development. Master’s
+
+thesis, University of Bern (2006)
+
+ing (2007)
+
+

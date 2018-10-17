@@ -1,0 +1,2879 @@
+7
+1
+0
+2
+
+ 
+l
+u
+J
+ 
+
+1
+1
+
+ 
+ 
+]
+S
+D
+.
+s
+c
+[
+ 
+ 
+
+4
+v
+2
+8
+3
+0
+1
+
+.
+
+5
+0
+7
+1
+:
+v
+i
+X
+r
+a
+
+Optimal-Time Text Indexing in BWT-runs Bounded Space (cid:63)
+
+Travis Gagie1,2, Gonzalo Navarro2,3, and Nicola Prezza4
+
+1 EIT, Diego Portales University, Chile
+
+2 Center for Biotechnology and Bioengineering (CeBiB), Chile
+3 Department of Computer Science, University of Chile, Chile
+4 DTU Compute, Technical University of Denmark, Denmark
+
+Abstract. Indexing highly repetitive texts — such as genomic databases, software repositories and
+versioned text collections — has become an important problem since the turn of the millennium. A
+relevant compressibility measure for repetitive texts is r, the number of runs in their Burrows-Wheeler
+Transform (BWT). One of the earliest indexes for repetitive collections, the Run-Length FM-index,
+used O(r) space and was able to eﬃciently count the number of occurrences of a pattern of length
+m in the text (in loglogarithmic time per pattern symbol, with current techniques). However, it was
+unable to locate the positions of those occurrences eﬃciently within a space bounded in terms of r.
+Since then, a number of other indexes with space bounded by other measures of repetitiveness — the
+number of phrases in the Lempel-Ziv parse, the size of the smallest grammar generating the text,
+the size of the smallest automaton recognizing the text factors — have been proposed for eﬃciently
+locating, but not directly counting, the occurrences of a pattern. In this paper we close this longstanding 
+problem, showing how to extend the Run-Length FM-index so that it can locate the occ
+occurrences eﬃciently within O(r) space (in loglogarithmic time each), and reaching optimal time
+O(m + occ) within O(r log(n/r)) space, on a RAM machine of w = Ω(log n) bits. Within O(r log(n/r))
+space, our index can also count in optimal time O(m). Raising the space to O(rw logσ(n/r)), we
+support count and locate in O(m log(σ)/w) and O(m log(σ)/w + occ) time, which is optimal in the
+packed setting and had not been obtained before in compressed space. We also describe a structure
+using O(r log(n/r)) space that replaces the text and extracts any text substring of length (cid:96) in almostoptimal 
+time O(log(n/r) + (cid:96) log(σ)/w). Within that space, we similarly provide direct access to suﬃx
+array, inverse suﬃx array, and longest common preﬁx array cells, and extend these capabilities to full
+suﬃx tree functionality, typically in O(log(n/r)) time per operation. Finally, we uncover new relations
+between r, the size of the smallest grammar generating the text, the Lempel-Ziv parsing, and the
+optimal bidirectional parsing.
+
+1 Introduction
+
+The data deluge has become a routine problem in most organizations that aim to collect and
+process data, even in relatively modest and focused scenarios. We are concerned about string (or
+text, or sequence) data, formed by collections of symbol sequences. This includes natural language
+text collections, DNA and protein sequences, source code repositories, digitalized music, and many
+others. The rate at which those sequence collections are growing is daunting, and outpaces Moore’s
+Law by a signiﬁcant margin [92]. One of the key technologies to handle those growing datasets is
+compact data structures, which aim to handle the data directly in compressed form, without ever
+decompressing it [78]. In general, however, compact data structures do not compress the data by
+orders of magnitude, but rather oﬀer complex functionality within the space required by the raw
+data, or a moderate fraction of it. As such, they do not seem to oﬀer the signiﬁcant space reductions
+that are required to curb the sharply growing sizes of today’s datasets.
+
+(cid:63) Partially funded by Basal Funds FB0001, Conicyt, by Fondecyt Grants 1-171058 and 1-170048, Chile, and by the
+
+Danish Research Council DFF-4005-00267.
+
+What makes a fundamental diﬀerence, however, is that the fastest-growing string collections are
+in many cases highly repetitive, that is, most of the strings can be obtained from others with a few
+modiﬁcations. For example, most genome sequence collections store many genomes from the same
+species, which in the case of, say, humans diﬀer by 0.1% [85] (there is some discussion about the
+exact percentage). The 1000-genomes project5 uses a Lempel-Ziv-like compression mechanism that
+reports compression ratios around 1% [34]. Versioned document collections and software repositories 
+are another natural source of repetitiveness. For example, Wikipedia reports that, by June
+2015, there were over 20 revisions (i.e., versions) per article in its 10 TB content, and that p7zip
+compressed it to about 1%. They also report that what grows the fastest today are the revisions
+rather than the new articles, which increases repetitiveness.6 A study of GitHub (which surpassed
+20 TB in 2016)7 reports a ratio of commit (new versions) over create (brand new projects) around
+20.8 Repetitiveness also arises in other less obvious scenarios: it is estimated that about 50% of
+(non-versioned) software sources [51], 40% of the Web pages [46], 50% of emails [25], and 80% of
+tweets [95], are near-duplicates.
+
+When the versioning structure is explicit, version management systems are able to factor out
+repetitiveness eﬃciently while providing access to any version. The idea is simply to store the ﬁrst
+version of a document in plain form and then the edits of each version of it, so as to reconstruct any
+version eﬃciently. This becomes much harder when there is not a clear versioning structure (as in
+genomic databases) or when we want to provide more advanced functionalities, such as counting or
+locating the positions where a string pattern occurs across the collection. In this case, the problem
+is how to reduce the size of classical data structures for indexed pattern matching, like suﬃx trees
+[98] or suﬃx arrays [66], so that they become proportional to the amount of distinct material in the
+collection. It should be noted that all the work on statistical compression of suﬃx trees and arrays
+[74] is not useful for this purpose, as it does not capture this kind of repetitiveness [58, Lem. 2.6].
+
+M¨akinen et al. [63, 91, 64, 65] pioneered the research on structures for searching repetitive collections.
+ They regard the collection as a single concatenated text T [1..n] with separator symbols,
+and note that the number r of runs (i.e., maximal substrings formed by a single symbol) in the
+Burrows-Wheeler Transform [17] of the text is very low on repetitive texts. Their index, Run-Length
+FM-Index (RLFM-index), uses O(r) words and can count the number of occurrences of a pattern
+P [1..m] in time O(m log n) and even less. However, they are unable to locate where those positions
+are in T unless they add a set of samples that require O(n/s) words in order to oﬀer O(s log n) time
+to locate each occurrence. On repetitive texts, either this sampled structure is orders of magnitude
+larger than the O(r)-size basic index, or the locating time is unacceptably high.
+
+Many proposals since then aimed at reducing the locating time by building on other measures
+related to repetitiveness: indexes based on the Lempel-Ziv parse [61] of T , with size bounded in
+terms of the number z of phrases [58, 36, 79, 6]; indexes based on the smallest context-free grammar
+[18] that generates T , with size bounded in terms of the size g of the grammar [22, 23, 35]; and
+indexes based on the size e of the smallest automaton (CDAWG) [16] recognizing the substrings of
+T [6, 94, 4]. The achievements are summarized in Table 1; note that none of those later approaches
+is able to count the occurrences without enumerating them all. We are not considering in this paper
+
+5 http://www.internationalgenome.org
+6 https://en.wikipedia.org/wiki/Wikipedia:Size of Wikipedia
+7 https://blog.sourced.tech/post/tab vs spaces
+8 http://blog.coderstats.net/github/2013/event-types, see the ratios of push per create and commit per push.
+
+2
+
+indexes based on other measures of repetitiveness that only apply in restricted scenarios, such as
+based on Relative Lempel-Ziv [59, 24, 8, 27] or on alignments [72, 73].
+There are a few known asymptotic bounds between the repetitiveness measures r, z, g, and e:
+z ≤ g = O(z log(n/z)) [88, 18, 50] and e = Ω(max(r, z, g)) [6, 5]. Several examples of string families
+are known that show that r is not comparable with z and g [6, 84]. Experimental results [65, 58, 6,
+21], on the other hand, suggest that in typical repetitive texts it holds z < r ≈ g (cid:28) e.
+
+In highly repetitive texts, one expects not only to have a compressed index able to count and
+locate pattern occurrences, but also to replace the text with a compressed version that nonetheless
+can eﬃciently extract any substring T [i..i+(cid:96)]. Indexes that, implicitly or not, contain a replacement
+of T , are called self-indexes. As can be seen in Table 1, self-indexes with O(z) space require up
+to O(n) time per extracted character, and none exists within O(r) space. Good extraction times
+are instead obtained with O(g), O(z log(n/z)), or O(e) space. A lower bound [97] shows that
+Ω((log n)1−/ log g) time, for every constant  > 0, is needed to access one random position within
+O(poly(g)) space. This bound shows that various current techniques using structures bounded in
+terms of g or z [15, 11, 37, 7] are nearly optimal (note that g = Ω(log n), so the space of all these
+structures is O(poly(g))). In an extended article [19], they give a lower bound in terms of r, but
+only for binary texts and log r = o(w): Ω
+for any constant  > 0, where w = Ω(log n)
+is the number of bits in the RAM word. In fact, since there are string families where z = Ω(r log n)
+[84], no extraction mechanism in space O(poly(r)) can escape in general from the lower bound [97].
+In more sophisticated applications, especially in bioinformatics, it is desirable to support a
+more complex set of operations, which constitute a full suﬃx tree functionality [45, 81, 62]. While
+M¨akinen et al. [65] oﬀered suﬃx tree functionality, they had the same problem of needing O(n/s)
+space to achieve O(s log n) time for most suﬃx tree operations. Only recently a suﬃx tree of size
+O(e) supports most operations in time O(log n) [6, 5], where e refers to the e measure of T plus
+that of T reversed.
+
+w/(1−) log r
+
+(cid:16)
+
+(cid:17)
+
+log n
+
+Summarizing Table 1 and our discussion, the situation on repetitive text indexing is as follows.
+
+1. The RLFM-index is the only structure able to eﬃciently count the occurrences of P in T without
+
+having to enumerate them all. However, it does not oﬀer eﬃcient locating within O(r) space.
+
+2. The only structure clearly smaller than the RLFM-index, using O(z) space [58], has unbounded
+locate time. Structures using O(g) space, which is about the same space of the RLFM-index,
+have an additive penalty quadratic in m in their locate time.
+
+3. Structures oﬀering lower locate time require O(z log(n/z)) space or more [36, 79, 13], O(r + z)
+
+space [6] (where r is the sum of r for T and its reverse), or O(e) space or more [6, 94, 4].
+
+4. Self-indexes with eﬃcient extraction require O(z log(n/z)) space or more [37, 7], O(g) space [15,
+
+11], or O(e) space or more [94, 4].
+
+5. The only eﬃcient compressed suﬃx tree requires O(e) space [5].
+
+Eﬃciently locating the occurrences of P in T within O(r) space has been a bottleneck and an
+open problem for almost a decade. In this paper we give the ﬁrst solution to this problem. Our
+precise contributions, largely detailed in Tables 1 and 2, are the following.
+1. We improve the counting time of the RLFM-index to O(m log logw(σ + n/r)), where σ ≤ r is
+
+the alphabet size of T .
+
+2. We show how to locate each occurrence in time O(log logw(n/r)), within O(r) space. We reduce
+
+the locate time to O(1) per occurrence by using slightly more space, O(r log logw(n/r)).
+
+3
+
+Index
+M¨akinen et al. [65, Thm. 17]
+This paper (Lem. 1)
+This paper (Thm. 9)
+This paper (Thm. 10)
+
+Space
+O(r)
+O(r)
+
+O(m( log σ
+
+Count time
+log log r + (log log n)2))
+
+O(m log logw(σ + n/r))
+
+O(r log(n/r))
+
+O(rw logσ(n/r))
+
+O(m)
+
+O(m log(σ)/w)
+
+Index
+Kreft and Navarro [58, Thm. 4.11]
+Gagie et al. [36, Thm. 4]
+Bille et al. [13, Thm. 1]
+Nishimoto et al. [79, Thm. 1]
+
+Space
+O(z)
+
+O(z log(n/z))
+O(z log(n/z))
+O(z log n log∗ n)
+
+Bille et al. [13, Thm. 1]
+Claude and Navarro [22, Thm. 4]
+Claude and Navarro [23, Thm. 1]
+Gagie et al. [35, Thm. 4]
+M¨akinen et al. [65, Thm. 20]
+Belazzougui et al. [6, Thm. 3]
+This paper (Thm. 1)
+This paper (Thm. 1)
+This paper (Thm. 3)
+This paper (Thm. 4)
+Belazzougui et al. [6, Thm. 4]
+Takagi et al. [94, Thm. 9]
+Belazzougui and Cunial [4, Thm. 1]
+
+O(z log(n/z) log log z)
+
+O(g)
+O(g)
+
+O(g + z log log z)
+
+O(r + n/s)
+
+O(r + z)
+
+O(r)
+
+O(r log logw(n/r))
+
+O(r log(n/r))
+
+O(rw logσ(n/r))
+
+O(e)
+O(e)
+O(e)
+
+Locate time
+
+O(m2h + (m + occ) log z)
+O(m log m + occ log log n)
+
+O(m(1 + log z/ log(n/z)) + occ(log z + log log n))
+O(m log log n log log z + log z log m log n(log∗ n)2
+
++occ log n)
+
+O(m + occ log log n)
+
+O(m(m + log n) log n + occ log2 n)
+
+O(m2 logg n + (m + occ) log g)
+O(m2 + (m + occ) log log n)
+
+O((m + s · occ)( log σ
+
+log log r + (log log n)2))
+
+O(m(log z + log log n) + occ(log z + log log n))
+
+O(m log logw(σ + n/r) + occ log logw(n/r))
+
+O(m log logw(σ + n/r) + occ)
+
+O(m + occ)
+
+O(m log(σ)/w + occ)
+O(m log log n + occ)
+
+O(m + occ)
+O(m + occ)
+
+Extract time
+
+O((cid:96) h)
+
+O((cid:96) + log n)
+O((cid:96) + log n)
+
+O((cid:96) + log(n/z))
+
+O((1 + (cid:96)/ logσ n) log(n/z))
+
+O((cid:96) + log n)
+
+Structure
+Kreft and Navarro [58, Thm. 4.11]
+Gagie et al. [37, Thm. 1–2]
+Rytter [88], Charikar et al. [18]
+Bille et al. [13, Lem. 5]
+Gagie et al. [7, Thm. 2]
+Bille et al. [15, Thm. 1.1]
+Belazzougui et al. [11, Thm. 1]
+Belazzougui et al. [11, Thm. 2]
+M¨akinen et al. [65, Thm. 20]
+This paper (Thm. 2)
+Takagi et al. [94, Thm. 9]
+Belazzougui and Cunial [4, Thm. 1]
+
+Space
+O(z)
+
+O(z log n)
+
+O(z log(n/z))
+O(z log(n/z))
+O(z log(n/z))
+
+O(g)
+O(g)
+
+O(r + n/s)
+
+O(r log(n/r))
+
+O(e)
+O(e)
+
+O(g log n log(n/g)) O(log n/ log log n + (cid:96)/ logσ n)
+
+O(log n + (cid:96)/ logσ n)
+
+O(((cid:96) + s)( log σ
+
+log log r + (log log n)2))
+
+O(log(n/r) + (cid:96) log(σ)/w)
+
+O(log n + (cid:96))
+O(log n + (cid:96))
+
+Structure
+M¨akinen et al. [65, Thm. 30]
+This paper (Thm. 8)
+Belazzougui and Cunial [5, Thm. 1]
+
+Space
+
+Typical suﬃx tree operation time
+
+O(r + n/s)
+
+O(r log(n/r))
+
+O(e)
+
+O(s( log σ
+
+log log r + (log log n)2))
+
+O(log(n/r))
+
+O(log n)
+
+Table 1. Previous and our new results on counting, locating, extracting, and supporting suﬃx tree functionality. We
+simpliﬁed some formulas with tight upper bounds. The main variables are the text size n, pattern length m, number
+of occurrences occ of the pattern, alphabet size σ, Lempel-Ziv parsing size z, smallest grammar size g, BWT runs
+r, CDAWG size e, and machine word length in bits w. Variable h ≤ n is the depth of the dependency chain in the
+Lempel-Ziv parse, and  > 0 is an arbitrarily small constant. Symbols r or e mean r or e of T plus r or e of its
+reverse. The z in Nishimoto et al. [79] refers to the Lempel-Ziv variant that does not allow overlaps between sources
+and targets (Kreft and Navarro [58] claim the same but their index actually works in either variant). Rytter [88] and
+Charikar et al. [18] enable the given extraction time because they produce balanced grammars of the given size (as
+several others that came later). Takagi et al. [94] claim time O(m log σ + occ) but they can reach O(m + occ) by using
+perfect hashing.
+
+4
+
+Functionality
+Count (Lem. 1)
+Count (Thm. 9)
+Count (Thm. 10)
+Count + Locate (Thm. 1)
+Count + Locate (Thm. 1)
+Count + Locate (Thm. 3)
+Count + Locate (Thm. 4)
+Extract (Thm. 2)
+Access SA, ISA, LCP (Thm. 5–7)
+Suﬃx tree (Thm. 8)
+
+Space (words)
+
+O(r)
+
+O(r log(n/r))
+
+O(rw logσ(n/r))
+
+Time
+
+O(m log logw(σ + n/r))
+
+O(m)
+
+O(m log(σ)/w)
+
+O(r)
+
+O(m log logw(σ + n/r) + occ log logw(n/r))
+
+O(r log logw(n/r))
+
+O(r log(n/r))
+
+O(rw logσ(n/r))
+
+O(r log(n/r))
+O(r log(n/r))
+O(r log(n/r))
+
+O(m log logw(σ + n/r) + occ)
+
+O(m + occ)
+
+O(m log(σ)/w + occ)
+
+O(log(n/r) + (cid:96) log(σ)/w)
+
+O(log(n/r) + (cid:96))
+
+O(log(n/r)) for most operations
+
+Table 2. Our contributions.
+
+3. We give the ﬁrst structure building on BWT runs that replaces T while retaining direct access.
+It extracts any substring of length (cid:96) in time O(log(n/r)+(cid:96) log(σ)/w), using O(r log(n/r)) space.
+As discussed, even the additive penalty is near-optimal [97].
+
+4. By using O(r log(n/r)) space, we obtain optimal locate time, O(m+occ). This had been obtained
+only using O(e) [4] or O(e) [94] space. By increasing the space to O(rw logσ(n/r)), we obtain
+optimal locate time O(m log(σ)/w + occ) in the packed setting (i.e., the pattern symbols come
+packed in blocks of w/ log σ symbols per word). This had not been achieved so far by any
+compressed index, but only on uncompressed ones [75].
+
+5. By using O(r log(n/r)) space, we obtain optimal count time, O(m). We also achieve optimal
+count time in the packed setting, O(m log(σ)/w), by increasing the space to O(rw logσ(n/r)).
+As for locate, this is the ﬁrst compressed index achieving optimal-time count.
+
+6. We give the ﬁrst compressed suﬃx tree whose space is bounded in terms of r, O(r log(n/r))
+words. It implements most navigation operations in time O(log(n/r)). There exist only comparable 
+suﬃx trees within O(e) space [5], taking O(log n) time for most operations.
+7. We uncover new relations between r, g, grl ≤ g (the smallest run-length context-free grammar
+[80], which allows size-1 rules of the form X → Y t), z, zno (the Lempel-Ziv parse that does
+not allow overlaps), and b (the smallest bidirectional parsing of T [93]). Namely, we show that
+b ≤ r, z ≤ 2grl = O(b log(n/b)), max(g, zno) = O(b log2(n/b)), and that z can be Ω(b log n).
+
+Contribution 1 is a simple update of the RLFM-index [65] with newer data structures for rank
+and predecessor queries [10]. Contribution 2 is one of the central parts of the paper, and is obtained
+in two steps. The ﬁrst uses the fact that we can carry out the classical RLFM counting process
+for P in a way that we always know the position of one occurrence in T [84, 82]; we give a simpler
+proof of this fact. The second shows that, if we know the position in T of one occurrence of BWT ,
+then we can obtain the preceding and following ones with an O(r)-size sampling. This is achieved
+by using the BWT runs to induce phrases in T (which are somewhat analogous to the Lempel-Ziv
+phrases [61]) and showing that the positions of occurrences within phrases can be obtained from
+the positions of their preceding phrase beginning. The time O(1) is obtained by using an extended
+sampling. Contribution 3 creates an analogous of the Block Tree [7] built on the BWT -induced
+phrases, which satisfy the same property that any distinct string has an occurrence overlapping a
+boundary between phrases. For Contribution 4, we discard the RLFM-index and use a mechanism
+similar to the one used in Lempel-Ziv or grammar indexes [22, 23, 58] to ﬁnd one primary occurrence,
+that is, one that overlaps phrase boundaries; then the others are found with the mechanism to obtain
+
+5
+
+neighboring occurrences already described. Here we use a stronger property of primary occurrences
+that does not hold on those of Lempel-Ziv or grammars, and that might have independent interest.
+Further, to avoid time quadratic in m to explore all the suﬃxes of P , we use a (deterministic)
+mechanism based on Karp-Rabin signatures [3, 36], which we show how to compute from a variant
+of the structure we create for extracting text substrings. The optimal packed time is obtained by
+enlarging samplings. In Contribution 5, we use the components used in Contribution 4 to ﬁnd a
+pattern occurrence, and then ﬁnd the BWT range of the pattern with range searches on the longest
+common preﬁx array LCP , supported by compressed suﬃx tree primitives (see next). Contribution
+6 needs basically direct access to the suﬃx array SA, inverse suﬃx array ISA, and array LCP
+of T , for which we show that a recent grammar compression method achieving locally consistent
+parsing [49, 48] interacts with the BWT runs/phrases to produce run-length context-free grammars
+of size O(r log(n/r)) and height O(log(n/r)). The suﬃx tree operations also need primitives on the
+LCP array that compute range minimum queries and previous/next smaller values [33]. Finally,
+for Contribution 7 we show that a locally-consistent-parsing-based run-length grammar of size
+O(b log(n/b)) can compress a bidirectional scheme of size b, and this yields upper bounds on z as
+well. We also show that the BWT runs induce a valid bidirectional scheme on T , so b ≤ r, and use
+known examples [84] where z = Ω(r log n). The other relations are derived from known bounds.
+
+2 Basic Concepts
+A string is a sequence S[1..(cid:96)] = S[1]S[2] . . . S[(cid:96)], of length (cid:96) = |S|, of symbols (or characters, or
+letters) chosen from an alphabet [1..σ] = {1, 2, . . . , σ}, that is, S[i] ∈ [1..σ] for all 1 ≤ i ≤ (cid:96). We use
+S[i..j] = S[i] . . . S[j], with 1 ≤ i, j ≤ (cid:96), to denote a substring of S, which is the empty string ε if
+i > j. A preﬁx of S is a substring of the form S[1..i] and a suﬃx is a substring of the form S[i..(cid:96)].
+The yuxtaposition of strings and/or symbols represents their concatenation.
+
+We will consider indexing a text T [1..n], which is a string over alphabet [1..σ] terminated by the
+special symbol $ = 1, that is, the lexicographically smallest one, which appears only at T [n] = $.
+This makes any lexicographic comparison between suﬃxes well deﬁned.
+
+Our computation model is the transdichotomous RAM, with a word of w = Ω(log n) bits, where
+all the standard arithmetic and logic operations can be carried out in constant time. In this article
+we generally measure space in words.
+
+2.1 Suﬃx Trees and Arrays
+
+The suﬃx tree [98] of T [1..n] is a compacted trie where all the n suﬃxes of T have been inserted.
+By compacted we mean that chains of degree-1 nodes are collapsed into a single edge that is labeled
+with the concatenation of the individual symbols labeling the collapsed edges. The suﬃx tree has
+n leaves and less than n internal nodes. By representing edge labels with pointers to T , the suﬃx
+tree uses O(n) space, and can be built in O(n) time [98, 69, 96, 26].
+The suﬃx array [66] of T [1..n] is an array SA[1..n] storing a permutation of [1..n] so that, for
+all 1 ≤ i < n, the suﬃx T [SA[i]..] is lexicographically smaller than the suﬃx T [SA[i + 1]..]. Thus
+SA[i] is the starting position in T of the ith smallest suﬃx of T in lexicographic order. This can be
+regarded as an array collecting the leaves of the suﬃx tree. The suﬃx array uses n words and can
+be built in O(n) time [56, 57, 52].
+
+All the occurrences of a pattern string P [1..m] in T can be easily spotted in the suﬃx tree or
+array. In the suﬃx tree, we descend from the root matching the successive symbols of P with the
+
+6
+
+strings labeling the edges. If P is in T , the symbols of P will be exhausted at a node v or inside an
+edge leading to a node v; this node is called the locus of P , and all the occ leaves descending from
+v are the suﬃxes starting with P , that is, the starting positions of the occurrences of P in T . By
+using perfect hashing to store the ﬁrst characters of the edge labels descending from each node of
+v, we reach the locus in optimal time O(m) and the space is still O(n). If P comes packed using
+w/ log σ symbols per computer word, we can descend in time O(m log(σ)/w) [75], which is optimal
+in the packed model. In the suﬃx array, all the suﬃxes starting with P form a range SA[sp..ep],
+which can be binary searched in time O(m log n), or O(m + log n) with additional structures [66].
+The inverse permutation of SA, ISA[1..n], is called the inverse suﬃx array, so that ISA[j] is the
+
+lexicographical position of the suﬃx T [j..n] among the suﬃxes of T .
+Another important concept related to suﬃx arrays and trees is the longest common preﬁx
+array. Let lcp(S, S(cid:48)) be the length of the longest common preﬁx between strings S and S(cid:48), that
+is, S[1..lcp(S, S(cid:48))] = S(cid:48)[1..lcp(S, S(cid:48))] but S[lcp(S, S(cid:48)) + 1] (cid:54)= S(cid:48)[lcp(S, S(cid:48)) + 1]. Then we deﬁne the
+longest common preﬁx array LCP [1..n] as LCP [1] = 0 and LCP [i] = lcp(T [SA[i − 1]..], T [SA[i]..]).
+The LCP array uses n words and can be built in O(n) time [55].
+
+2.2 Self-indexes
+
+A self-index is a data structure built on T [1..n] that provides at least the following functionality:
+
+Count: Given a pattern P [1..m], count the number of occurrences of P in T .
+Locate: Given a pattern P [1..m], return the positions where P occurs in T .
+Extract: Given a range [i..i + (cid:96) − 1], return T [i..i + (cid:96) − 1].
+
+The last operation allows a self-index to act as a replacement of T , that is, it is not necessary
+to store T since any desired substring can be extracted from the self-index. This can be trivially
+obtained by including a copy of T as a part of the self-index, but it is challenging when the self-index
+uses less space than a plain representation of T .
+
+In principle, suﬃx trees and arrays can be regarded as self-indexes that can count in time
+O(m) or O(m log(σ)/w) (suﬃx tree, by storing occ in each node v) and O(m log n) or O(m + log n)
+(suﬃx array, with occ = ep − sp + 1), locate each occurrence in O(1) time, and extract in time
+O(1 + (cid:96) log(σ)/w). However, they use O(n log n) bits, much more than the n log σ bits needed to
+represent T in plain form. We are interested in compressed self-indexes [74, 78], which use the space
+required by a compressed representation of T (under some entropy model) plus some redundancy
+(at worst o(n log σ) bits). We describe later the FM-index, a particular self-index of interest to us.
+
+2.3 Burrows-Wheeler Transform
+
+The Burrows-Wheeler Transform of T [1..n], BWT [1..n] [17], is a string deﬁned as BWT [i] =
+T [SA[i] − 1] if SA[i] > 1, and BWT [i] = T [n] = $ if SA[i] = 1. That is, BWT has the same
+symbols of T in a diﬀerent order, and is a reversible transform.
+
+The array BWT is obtained from T by ﬁrst building SA, although it can be built directly, in
+O(n) time and within O(n log σ) bits of space [70]. To obtain T from BWT [17], one considers
+two arrays, L[1..n] = BWT and F [1..n], which contains all the symbols of L (or T ) in ascending
+order. Alternatively, F [i] = T [SA[i]], so F [i] follows L[i] in T . We need a function that maps any
+L[i] to the position j of that same character in F . The formula is LF (i) = C[c] + rank[i], where
+c = L[i], C[c] is the number of occurrences of symbols less than c in L, and rank[i] is the number
+
+7
+
+of occurrences of symbol L[i] in L[1..i]. A simple O(n)-time pass on L suﬃces to compute arrays
+C[i] and rank[i] using O(n log σ) bits of space. Once they are computed, we reconstruct T [n] = $
+and T [n − k] ← L[LF k−1(1)] for k = 1, . . . , n − 1, in O(n) time as well.
+
+2.4 Compressed Suﬃx Arrays and FM-indexes
+
+Compressed suﬃx arrays [74] are a particular case of self-indexes that simulate SA in compressed
+form. Therefore, they aim to obtain the suﬃx array range [sp..ep] of P , which is suﬃcient to count
+since P then appears occ = ep − sp + 1 times in T . For locating, they need to access the content of
+cells SA[sp], . . . , SA[ep], without having SA stored.
+
+The FM-index [28, 29] is a compressed suﬃx array that exploits the relation between the string
+L = BWT and the suﬃx array SA. It stores L in compressed form (as it can be easily compressed
+to the high-order empirical entropy of T [68]) and adds sublinear-size data structures to compute
+(i) any desired position L[i], (ii) the generalized rank function rankc(L, i), which is the number of
+times symbol c appears in L[1..i]. Note that these two operations permit, in particular, computing
+rank[i] = rankL[i](L, i), which is called partial rank. Therefore, they compute
+
+LF (i) = C[i] + rankL[i](L, i).
+
+For counting, the FM-index resorts to backward search. This procedure reads P backwards and
+at any step knows the range [spi, epi] of P [i..m] in T . Initially, we have the range [spm+1..epm+1] =
+[1..n] for P [m + 1..m] = ε. Given the range [spi+1..epi+1], one obtains the range [spi..epi] from
+c = P [i] with the operations
+
+spi = C[c] + rankc(L, spi+1 − 1) + 1,
+epi = C[c] + rankc(L, epi+1).
+
+Thus the range [sp..ep] = [sp1..ep1] is obtained with O(m) computations of rank, which dominates
+the counting complexity.
+
+For locating, the FM-index (and most compressed suﬃx arrays) stores sampled values of SA
+at regularly spaced text positions, say multiples of s. Thus, to retrieve SA, we ﬁnd the smallest k
+for which SA[LF k(i)] is sampled, and then the answer is SA[i] = SA[LF k(i)] + k. This is because
+function LF virtually traverses the text backwards, that is, it drives us from L[i], which points to
+some SA[i], to its corresponding position F [j], which is preceded by L[j], that is, SA[j] = SA[i]− 1:
+
+SA[LF (i)] = SA[i] − 1.
+
+Since it is guaranteed that k < s, each occurrence is located with s accesses to L and computations
+of LF , and the extra space for the sampling is O((n log n)/s) bits, or O(n/s) words.
+For extracting, a similar sampling is used on ISA, that is, we sample the positions of ISA
+that are multiples of s. To extract T [i..i + (cid:96) − 1] we ﬁnd the smallest multiple of s in [i + (cid:96)..n],
+j = s · (cid:100)(i + (cid:96))/s(cid:101), and extract T [i..j]. Since ISA[j] = p is sampled, we know that T [j − 1] = L[p],
+T [j − 2] = L[LF (p)], and so on. In total we require at most (cid:96) + s accesses to L and computations
+of LF to extract T [i..i + (cid:96) − 1]. The extra space is also O(n/s) words.
+
+For example, using a representation [10] that accesses L and computes partial ranks in constant
+time (so LF is computed in O(1) time), and computes rank in the optimal O(log logw σ) time, an
+FM-index can count in time O(m log logw σ), locate each occurrence in O(s) time, and extract (cid:96)
+symbols of T in time O(s + (cid:96)), by using O(n/s) space on top of the empirical entropy of T [10].
+There exist even faster variants [9], but they do not rely on backward search.
+
+8
+
+2.5 Run-Length FM-index
+One of the sources of the compressibility of BWT is that symbols are clustered into r ≤ n runs,
+which are maximal substrings formed by the same symbol. M¨akinen and Navarro [63] proved a
+(relatively weak) bound on r in terms of the high-order empirical entropy of T and, more importantly,
+ designed an FM-index variant that uses O(r) words of space, called Run-Length FM-index or
+RLFM-index. They later experimented with several variants of the RLFM-index, where the variant
+RLFM+ [65, Thm. 17] corresponds to the original one [63].
+The structure stores the run heads, that is, the ﬁrst positions of the runs in BWT , in a data
+structure E = {1} ∪ {1 < i ≤ n, BWT [i] (cid:54)= BWT [i − 1]} that supports predecessor searches. Each
+element e ∈ E has associated the value e.p = |{e(cid:48) ∈ E, e(cid:48) ≤ e}|, which gives its position in a string
+L(cid:48)[1..r] that stores the run symbols. Another array, D[0..r], stores the cumulative lengths of the
+runs after sorting them lexicographically by their symbols (with D[0] = 0). Let array C(cid:48)[1..σ] count
+the number of runs of symbols smaller than c in L. One can then simulate
+rankc(L, i) = D[C(cid:48)[c] + rankc(L(cid:48), pred(i).p − 1)] + [if L(cid:48)[pred(i).p] = c then i − pred(i) + 1 else 0]
+at the cost of a predecessor search (pred) in E and a rank on L(cid:48). By using up-to-date data structures,
+the counting performance of the RLFM-index can be stated as follows.
+
+Lemma 1. The Run-Length FM-index of a text T [1..n] whose BWT has r runs can occupy O(r)
+words and count the number of occurrences of a pattern P [1..m] in time O(m log logw(σ + n/r)). It
+also computes LF and access to any BWT [p] in time O(log logw(n/r)).
+
+Proof. We use the RLFM+ [65, Thm. 17], using the structure of Belazzougui and Navarro [10,
+Thm. 10] for the sequence L(cid:48) (with constant access time) and the predecessor data structure described 
+by Belazzougui and Navarro [10, Thm. 14] to implement E (instead of the bitvector they
+originally used). They also implement D with a bitvector, but we use a plain array. The sum of both
+operation times is O(log logw σ + log logw(n/r)), which can be written as O(log logw(σ + n/r)). To
+access BWT [p] = L[p] we only need a predecessor search on E, which takes time O(log logw(n/r)).
+Finally, we compute LF faster than a general rank query, as we only need the partial rank query
+rankL[i](L, i). This can be supported in constant time on L(cid:48) using O(r) space, by just recording all
+the answers, and therefore the time for LF on L is also dominated by the predecessor search on E,
+(cid:117)(cid:116)
+with O(log logw(n/r)) time.
+
+We will generally assume that σ is the eﬀective alphabet of T , that is, the σ symbols appear in
+T . This implies that σ ≤ r ≤ n. If this is not the case, we can map T to an eﬀective alphabet [1..σ(cid:48)]
+before indexing it. A mapping of σ(cid:48) ≤ r words then stores the actual symbols when extracting a
+substring of T is necessary. For searches, we have to map the m positions of P to the eﬀective
+alphabet. By storing a predecessor structure of O(σ(cid:48)) = O(r) words, we map each symbol of P in
+time O(log logw(σ/σ(cid:48))) [10, Thm. 14]. This is within the bounds given in Lemma 1, which therefore
+holds for any alphabet size.
+
+To provide locating and extracting functionality, M¨akinen et al. [65] use the sampling mechanism
+we described for the FM-index. Therefore, although they can eﬃciently count within O(r) space,
+they need a much larger O(n/s) space to support these operations in time proportional to O(s).
+Despite various eﬀorts [65], this has been a bottleneck in theory and in practice since then.
+
+9
+
+2.6 Compressed Suﬃx Trees
+
+Suﬃx trees provide a much more complete functionality than self-indexes, and are used to solve
+complex problems especially in bioinformatic applications [45, 81, 62]. A compressed suﬃx tree is
+regarded as an enhancement of a compressed suﬃx array (which, in a sense, represents only the
+leaves of the suﬃx tree). Such a compressed representation must be able to simulate the operations
+on the classical suﬃx tree (see Table 4 later in the article), while using little space on top of the
+compressed suﬃx array. The ﬁrst such compressed suﬃx tree [89] used O(n) extra bits, and there
+are variants using o(n) extra bits [33, 31, 87, 41, 1].
+
+Instead, there are no compressed suﬃx trees using O(r) space. An extension of the RLFM-index
+[65] still needs O(n/s) space to carry out most of the suﬃx tree operations in time O(s log n). Some
+variants that are designed for repetitive text collections [1, 76] are heuristic and do not oﬀer worstcase 
+guarantees. Only recently a compressed suﬃx tree was presented [5] that uses O(e) space and
+carries out operations in O(log n) time.
+
+3 Locating Occurrences
+
+In this section we show that, if the BWT of a text T [1..n] has r runs, we can have an index using
+O(r) space that not only eﬃciently ﬁnds the interval SA[sp..ep] of the occurrences of a pattern
+P [1..m] (as was already known in the literature, see previous sections) but that can locate each
+such occurrence in time O(log logw(n/r)) on a RAM machine of w bits. Further, the time per
+occurrence may become constant if the space is raised to O(r log logw(n/r)).
+
+We start with Lemma 2, which shows that the typical backward search process can be enhanced
+so that we always know the position of one of the values in SA[sp..ep]. Our proof simpliﬁes a previous
+one [84, 82]. Lemma 3 then shows how to eﬃciently obtain the two neighboring cells of SA if we know
+the value of one. This allows us extending the ﬁrst known cell in both directions, until obtaining
+the whole interval SA[sp..ep]. In Lemma 4 we show how this process can be sped up by using more
+space. Theorem 1 then summarizes the main result of this section.
+
+In Section 3.1 we extend the idea in order to obtain LCP values analogously to how we obtain
+SA values. While not of immediate use for locating, this result is useful later in the article and also
+has independent interest.
+
+Lemma 2. We can store O(r) words such that, given P [1..m], in time O(m log logw(σ + n/r)) we
+can compute the interval SA[sp, ep] of the occurrences of P in T , and also return the position j and
+contents SA[j] of at least one cell in the interval [sp, ep].
+
+Proof. We store a RLFM-index and predecessor structures Rc storing the position in BWT of
+the right and left endpoints of each run of copies of c. Each element in Rc is associated to its
+corresponding text position, that is, we store pairs (cid:104)i, SA[i] − 1(cid:105) sorted by their ﬁrst component
+(equivalently, we store in the predecessor structures their concatenated binary representation).
+These structures take a total of O(r) words.
+
+The interval of characters immediately preceding occurrences of the empty string is the entire
+BWT [1..n], which clearly includes P [m] as the last character in some run (unless P does not occur
+in T ). It follows that we ﬁnd an occurrence of P [m] in predecessor time by querying pred(RP [m], n).
+Assume we have found the interval BWT [sp, ep] containing the characters immediately preceding 
+all the occurrences of some (possibly empty) suﬃx P [i+1..m] of P , and we know the position and
+
+10
+
+contents of some cell SA[j] in the corresponding interval, sp ≤ j ≤ ep. Since SA[LF (j)] = SA[j]− 1,
+if BWT [j] = P [i] then, after the next application of LF -mapping, we still know the position and
+value of some cell SA[j(cid:48)] corresponding to the interval BWT [sp(cid:48), ep(cid:48)] for P [i..m], namely j(cid:48) = LF (j)
+and SA[j(cid:48)] = SA[j] − 1.
+On the other hand, if BWT [j] (cid:54)= P [i] but P still occurs somewhere in T (i.e., sp(cid:48) ≤ ep(cid:48)), then
+there is at least one P [i] and one non-P [i] in BWT [sp, ep], and therefore the interval intersects an
+extreme of a run of copies of P [i]. Then, a predecessor query pred(RP [i], ep) gives us the desired
+pair (cid:104)j(cid:48), SA[j(cid:48)] − 1(cid:105) with sp ≤ j(cid:48) ≤ ep and BWT [j(cid:48)] = P [i].
+
+Therefore, by induction, when we have computed the BWT interval for P , we know the position
+
+and contents of at least one cell in the corresponding interval in SA.
+To obtain the desired time bounds, we concatenate all the universes of the Rc structures into a
+single one of size σn, and use a single structure R on that universe: each (cid:104)x, SA[x−1](cid:105) ∈ Rc becomes
+(cid:104)x + (c − 1)n, SA[x] − 1(cid:105) in R, and a search pred(Rc, y) becomes pred(R, (c − 1)n + y) − (c − 1)n.
+Since R contains 2r elements on a universe of size σn, we can have predecessor searches in time
+O(log logw(nσ/r)) and O(r) space [10, Thm. 14]. This is the same O(log logw(σ + n/r)) time we
+obtained in Lemma 1 to carry out the normal backward search operations on the RLFM-index. (cid:117)(cid:116)
+
+Lemma 2 gives us a toe-hold in the suﬃx array, and we show in this section that a toe-hold is
+all we need. We ﬁrst show that, given the position and contents of one cell of the suﬃx array SA of
+a text T , we can compute the contents of the neighbouring cells in O(log logw(n/r)) time. It follows
+that, once we have counted the occurrences of a pattern in T , we can locate all the occurrences in
+O(log logw(n/r)) time each.
+Lemma 3. We can store O(r) words such that, given p and SA[p], we can compute SA[p − 1] and
+SA[p + 1] in O(log logw(n/r)) time.
+
+Proof. We parse T into phrases such that T [i] is the ﬁrst character in a phrase if and only if i = 1
+or q = SA−1[i + 1] is the ﬁrst or last position of a run in BWT (i.e., BWT [q] = T [i] starts or ends
+a run). We store an O(r)-space predecessor data structure with O(log logw(n/r)) query time [10,
+Thm. 14] for the starting phrase positions in T (i.e., the values i just mentioned). We also store,
+associated with such values i in the predecessor structure, the positions in T of the characters
+immediately preceding and following q in BWT , that is, N [i] = (cid:104)SA[q − 1], SA[q + 1](cid:105).
+Suppose we know SA[p] = k + 1 and want to know SA[p− 1] and SA[p + 1]. This is equivalent to
+knowing the position BWT [p] = T [k] and wanting to know the positions in T of BWT [p − 1] and
+BWT [p + 1]. To compute these positions, we ﬁnd with the predecessor data structure the position i
+in T of the ﬁrst character of the phrase containing T [k], take the associated positions N [i] = (cid:104)x, y(cid:105),
+and return SA[p − 1] = x + k − i and SA[p + 1] = y + k − i.
+To see why this works, let SA[p − 1] = j + 1 and SA[p + 1] = (cid:96) + 1, that is, j and (cid:96) are the
+positions in T of BWT [p − 1] = T [j] and BWT [p + 1] = T [(cid:96)]. Note that, for all 0 ≤ t < k − i,
+T [k − t] is not the ﬁrst nor the last character of a run in BWT . Thus, by deﬁnition of LF ,
+LF t(p − 1), LF t(p), and LF t(p + 1), that is, the BWT positions of T [j − t], T [k − t], and T [(cid:96) − t],
+are contiguous and within a single run, thus T [j−t] = T [k−t] = T [(cid:96)−t]. Therefore, for t = k−i−1,
+T [j − (k − i− 1)] = T [i + 1] = T [(cid:96)− (k − i + 1)] are contiguous in BWT , and thus a further LF step
+yields that BWT [q] = T [i] is immediately preceded and followed by BWT [q−1] = T [j−(k−i)] and
+BWT [q + 1] = T [(cid:96)− (k − i)]. That is, N [i] = (cid:104)SA[q − 1], SA[q + 1](cid:105) = (cid:104)j − (k − i) + 1, (cid:96)− (k − i) + 1(cid:105)
+(cid:117)(cid:116)
+and our answer is correct.
+
+11
+
+The following lemma shows that the above technique can be generalized. The result is a spacetime 
+trade-oﬀ allowing us to list each occurrence in constant time at the expense of a slight increase
+in space usage.
+
+Lemma 4. Let s > 0. We can store a data structure of O(rs) words such that, given SA[p], we
+can compute SA[p− i] and SA[p + i] for i = 1, . . . , s(cid:48) and any s(cid:48) ≤ s, in O(log logw(n/r) + s(cid:48)) time.
+Proof. Consider all BWT positions j1 < ··· < jt that are at distance at most s from a run border
+(we say that characters on run borders are at distance 1), and let W [1..t] be an array such that
+W [k] is the text position corresponding to jk, for k = 1, . . . , t. Let now j+
+t+ be the
+BWT positions having a run border at most s positions after them, and j−
+t− be the
+BWT positions having a run border at most s positions before them. We store the text positions
+t− in two predecessor structures P + and P −,
+corresponding to j+
+respectively, of size O(rs). We store, for each i ∈ P + ∪ P −, its position in W , that is, W [f (i)] = i.
+To answer queries given SA[p], we ﬁrst compute its P +-predecessor i < SA[p] in O(log logw(n/r))
+time, and retrieve f (i). Then, it holds that SA[p + j] = W [f (i) + j] + (SA[p] − i), for j = 0, . . . , s.
+Computing SA[p − j] is symmetric (just use P − instead of P +).
+
+1 < ··· < j+
+1 < ··· < j−
+
+1 < ··· < j+
+
+t+ and j−
+
+1 < ··· < j−
+
+To see why this procedure is correct, consider the range SA[p..p + s]. We distinguish two cases.
+(i) BWT [p..p+s] contains at least two distinct characters. Then, SA[p]−1 is inside P + (because
+p is followed by a run break at most s positions away), and is therefore the immediate predecessor
+of SA[p]. Moreover, all BWT positions [p, p + s] are in j1, . . . , jt (since they are at distance at most
+s from a run break), and their corresponding text positions are therefore contained in a contiguous
+range of W (i.e., W [f (SA[p] − 1)..f (SA[p] − 1) + s]). The claim follows.
+(ii) BWT [p..p + s] contains a single character; we say it is unary. Then SA[p] − 1 /∈ P +,
+since there are no run breaks in BWT [p..p + s]. Moreover, by the LF formula, the LF mapping
+applied on the unary range BWT [p..p + s] gives a contiguous range BWT [LF (p)..LF (p + s)] =
+BWT [LF (p)..LF (p) + s]. Note that this corresponds to a parallel backward step on text positions
+SA[p] → SA[p] − 1, . . . , SA[p + s] → SA[p + s] − 1. We iterate the application of LF until we
+end up in a range BWT [LF δ(p)..LF δ(p + s)] that is not unary. Then, SA[LF δ(p)] − 1 is the
+immediate predecessor of SA[p] in P +, and δ is their distance (minus one). This means that with
+a single predecessor query on P + we “skip” all the unary BWT ranges BWT [LF i(p)..LF i(p + s)]
+for i = 1, . . . , δ − 1 and, as in case (i), retrieve the contiguous range in W containing the values
+(cid:117)(cid:116)
+SA[p] − δ, . . . , SA[p + s] − δ and add δ to obtain the desired SA values.
+Combining Lemmas 2 and 4, we obtain the main result of this section. The O(log logw(n/σ))
+
+additional time spent at locating is absorbed by the counting time.
+
+Theorem 1. Let s > 0. We can store a text T [1..n], over alphabet [1..σ], in O(rs) words, where r
+is the number of runs in the BWT of T , such that later, given a pattern P [1..m], we can count the
+occurrences of P in T in O(m log logw(σ + n/r)) time and (after counting) report their occ locations
+in overall time O((1 + log logw(n/r)/s) · occ).
+
+In particular, we can locate in O(m log logw(σ + n/r) + occ log logw(n/r)) time and O(r) space
+
+or, alternatively, in O(m log logw(σ + n/r) + occ) time and O(r log logw(n/r)) space.
+
+3.1 Accessing LCP
+
+Lemma 4 can be further extended to entries of the LCP array, which we will use later in the article.
+That is, given SA[p], we compute LCP [p] and its adjacent entries (note that we do not need to
+
+12
+
+know p, but just SA[p]). The result is also an extension of a representation by Fischer et al. [33]. In
+Section 6.4 we use diﬀerent structures that allow us access LCP [p] directly, without knowing SA[p].
+
+Lemma 5. Let s > 0. We can store a data structure of O(rs) words such that, given SA[p], we can
+compute LCP [p−i+1] and LCP [p+i], for i = 1, . . . , s(cid:48) and any s(cid:48) ≤ s, in time O(log logw(n/r)+s(cid:48)).
+
+1 < ··· < j−
+
+Proof. The proof follows closely that of Lemma 4, except that now we sample LCP entries corresponding 
+to suﬃxes following sampled BWT positions. Let us deﬁne j1 < ··· < jt, j+
+1 < ··· < j+
+t+,
+and j−
+t−, as well as the predecessor structures P + and P −, exactly as in the proof of
+Lemma 4. We store LCP(cid:48)[1..t] = LCP [j1], . . . , LCP [jt]. We also store, for each i ∈ P + ∪ P −, its
+corresponding position f (i) in LCP(cid:48), that is, LCP(cid:48)[f (i)] = LCP [ISA[i + 1]].
+To answer queries given SA[p], we ﬁrst compute its P +-predecessor i < SA[p] in O(log logw(n/r))
+time, and retrieve f (i). Then, it holds that LCP [p + j] = LCP(cid:48)[f (i) + j] − (SA[p] − i − 1), for
+j = 1, . . . , s. Computing LCP [p − j] for j = 0, . . . , s − 1 is symmetric (just use P − instead of P +).
+To see why this procedure is correct, consider the range SA[p..p + s]. We distinguish two cases.
+(i) BWT [p..p + s] contains at least two distinct characters. Then, as in case (i) of Lemma 4,
+SA[p]− 1 is inside P + and is therefore the immediate predecessor i = SA[p]− 1 of SA[p]. Moreover,
+all BWT positions [p, p + s] are in j1, . . . , jt, and therefore values LCP [p..p + s] are explicitly
+stored in a contiguous range in LCP(cid:48) (i.e., LCP(cid:48)[f (i)..f (i) + s]). Note that (SA[p] − i) = 1, so
+LCP(cid:48)[f (i) + j] − (SA[p] − i − 1) = LCP(cid:48)[f (i) + j] for j = 0, . . . , s. The claim follows.
+(ii) BWT [p..p + s] contains a single character; we say it is unary. Then we reason exactly as
+in case (ii) of Lemma 4 to deﬁne δ so that i(cid:48) = SA[LF δ(p)] − 1 is the immediate predecessor of
+SA[p] in P + and, as in case (i) of this proof, retrieve the contiguous range LCP(cid:48)[f (i(cid:48))..f (i(cid:48)) + s]
+containing the values LCP [LF δ(p)..LF δ(p + s)]. Since the skipped BWT ranges are unary, it is
+then not hard to see that LCP [LF δ(p + j)] = LCP [p + j] + δ for j = 1, . . . , s (note that we do not
+include s = 0 since we cannot exclude that, for some i < δ, LF i(p) is the ﬁrst position in its run).
+From the equality δ = SA[p]− i(cid:48) − 1 = SA[p]− SA[LF δ(p)] (that is, δ is the distance between SA[p]
+and its predecessor minus one or, equivalently, the number of LF steps virtually performed), we
+then compute LCP [p + j] = LCP(cid:48)[f (i(cid:48)) + j] − δ for j = 1, . . . , s.
+(cid:117)(cid:116)
+
+4 Extracting Substrings and Computing Fingerprints
+
+In this section we consider the problem of extracting arbitrary substrings of T [1..n]. Though an
+obvious solution is to store a grammar-compressed version of T [15], little is known about the
+relation between the size g of the smallest grammar that generates T (which nevertheless is NPhard 
+to ﬁnd [18]) and the number of runs r in its BWT (but see Section 6.5). Another choice is to
+use block trees [7], which require O(z log(n/z)) space, where z is the size of the Lempel-Ziv parse
+[61] of T . Again, z can be larger or smaller than r [84].
+
+Instead, we introduce a novel representation that uses O(r log(n/r)) space and can retrieve any
+substring of length (cid:96) from T in time O(log(n/r)+(cid:96) log(σ)/w). This is similar (though incomparable)
+with the O(log(n/g) + (cid:96)/ logσ n) time that could be obtained with grammar compression [15, 11],
+and with the O(log(n/z) + (cid:96)/ logσ n) that could be obtained with block trees. In Section 6.5 we
+obtain a run-length context-free grammar of asymptotically the same size, O(r log(n/r)), which
+extracts substrings in time O(log(n/r) + (cid:96)). The bounds we obtain in this section are thus better.
+Also, as explained in the Introduction, the O(log(n/r)) additive penalty is near-optimal in general.
+
+13
+
+We ﬁrst prove an important result in Lemma 6: any desired substring of T has a primary
+occurrence, that is, one overlapping a border between phrases. The property is indeed stronger
+than in alternative formulations that hold for Lempel-Ziv parses [53] or grammars [22]: If we
+choose a primary occurrence overlapping at its leftmost position, then all the other occurrences of
+the string suﬃx must be preceded by the same preﬁx. This stronger property is crucial to design
+an optimal locating procedure in Section 5 and an optimal counting procedure in Section 8. The
+weaker property, instead, is suﬃcient to design in Theorem 2 a data structure reminiscent of block
+trees [7] for extracting substrings of T , which needs to store only some text around phrase borders.
+Finally, in Lemma 7 we show that a Karp-Rabin ﬁngerprint [54, 36] of any substring of T can be
+obtained in time O(log(n/r)), which will also be used in Section 5.
+
+Deﬁnition 1. We say that a text character T [i] is sampled if and only if T [i] is the ﬁrst or last
+character in its BWT run.
+
+Deﬁnition 2. We say that a text substring T [i..j] is primary if and only if it contains at least one
+sampled character.
+Lemma 6. Every text substring T [i..j] has a primary occurrence T [i(cid:48)..j(cid:48)] = T [i..j] such that, for
+some i(cid:48) ≤ p ≤ j(cid:48), the following hold:
+
+1. T [p] is sampled.
+2. T [i(cid:48)], . . . , T [p − 1] are not sampled.
+3. Every text occurrence of T [p..j(cid:48)] is always preceded by the string T [i(cid:48)..p − 1].
+Proof. We prove the lemma by induction on j − i. If j − i = 0, then T [i..j] is a single character.
+Every character has a sampled occurrence i(cid:48) in the text, therefore the three properties trivially hold
+for p = i(cid:48).
+Let j − i > 0. By the inductive hypothesis, T [i + 1..j] has an occurrence T [i(cid:48) + 1..j(cid:48)] satisfying
+the three properties for some i(cid:48) + 1 ≤ p ≤ j(cid:48). Let [sp, ep] be the BWT range of T [i + 1..j]. We
+distinguish three cases.
+(i) All characters in BWT [sp, ep] are equal to T [i] = T [i(cid:48)] and are not the ﬁrst or last in their
+run. Then, we leave p unchanged. T [p] is sampled by the inductive hypothesis, so Property 1 still
+holds. Also, T [i(cid:48) + 1], . . . , T [p − 1] are not sampled by the inductive hypothesis, and T [i(cid:48)] is not
+sampled by assumption, so Property 2 still holds. By the inductive hypothesis, every text occurrence
+of T [p..j(cid:48)] is always preceded by the string T [i(cid:48) + 1..p − 1]. Since all characters in BWT [sp, ep] are
+equal to T [i] = T [i(cid:48)], Property 3 also holds for T [i..j] and p.
+
+(ii) All characters in BWT [sp, ep] are equal to T [i] and either BWT [sp] is the ﬁrst character in
+its run, or BWT [ep] is the last character in its run (or both). Then, we set p to the text position
+corresponding to sp or ep, depending on which one is sampled (if both are sampled, choose sp).
+The three properties then hold trivially for T [i..j] and p.
+(iii) BWT [sp, ep] contains at least one character c (cid:54)= T [i]. Then, there must be a run of T [i]’s
+ending or beginning in BWT [sp, ep], meaning that there is a sp ≤ q ≤ ep such that BWT [q] = T [i]
+and the text position i(cid:48) corresponding to q is sampled. We then set p = i(cid:48). Again, the three properties
+(cid:117)(cid:116)
+hold trivially for T [i..j] and p.
+
+Lemma 6 has several important implications. We start by using it to build a data structure
+supporting eﬃcient text extraction queries. In Section 5 we will use it to locate pattern occurrences
+in optimal time.
+
+14
+
+Theorem 2. Let T [1..n] be a text over alphabet [1..σ]. We can store a data structure of O(r log(n/r))
+words supporting the extraction of any length-(cid:96) substring of T in O(log(n/r) + (cid:96) log(σ)/w) time.
+
+Proof. We describe a data structure supporting the extraction of α = w log(n/r)
+packed characters
+in O(log(n/r)) time. To extract a text substring of length (cid:96) we divide it into (cid:100)(cid:96)/α(cid:101) blocks and
+extract each block with the proposed data structure. Overall, this will take O(((cid:96)/α + 1) log(n/r)) =
+O(log(n/r) + (cid:96) log(σ)/w) time.
+
+log σ
+
+i,j = T [j − si..j − 1] and X 2
+
+i,j = X k
+
+i,j[1..si/2] X k
+
+i,j[1..si/2], and ending in the middle of the last, X 2
+
+Let i∗ be the smallest number such that si∗ < 4α = 4w log(n/r)
+
+Our data structure is stored in O(log(n/r)) levels. For simplicity, we assume that r divides
+n and that n/r is a power of two. The top level (level 0) is special: we divide the text into r
+blocks T [1..n/r] T [n/r + 1..2n/r] . . . T [n − n/r + 1..n] of size n/r. For levels i > 0, we let si =
+n/(r · 2i−1) and, for every sampled position j (Deﬁnition 1), we consider the two non-overlapping
+i,j = T [j..j + si − 1]. Each such block X k
+blocks of length si: X 1
+i,j,
+for k = 1, 2, is composed of two half-blocks, X k
+i,j[si/2 + 1..si]. We moreover
+consider three additional consecutive and non-overlapping half-blocks, starting in the middle of the
+ﬁrst, X 1
+i,j[si/2 + 1..si], of the 4 half-blocks just
+described: T [j − si + si/4..j − si/4 − 1], T [j − si/4..j + si/4 − 1], and T [j + si/4..j + si − si/4 − 1].
+From Lemma 6, blocks at level 0 and each half-block at level i > 0 have a primary occurrence at
+level i + 1. Such an occurrence can be fully identiﬁed by the coordinate (cid:104)oﬀ , j(cid:48)(cid:105), for 0 < oﬀ ≤ si+1
+and j(cid:48) sampled position, indicating that the occurrence starts at position j(cid:48) − si+1 + oﬀ .
+. Then i∗ is the last level of our
+structure. At this level, we explicitly store a packed string with the characters of the blocks. This
+uses in total O(r · si∗ log(σ)/w) = O(r log(n/r)) words of space. All the blocks at level 0 and halfblock 
+at levels 0 < i < i∗ store instead the coordinates (cid:104)oﬀ , j(cid:48)(cid:105) of their primary occurrence in the
+next level. At level i∗ − 1, these coordinates point inside the strings of explicitly stored characters.
+Let S = T [i..i + α − 1] be the text substring to be extracted. Note that we can assume n/r ≥
+α; otherwise all the text can be stored in plain packed form using n log(σ)/w < αr log(σ)/w ∈
+O(r log(n/r)) words and we do not need any data structure. It follows that S either spans two
+blocks at level 0, or it is contained in a single block. The former case can be solved with two queries
+of the latter, so we assume, without losing generality, that S is fully contained inside a block at
+level 0. To retrieve S, we map it down to the next levels (using the stored coordinates of primary
+occurrences of half-blocks) as a contiguous text substring as long as this is possible, that is, as long
+as it ﬁts inside a single half-block. Note that, thanks to the way half-blocks overlap, this is always
+possible as long as α ≤ si/4. By deﬁnition, then, we arrive in this way precisely to level i∗, where
+(cid:117)(cid:116)
+characters are stored explicitly and we can return the packed text substring.
+
+log σ
+
+Using a similar idea, we can compute the Karp-Rabin ﬁngerprint of any text substring in just
+
+O(log(n/r)) time. This will be used in Section 5 to obtain our optimal-time locate solution.
+
+Lemma 7. We can store a data structure of O(r log(n/r)) words supporting computation of the
+Karp-Rabin ﬁngerprint of any text substring in O(log(n/r)) time.
+
+Proof. We store a data structure with O(log(n/r)) levels, similar to the one of Theorem 2 but with
+two non-overlapping children blocks. Assume again that r divides n and that n/r is a power of two.
+The top level 0 divides the text into r blocks T [1..n/r] T [n/r + 1..2n/r] . . . T [n − n/r + 1..n] of size
+n/r. For levels i > 0, we let si = n/(r · 2i−1) and, for every sampled position j, we consider the two
+i,j = T [j..j + si − 1]. Each such
+non-overlapping blocks of length si: X 1
+
+i,j = T [j − si..j − 1] and X 2
+
+15
+
+i,j = X k
+
+i,j[1..si/2] X k
+
+i+1,j(cid:48)[L..si+1] X 2
+
+i,j is composed of two half-blocks, X k
+
+block X k
+i,j[si/2 + 1..si]. As in Theorem 2,
+blocks at level 0 and each half-block at level i > 0 have a primary occurrence at level i + 1, meaning
+i+1,j(cid:48)[1..R] for some 1 ≤ L, R ≤ si+1,
+that such an occurrence can be written as X 1
+and some sampled position j(cid:48) (the special case where the half-block is equal to X 2
+i+1,j(cid:48) is expressed
+as L = si+1 + 1 and R = si+1).
+We associate with every block at level 0 and every half-block at level i > 0 the following
+information: its Karp-Rabin ﬁngerprint κ, the coordinates (cid:104)j(cid:48), L(cid:105) of its primary occurrence in the
+next level, and the Karp-Rabin ﬁngerprints κ(X 1
+i+1,j(cid:48)[1..R]) of (the two
+pieces of) its occurrence. At level 0, we also store the Karp-Rabin ﬁngerprint of every text preﬁx
+ending at block boundaries, κ(T [1..jr]) for j = 1, . . . , n/r. At the last level, where blocks are of
+length 1, we only store their Karp-Rabin ﬁngerprint (or we may compute them on the ﬂy).
+
+i+1,j(cid:48)[L..si+1]) and κ(X 2
+
+i,j). Let X 1
+
+i+1,j(cid:48)[L..si+1] X 2
+
+i+1,j(cid:48)[L..si+1] X 2
+
+i,j[1..R(cid:48)] = X 1
+
+To answer queries κ(T [i..j]) quickly, the key point is to show that computing the Karp-Rabin
+ﬁngerprint of a preﬁx or a suﬃx of a block translates into the same problem (preﬁx/suﬃx of a
+block) in the next level, and therefore leads to a single-path descent in the block structure. To
+i,j[1..R(cid:48)]) of some block (comprove 
+this, consider computing the ﬁngerprint of the preﬁx κ(X k
+puting suﬃxes is symmetric). Note that we explicitly store κ(X k
+i,j[1..si/2]), so we can consider
+only the problem of computing the ﬁngerprint of a preﬁx of a half-block, that is, we assume
+R(cid:48) ≤ si/2 = si+1 (the proof is the same for the right half of X k
+i+1,j(cid:48)[1..R]
+be the occurrence of the half-block in the next level. We have two cases. (i) R(cid:48) ≥ si+1 − L + 1.
+i+1,j(cid:48)[1..R(cid:48) − (si+1 − L + 1)]. Since we explicitly store the ﬁnThen,
+ X k
+gerprint κ(X 1
+i+1,j(cid:48)[L..si+1]), the problem reduces to computing the ﬁngerprint of the block preﬁx
+i+1,j(cid:48)[L..L + R(cid:48) − 1]. Even
+i+1,j(cid:48)[1..R(cid:48) − (si+1 − L + 1)]. (ii) R(cid:48) < si+1 − L + 1. Then, X k
+X 2
+i+1,j(cid:48)[L..L + R(cid:48) −
+though this is not a preﬁx nor a suﬃx of a block, note that X 1
+i+1,j(cid:48)[L + R(cid:48)..si+1]. We explicitly store the ﬁngerprint of the left-hand side of this equation, so
+1] X 1
+i+1,j(cid:48)[L + R(cid:48)..si+1], which is a suﬃx of a block.
+the problem reduces to ﬁnding the ﬁngerprint of X k
+From both ﬁngerprints we can compute κ(X 1
+Note that, in order to combine ﬁngerprints, we also need the corresponding exponents and their
+inverses (i.e., σ±(cid:96) mod q, where (cid:96) is the string length and q is the prime used in κ). We store
+the exponents associated with the lengths of the explicitly stored ﬁngerprints at all levels. The
+remaining exponents needed for the calculations can be retrieved by combining exponents from
+the next level (with a plain modular multiplication) in the same way we retrieve ﬁngerprints by
+combining partial results from next levels.
+
+i+1,j(cid:48)[L..L + R(cid:48) − 1]).
+
+i+1,j(cid:48)[L..si+1] = X 1
+
+i,j[1..R(cid:48)] = X 1
+
+To ﬁnd the ﬁngerprint of any text substring T [i..j], we proceed as follows. If T [i..j] spans at
+least two blocks at level 0, then T [i..j] can be factored into (a) a suﬃx of a block, (b) a central part
+(possibly empty) of full blocks, and (c) a preﬁx of a block. Since at level 0 we store the Karp-Rabin
+ﬁngerprint of every text preﬁx ending at block boundaries, the ﬁngerprint of (b) can be found in
+constant time. Computing the ﬁngerprints of (a) and (c), as proved above, requires only a singlepath 
+descent in the block structure, taking O(log(n/r)) time each. If T [i..j] is fully contained in a
+block at level 0, then we map it down to the next levels until it spans two blocks. From this point,
+(cid:117)(cid:116)
+the problem translates into a preﬁx/suﬃx problem, which can be solved in O(log(n/r)) time.
+
+5 Locating in Optimal Time
+
+In this section we show how to obtain optimal locating time in the unpacked — O(m + occ) — and
+packed — O(m log(σ)/w + occ) — scenarios, by using O(r log(n/r)) and O(rw logσ(n/r)) space,
+
+16
+
+respectively. To improve upon the times of Theorem 1 we have to abandon the idea of using the
+RLFM-index to ﬁnd the toe-hold suﬃx array entry, as counting on the RLFM-index takes ω(m)
+time. We will use a diﬀerent machinery that, albeit conceptually based on the BWT properties,
+does not use it at all. We exploit the idea that some pattern occurrence must cross a run boundary
+to build a structure that only ﬁnds pattern suﬃxes starting at a run boundary. By sampling
+more text suﬃxes around those run boundaries, we manage to ﬁnd one pattern occurrence in time
+O(m + log(n/r)), Lemma 10. We then show how the LCP information we obtained in Section 3.1
+can be used to extract all the occurrences in time O(m + occ + log(n/r)), in Lemma 12. Finally,
+by adding a structure that ﬁnds faster the patterns shorter than log(n/r), we obtain the unpacked
+result in Theorem 3. We use the same techniques, but with larger structures, in the packed setting,
+Theorem 4.
+We make use of Lemma 6: if the pattern P [1..m] occurs in the text then there must exist an
+integer 1 ≤ p ≤ m such that (1) P [p..m] preﬁxes a text suﬃx T [i + p − 1..], where T [i + p − 1] is
+sampled, (2) none of the characters T [i], . . . , T [i + p − 2] are sampled, and (3) P [p..m] is always
+preceded by P [1..p − 1] in the text. It follows that T [i..i + m − 1] = P . This implies that we can
+locate a pattern occurrence by ﬁnding the longest pattern suﬃx preﬁxing some text suﬃx that
+starts with a sampled character. Indeed, those properties are preserved if we enlarge the sampling.
+
+Lemma 8. Lemma 6 still holds if we add arbitrary sampled positions to the original sampling.
+Proof. If the leftmost sampled position T [i + p− 1] in the pattern occurrence belongs to the original
+sampling, then the properties hold by Lemma 6. If, on the other hand, T [i+p−1] is one of the extra
+samples we added, then let i(cid:48) + p(cid:48) − 1 be the position of the original sampling satisfying the three
+properties, with p(cid:48) ≥ p. Properties (1) and (2) hold for the sampled position i + p− 1 by deﬁnition.
+By property (3) applied to i(cid:48) + p(cid:48) − 1, we have that P [p(cid:48)..m] is always preceded by P [1..p(cid:48) − 1] in
+the text. Since p(cid:48) ≥ p, it follows that also P [p..m] is always preceded by P [1..p− 1] in the text, that
+is, property (3) holds for position i + p − 1 as well.
+(cid:117)(cid:116)
+We therefore add to the sampling the r equally-spaced extra text positions i · (n/r) + 1, for
+i = 0, . . . , r−1; we now have at most 3r sampled positions. The task of ﬁnding a pattern occurrence
+satisfying properties (1)–(3) on the extended sampling can be eﬃciently solved by inserting all the
+text suﬃxes starting with a sampled character in a data structure supporting fast preﬁx search
+operations and taking O(r) words (e.g., a z-fast trie [3]). We make use of the following lemma.
+Lemma 9 ([36, 3]). Let S be a set of strings and assume we have some data structure supporting
+extraction of any length-(cid:96) substring of strings in S in time fe((cid:96)) and computation of the Karp-Rabin
+ﬁngerprint of any substring of strings in S in time fh. We can build a data structure of O(|S|)
+words such that, later, we can solve the following problem in O(m log(σ)/w + t(fh + log m) + fe(m))
+time: given a pattern P [1..m] and t > 0 suﬃxes Q1, . . . , Qt of P , discover the ranges of strings in
+(the lexicographically-sorted) S preﬁxed by Q1, . . . , Qt.
+
+Proof. Z-fast tries [3, App. H.3] already solve the weak part of the lemma in O(m log(σ)/w+t log m)
+time. By weak we mean that the returned answer for suﬃx Qi is not guaranteed to be correct if
+Qi does not preﬁx any string in S: we could therefore have false positives among the answers, but
+false negatives cannot occur. A procedure for deterministically discarding false positives has already
+been proposed [36] and requires extracting substrings and their ﬁngerprints from S. We describe
+this strategy in detail in order to analyze its time complexity in our scenario.
+
+17
+
+First, we require the Karp-Rabin function κ to be collision-free between equal-length text substrings 
+whose length is a power of two. We can ﬁnd such a function at index-construction time
+in O(n log n) expected time and O(n) space [14]. We extend the collision-free property to pairs of
+equal-letter strings of general length switching to the hash function κ(cid:48) deﬁned as κ(cid:48)(T [i..i+(cid:96)−1]) =
+(cid:104)κ(T [i..i + 2(cid:98)log2 (cid:96)(cid:99) − 1]), κ(T [i + (cid:96) − 2(cid:98)log2 (cid:96)(cid:99)..i + (cid:96) − 1])(cid:105). Let Q1, . . . , Qj be the pattern suﬃxes for
+which the preﬁx search found a candidate node. Order the pattern suﬃxes so that |Q1| < ··· < |Qj|,
+that is, Qi is a suﬃx of Qi(cid:48) whenever i < i(cid:48). Let moreover v1, . . . , vj be the candidate nodes (explicit
+or implicit) of the z-fast trie such all substrings below them are preﬁxed by Q1, . . . , Qj (modulo
+false positives), respectively, and let ti = string(vi) be the substring read from the root of the trie
+to vi. Our goal is to discard all nodes vk such that tk (cid:54)= Qk.
+We compute the κ(cid:48)-signatures of all candidate pattern suﬃxes Q1, . . . , Qt in O(m log(σ)/w + t)
+time. We proceed in rounds. At the beginning, let a = 1 and b = 2. At each round, we perform the
+following checks:
+1. If κ(cid:48)(Qa) (cid:54)= κ(cid:48)(ta): discard va and set a ← a + 1 and b ← b + 1.
+2. If κ(cid:48)(Qa) = κ(cid:48)(ta): let R be the length-|ta| suﬃx of tb, i.e. R = tb[|tb| − |ta| + 1..|tb|]. We have
+two sub-cases:
+(a) κ(cid:48)(Qa) = κ(cid:48)(R). Then, we set b ← b + 1 and a to the next integer a(cid:48) such that va(cid:48) has not
+(b) κ(cid:48)(Qa) (cid:54)= κ(cid:48)(R). Then, discard vb and set b ← b + 1.
+
+been discarded.
+
+3. If b = j + 1: let vf be the last node that was not discarded. Note that Qf is the longest pattern
+suﬃx that was not discarded; other non-discarded pattern suﬃxes are suﬃxes of Qf . We extract
+tf . Let s be the length of the longest common suﬃx between Qf and tf . We report as a true
+match all nodes vi that were not discarded in the above procedure and such that |Qi| ≤ s.
+Intuitively, the above procedure is correct because we deterministically check that text substrings 
+read from the root to the candidate nodes form a monotonically increasing sequence according 
+to the suﬃx relation: ti ⊆suf ti(cid:48) for i < i(cid:48) (if the relation fails at some step, we discard
+the failing node). Comparisons to the pattern are delegated to the last step, where we explicitly
+compare the longest matching pattern suﬃx with tf . For a full formal proof, see Gagie et al. [36].
+For every candidate node we compute a κ(cid:48)-signature from the set of strings (O(fh) time). For
+the last candidate, we extract a substring of length at most m (O(fe(m)) time) and compare it
+with the longest candidate pattern suﬃx (O(m log(σ)/w) time). There are at most t candidates, so
+the veriﬁcation process takes O(m log(σ)/w + t · fh + fe(m)). Added to the time spent to ﬁnd the
+(cid:117)(cid:116)
+candidates in the z-fast trie, we obtain the claimed bounds.
+
+In our case, we use the results stated in Theorem 2 and Lemma 7 to extract text substrings and
+their ﬁngerprints, so we get fe(m) = O(log(n/r) + m log(σ)/w) and fh = O(log(n/r)). Moreover
+note that, by the way we added the r equally-spaced extra text samples, if m ≥ n/r then the
+position p satisfying Lemma 8 must occur in the preﬁx of length n/r of the pattern. It follows that,
+for long patterns, it is suﬃcient to search the preﬁx data structure for only the t = n/r longest
+pattern suﬃxes. We can therefore solve the problem stated in Lemma 9 in time O(m log(σ)/w +
+min(m, n/r)(log(n/r) + log m)). Note that, while the ﬁngerprints are obtained with a randomized
+method, the resulting data structure oﬀers deterministic worst-case query times and cannot fail.
+To further speed up operations, for every sampled character T [i] we insert in S the text suﬃxes
+T [i − j..] for j = 0..τ − 1, for some parameter τ that we determine later. This increases the size
+of the preﬁx-search structure to O(r τ ) (excluding the components for extracting substrings and
+
+18
+
+ﬁngerprints), but in exchange it is suﬃcient to search only for aligned pattern suﬃxes of the form
+P [(cid:96)· τ + 1..m], for (cid:96) = 0 . . .(cid:100)min(m, n/r)/τ(cid:101)− 1, to ﬁnd any primary occurrence: to ﬁnd the longest
+suﬃx of P that preﬁxes a string in S, we keep an array B[1..|S|] storing the shift relative to each
+element in S; for every sampled T [i] and j = 0 . . . τ − 1, if k is the rank of T [i − j..] among all
+suﬃxes in S, then B[k] = j. We build a constant-time range minimum data structure on B, which
+requires only O(|S|) = O(r τ ) bits [32]. Let [L, R] be the lexicographical range of suﬃxes in S
+preﬁxed by the longest aligned suﬃx of P that has occurrences in S. With a range minimum query
+on B in the interval [L, R] we ﬁnd a text suﬃx with minimum shift, thereby matching the longest
+suﬃx of P . By Lemma 8, if P occurs in T then the remaining preﬁx of P appears to the left of the
+longest suﬃx found. However, if P does not occur in T this is not the case. We therefore verify the
+candidate occurrence of P using Theorem 2 in time fe(m) = O(log(n/r) + m log(σ)/w).
+
+Overall, we ﬁnd one pattern occurrence in O(m log(σ)/w+(min(m, n/r)/τ +1)(log m+log(n/r)))
+
+time. By setting τ = log(n/r), we obtain the following result.
+
+Lemma 10. We can ﬁnd one pattern occurrence in time O(m + log(n/r)) with a structure using
+O(r log(n/r)) space.
+
+Proof. If m < n/r, then it is easy to verify that O(m log(σ)/w + (min(m, n/r)/τ + 1)(log m +
+log(n/r))) = O(m + log(n/r)). If m ≥ n/r, the running time is O(m log(σ)/w + ((n/r)/ log(n/r) +
+1) log m). The claim follows by noticing that (n/r)/ log(n/r) = O(m/ log m), as x/ log x = ω(1). (cid:117)(cid:116)
+
+If we choose, instead, τ = w logσ(n/r), we can approach optimal-time locate in the packed
+
+setting.
+
+Lemma 11. We can ﬁnd one pattern occurrence in time O(m log(σ)/w+log(n/r)) with a structure
+using O(rw logσ(n/r)) space.
+Proof. We follow the proof of Lemma 10. The main diﬀerence is that, when m ≥ n/r, we end up
+with time O(m log(σ)/w + log m), which is O(m) but not necessarily O(m log(σ)/w). However, if
+m log(σ)/w = o(log m), then m/ log m = o(w/ log σ) and thus (n/r)/ log(n/r) = o(w/ log σ). The
+space we use, O(rw logσ(n/r)), is therefore ω(n), within which we can include a classical structure
+(cid:117)(cid:116)
+that ﬁnds one occurrence in O(m log(σ)/w) time (see, e.g., Belazzougui et al. [3, Sec. 7.1]).
+
+Let us now consider how to ﬁnd the other occurrences. Note that, diﬀerently from Section 3, at
+this point we know the position of one pattern occurrence but we do not know its relative position
+in the suﬃx array nor the BWT range of the pattern. In other words, we can extract adjacent suﬃx
+array entries using Lemma 4, but we do not know where we are in the suﬃx array. More critically,
+we do not know when to stop extracting adjacent suﬃx array entries. We can solve this problem
+using LCP information extracted with Lemma 5: it is suﬃcient to continue extraction of candidate
+occurrences and corresponding LCP values (in both directions) as long as the LCP is greater than
+or equal to m. It follows that, after ﬁnding the ﬁrst occurrence of P , we can locate the remaining
+ones in O(occ + log logw(n/r)) time using Lemmas 4 and 5 (with s = log logw(n/r)). This yields
+two ﬁrst results with a logarithmic additive term over the optimal time.
+
+Lemma 12. We can ﬁnd all the occ pattern occurrences in time O(m + occ + log(n/r)) with a
+structure using O(r log(n/r)) space.
+
+Lemma 13. We can ﬁnd all the occ pattern occurrences in time O(m log(σ)/w + occ + log(n/r))
+with a structure using O(rw logσ(n/r)) space.
+
+19
+
+To achieve the optimal running time, we must speed up the search for patterns that are shorter
+than log(n/r) (Lemma 12) and w logσ n (Lemma 13). We index all the possible short patterns by
+exploiting the following property.
+Lemma 14. There are at most 2rk distinct k-mers in the text, for any 1 ≤ k ≤ n.
+
+Proof. From Lemma 6, every distinct k-mer appearing in the text has a primary occurrence. It
+follows that, in order to count the number of distinct k-mers, we can restrict our attention to the
+regions of size 2k − 1 overlapping the at most 2r sampled positions (Deﬁnition 1). The claim easily
+(cid:117)(cid:116)
+follows.
+
+Note that, without Lemma 14, we would only be able to bound the number of distinct k-mers
+
+by σk. We ﬁrst consider achieving optimal locate time in the unpacked setting.
+
+Theorem 3. We can store a text T [1..n] in O(r log(n/r)) words, where r is the number of runs in
+the BWT of T , such that later, given a pattern P [1..m], we can report the occ occurrences of P in
+optimal O(m + occ) time.
+Proof. We store in a path-compressed trie T all the strings of length log(n/r) occurring in the text.
+By Lemma 14, T has O(r log(n/r)) leaves, and since it is path-compressed, it has O(r log(n/r))
+nodes. The texts labeling the edges are represented with oﬀsets pointing inside r strings of length
+2 log(n/r) extracted around each run boundary and stored in plain form (taking care of possible
+overlaps). Child operations on the trie are implemented with perfect hashing to support constanttime 
+traversal.
+In addition, we use the sampling structure of Lemma 4 with s = log logw(n/r). Recall from
+Lemma 4 that we store an array W such that, given any range SA[sp..sp + s − 1], there exists a
+range W [i..i + s − 1] and an integer δ such that SA[sp + j] = W [i + j] + δ, for j = 0, . . . , s − 1.
+We store this information on T nodes: for each node v ∈ T , whose string preﬁxes the range of
+suﬃxes SA[sp..ep], we store in v the triple (cid:104)ep − sp + 1, i, δ(cid:105) such that SA[sp + j] = W [i + j] + δ,
+for j = 0, . . . , s − 1.
+Our complete locate strategy is as follows. If m > log(n/r), then we use the structures of
+Lemma 12, which already gives us O(m + occ) time. Otherwise, we search for the pattern in T . If P
+does not occur in T , then its number of occurrences must be zero, and we stop. If it occurs and the
+locus node of P is v, let (cid:104)occ, i, δ(cid:105) be the triple associated with v. If occ ≤ s = log logw(n/r), then
+we obtain the whole interval SA[sp..ep] in time O(occ) by accessing W [i, i + occ − 1] and adding
+δ to the results. Otherwise, if occ > s, a plain application of Lemma 4 starting from the pattern
+occurrence W [i] + δ yields time O(log logw(n/r) + occ) = O(occ). Thus we obtain O(m + occ) time
+and the trie uses O(r log(n/r)) space. Considering all the structures, we obtain the main result. (cid:117)(cid:116)
+
+With more space, we can achieve optimal locate time in the packed setting.
+
+Theorem 4. We can store a text T [1..n] over alphabet [1..σ] in O(rw logσ(n/r)) words, where r
+is the number of runs in the BWT of T , such that later, given a packed pattern P [1..m], we can
+report the occ occurrences of P in optimal O(m log(σ)/w + occ) time.
+
+Proof. As in the proof of Theorem 3 we need to index all the short patterns, in this case of length
+at most (cid:96) = w logσ(n/r). We insert all the short text substrings in a z-fast trie to achieve optimaltime 
+navigation. As opposed to the z-fast trie used in Lemma 9, now we need to perform the trie
+
+20
+
+navigation (i.e., a preﬁx search) in only O(m log(σ)/w) time, that is, we need to avoid the additive
+term O(log m) that was instead allowed in Lemma 9, as it could be larger than m log(σ)/w for very
+short patterns. We exploit a result by Belazzougui et al. [3, Sec. H.2]: letting n(cid:48) be the number of
+indexed strings of average length (cid:96), we can support weak preﬁx search in optimal O(m log(σ)/w)
+time with a data structure of size O(n(cid:48)(cid:96)1/c(log (cid:96) + log log n)) bits, for any constant c. Note that,
+since (cid:96) = O(w2), this is O(n(cid:48)) space for any c > 2. We insert in this structure all n(cid:48) text (cid:96)-
+mers. For Lemma 14, n(cid:48) = O(r(cid:96)). It follows that the preﬁx-search data structure takes space
+O(r(cid:96)) = O(rw logσ(n/r)). This space is asymptotically the same of Lemma 13, which we use to
+ﬁnd long patterns. We store in a packed string V the contexts of length (cid:96) surrounding sampled text
+positions (O(rw logσ(n/r)) space); z-fast trie nodes point to their corresponding substrings in V .
+After ﬁnding the candidate node on the z-fast trie, we verify it in O(m log(σ)/w) time by extracting
+a substring from V . We augment each trie node as done in Theorem 3 with triples (cid:104)occ, i, δ(cid:105). The
+locate procedure works as for Theorem 3, except that now we use the z-fast trie mechanism to
+(cid:117)(cid:116)
+navigate the trie of all short patterns.
+
+6 Accessing the Suﬃx Array and Related Structures
+
+In this section we show how we can provide direct access to the suﬃx array SA, its inverse ISA,
+and the longest common preﬁx array LCP . Those enable functionalities that go beyond the basic
+counting, locating, and extracting that are required for self-indexes, which we covered in Sections 3
+to 5, and will be used to enable a full-ﬂedged compressed suﬃx tree in Section 7.
+
+We exploit the fact that the runs that appear in BWT induce equal substrings in the diﬀerential
+suﬃx array, its inverse, and longest common preﬁx arrays, DSA, DISA, and DLCP , where we store
+the diﬀerence between each cell and the previous one. Those equal substrings are exploited to
+grammar-compress the diﬀerential arrays. We choose a particular class of grammar compressor
+that we will prove to produce a grammar of size O(r log(n/r)), on which we can access cells in time
+O(log(n/r)). The grammar is of an extended type called run-length context-free grammar (RLCFG)
+[80], which allows rules of the form X → Y t that count as size 1. The grammar is based on applying
+several rounds of a technique called locally consistent parsing, which parses the string into small
+blocks (which then become nonterminals) in a way that equal substrings are parsed in the same
+form, therefore not increasing the grammar size. There are various techniques to achieve such a
+parsing [2], from which we choose a recent one [49, 48] that gives us the best results.
+
+6.1 Compressing with Locally Consistent Parsing
+
+We plan to grammar-compress sequences W = DSA, ISA, or LCP by taking advantage of the runs
+in BWT . We will apply a locally consistent parsing [49, 48] to obtain a ﬁrst partition of W into
+nonterminals, and then recurse on the sequence of nonterminals. We will show that the interaction
+between the runs and the parsing can be used to bound the size of the resulting grammar, because
+new nonterminals can be deﬁned only around the borders between runs. We use the following result.
+
+Deﬁnition 3. A repetitive area in a string is a maximal run of the same symbol, of length 2 or
+more.
+Lemma 15 ([49]). We can partition a string S into at most (3/4)|S| blocks so that, for every
+pair of identical substrings S[i..j] = S[i(cid:48)..j(cid:48)], if neither S[i + 1..j − 1] or S[i(cid:48) + 1..j(cid:48) − 1] overlap a
+repetitive area, then the sequence of blocks covering S[i + 1..j − 1] and S[i(cid:48) + 1..j(cid:48) − 1] are identical.
+
+21
+
+Proof. The parsing is obtained by, ﬁrst, creating blocks for the repetitive areas, which can be of any
+length ≥ 2. For the remaining characters, the alphabet is partitioned into two subsets, left-symbols
+and right-symbols. Then, every left-symbol followed by a right-symbol are paired in a block. It
+is then clear that, if S[i + 1..j − 1] and S[i(cid:48) + 1..j(cid:48) − 1] do not overlap repetitive areas, then the
+parsing of S[i..j] and S[i(cid:48)..j(cid:48)] may diﬀer only in their ﬁrst position (if it is part of a repetitive area
+ending there, or if it is a right-symbol that becomes paired with the preceding one) and in their
+last position (if it is part of a repetitive area starting there, or if it is a left-symbol that becomes
+paired with the following one). Jez [49] shows how to choose the pairs so that S contains at most
+(cid:117)(cid:116)
+(3/4)|S| blocks.
+The lemma ensures a locally consistent parsing into blocks as long as the substrings do not
+
+overlap repetitive areas, though the substrings may fully contain repetitive areas.
+
+Our key result is that a round of parsing does not create too many distinct nonterminals if there
+
+i + 1].
+
+i ..p+
+
+i − 1..p+
+
+1 ≤ p+
+
+1 < p−
+
+2 < . . . < p−
+
+are few runs in the BWT . We state the result in the general form we will need.
+Lemma 16. Let W [1..n] be a sequence with 2r positions p−
+r ≤ p+
+2 ≤ p+
+r
+and let there be a permutation π of one cycle on [1..n] so that, whenever k is not in any range
+[p−
+i ], it holds (a) π(k − 1) = π(k) − 1 and (b) W [π(k)] = W [k]. Then, an application of the
+i ..p+
+parsing scheme of Lemma 15 on W creates only the distinct blocks that it deﬁnes to cover all the
+areas W [p−
+Proof. Assume we carry out the parsing of Lemma 15 on W , which cuts W into at most (3/4)n
+blocks. Consider the smallest k ≥ 1 along the cycle of π such that (1) j = πk(1) is the end of a
+block [j(cid:48)..j] and (2) [j(cid:48) − 1..j + 1] is disjoint from any [p−
+i ]. Then, by conditions (a) and (b)
+it follows that [π(j(cid:48) − 1)..π(j + 1)] = [π(j(cid:48)) − 1..π(j) + 1] = [π(j) − (j − j(cid:48)) − 1..π(j) + 1] and
+W [π(j(cid:48)) − 1..π(j) + 1] = W [j(cid:48) − 1..j + 1].
+By the way blocks W [j(cid:48)..j] are formed, it must be W [j(cid:48) − 1] (cid:54)= W [j(cid:48)] and W [j + 1] (cid:54)= W [j],
+and thus W [π(j(cid:48)) − 1] (cid:54)= W [π(j(cid:48))] and W [π(j) + 1] (cid:54)= W [π(j)]. Therefore, neither W [j(cid:48)..j] nor
+W [π(j(cid:48))..π(j)] may overlap a repetitive area. It thus holds by Lemma 15 that W [π(j(cid:48))..π(j)] must
+also be a single block, identical to W [j(cid:48)..j].
+block identical to W [j(cid:48)..j] ends at πk+2(1), and so on, until we reach some πk(cid:48)
+that intersects some [p−
+(1) and (2), and continue the process from k = k(cid:48)(cid:48).
+Along the cycle we visit all the positions in W . The positions that do not satisfy (2) are those
+in the blocks that intersect some W [p−
+i + 1]. From those positions, the ones that satisfy (1)
+are the endpoints of the distinct blocks we visit. Therefore, the distinct blocks are precisely those
+that the parsing creates to cover the areas W [p−
+(cid:117)(cid:116)
+Now we show that a RLCFG built by successively parsing a string into blocks and replacing
+
+Hence position π(j) = πk+1(1) satisﬁes condition (1) as well. If it also satisﬁes (2), then another
+(1) ending a block
+satisﬁes
+
+i + 1]. At this point, we ﬁnd the next k(cid:48)(cid:48) > k(cid:48) such that πk(cid:48)(cid:48)
+
+i − 1, p+
+
+i − 1, p+
+
+i − 1, p+
+
+i + 1].
+
+them by nonterminals has a size that can be bounded in terms of r.
+Lemma 17. Let W [1..n] be a sequence with 2r positions p−
+i satisfying the conditions of
+Lemma 16. Then, a RLCFG built by applying Lemma 16 in several rounds and replacing blocks by
+nonterminals, compresses W to size O(λr log(n/r)), where λ = max1≤i≤r(p+
+
+i and p+
+
+i − p−
+
+i + 1).
+
+Proof. We apply a ﬁrst round of locally consistent parsing on W and create a distinct nonterminal
+per distinct block of length ≥ 2 produced along the parsing. In order to represent the blocks that
+are repetitive areas, our grammar is a RLCFG.
+
+22
+
+Once we replace the parsed blocks by nonterminals, the new sequence W (cid:48) is of length at most
+(3/4)n. Let µ map from a position in W to the position of its block in W (cid:48). To apply Lemma 16 again
+over W (cid:48), we deﬁne a new permutation π(cid:48), by skipping the positions in π that do not fall on block ends
+of W , and mapping the block ends to the blocks (now symbols) in W (cid:48). The positions p+
+i are
+i ). To see that (a) and (b) hold in W (cid:48),
+mapped to their corresponding block positions µ(p+
+i+1 − 1] be the zone between two areas [p−, p+] of Lemma 16, where it can be applied,
+let [p+
+i+1) − 1] =
+and consider the corresponding range W [π(p+
+i+1 − 1]. Then, the locally consistent parsing represented as a RLCFG guarantees that
+W [p+
+
+i + 1..p−
+i + 1..p−
+
+i+1 − 1)] = W [π(p+
+
+i + 1)..π(p−
+
+i ) + 1..π(p−
+
+i ) and µ(p−
+
+i and p−
+
+W (cid:48)[π(cid:48)(µ(p+
+= W (cid:48)[π(cid:48)(µ(p+
+= W (cid:48)[µ(p+
+
+i + 1) + 1)..π(cid:48)(µ(p−
+i + 1)) + 1..π(cid:48)(µ(p−
+
+i+1 − 1) − 1)]
+i+1 − 1)) − 1]
+
+i + 1) + 1..µ(p−
+
+i+1 − 1) − 1].
+
+i )(cid:48) = µ(p+
+
+i + 1) and (p−
+
+i )(cid:48) = µ(p−
+
+i − 1) and apply
+
+i − 1, p+
+
+i + 1], of length (cid:96)i = p+
+
+Therefore, we can choose the new values (p+
+Lemma 16 once again.
+Let us now bound the number of nonterminals created by each round. Considering repetitive
+areas in the extremes, the area W [p−
+i + 3 ≤ λ + 2, may produce
+up to 2 + (cid:98)(cid:96)i/2(cid:99) nonterminals, and be reduced to this new length after the ﬁrst round. It could
+also produce no nonterminals at all and retain its original length. In general, for each nonterminal
+i −d.
+produced, the area shrinks by at least 1: if we create d nonterminals, then (p+
+i )(cid:48) + 1] adds two new symbols to
+that length. Therefore, the area starts with length (cid:96)i and grows by 2 in each new round. Whenever
+it creates a new nonterminal, it decreases at least by 1. It follows that, after k parsing rounds, each
+area can create at most (cid:96)i + 2k ≤ λ + 2 + 2k nonterminals, thus the grammar is of size r(λ + 2 + 2k).
+On the other hand, the text is of length (3/4)kn, for a total size of (3/4)kn + r(λ + 2 + 2k). Choosing
+(cid:117)(cid:116)
+k = log4/3(n/r), the total space becomes O(λr log(n/r)).
+
+On the other hand, the new extended area W (cid:48)[(p−
+
+i )(cid:48) − 1..(p+
+
+i )(cid:48) ≤ p+
+
+i )(cid:48)−(p−
+
+i − p−
+
+i −p−
+
+6.2 Accessing SA
+Let us deﬁne the diﬀerential suﬃx array DSA[k] = SA[k] − SA[k − 1] for all k > 1, and DSA[1] =
+SA[1]. The next lemma shows that the structure of DSA is suitable to apply Lemmas 16 and 17.
+Lemma 18. Let [x−1, x] be within a run of BWT . Then LF (x−1) = LF (x)−1 and DSA[LF (x)] =
+DSA[x].
+Proof. Since x is not the ﬁrst position in a run of BWT , it holds that BWT [x − 1] = BWT [x],
+and thus LF (x − 1) = LF (x) − 1 follows from the formula of LF . Therefore, if y = LF (x), we have
+SA[y] = SA[x] − 1 and SA[y − 1] = SA[LF (x − 1)] = SA[x − 1] − 1; therefore DSA[y] = DSA[x].
+(cid:117)(cid:116)
+See the bottom of Figure 1 (other parts are used in the next sections).
+
+Therefore, Lemmas 16 and 17 apply on W = DSA, p−
+
+runs start in BWT , and π = LF . In this case, λ = 1.
+
+i = p+
+
+i = pi being the r positions where
+
+Note that the height of the grammar is k = O(log(n/r)), since the nonterminals of a round
+use only nonterminals from the previous rounds. Our construction ends with a sequence of O(r)
+symbols, not with a single initial symbol. While we could add O(r) nonterminals to have a single
+initial symbol and a grammar of height O(log n), we maintain the grammar in the current form to
+enable extraction in time O(log(n/r)).
+
+23
+
+Fig. 1. Illustration of Lemmas 19 and 20. Segments represent phrases in ISA and runs in SA.
+
+To eﬃciently extract any value SA[i], we associate with each nonterminal X the sum of the
+DSA values, d(X), and the number of positions, l(X), it expands to. We also sample one out of
+n/r positions of SA, storing the value SA[i · (n/r)], the pointer to the corresponding nonterminal
+in the compressed DSA sequence. For each position in the compressed DSA sequence, we also store
+its starting position, pos, in the original sequence, and the corresponding left absolute value, abs =
+SA[pos − 1]. Since there cannot be more than n/r nonterminals between two sampled positions, a
+binary search on the ﬁelds pos ﬁnds, in time O(log(n/r)), the nonterminal of the compressed DSA
+sequence we must expand to ﬁnd any SA[i], and the desired oﬀset inside it, o ← i − pos, as well as
+the sum of the DSA values to the left, a ← abs. We then descend from the node of this nonterminal
+in the grammar tree. At each node X → Y Z, we descend to the left child if l(Y ) ≥ o and to the
+rigth child otherwise. If we descend to the right child, we update o ← i − l(Y ) and a ← a + d(Y ).
+For rules of the form X → Y t, we determine which copy of Y we descend to, j = (cid:100)o/l(Y )(cid:101), and
+update o ← o− (j− 1)· l(Y ) and a ← a + (j− 1)· d(Y ). When we ﬁnally reach the leaf corresponding
+to DSA[i] (with o = 0), we return SA[i] = a + DSA[i]. The total time is O(log(n/r) + k). Note that,
+once a cell is found, each subsequent cell can be extracted in constant time.9
+
+Theorem 5. Let the BWT of a text T [1..n] contain r runs. Then there exists a data structure
+using O(r log(n/r)) words that can retrieve any (cid:96) consecutive values of its suﬃx array in time
+O(log(n/r) + (cid:96)).
+
+6.3 Accessing ISA
+
+A similar method can be used to access inverse suﬃx array cells, ISA[i]. Let us deﬁne DISA[i] =
+ISA[i]− ISA[i− 1] for all i > 1, and DISA[1] = ISA[1]. The role of the runs in SA will now be played
+by the phrases in ISA, which will be deﬁned analogously as in the proof of Lemma 3: Phrases in
+ISA start at the positions SA[p] such that a new run starts in BWT [p]. Instead of LF , we deﬁne
+the cycle φ(i) = SA[ISA[i]− 1] if ISA[i] > 1 and φ(i) = SA[n] otherwise. We then have the following
+lemmas.
+Lemma 19. Let [i − 1..i] be within a phrase of ISA. Then it holds φ(i − 1) = φ(i) − 1.
+Proof. Consider the pair of positions T [i−1..i] within a phrase. Let them be pointed from SA[x] = i
+and SA[y] = i−1, therefore ISA[i] = x, ISA[i−1] = y, and LF (x) = y (see Figure 1). Now, since i is
+9 To save space, we may store pos only for one out of k symbols in the compressed DSA sequence, and complete
+the binary search with an O(k)-time sequential scan. We may also store one top-level sample out of (n/r)2. This
+retains the time complexity and reduces the total sampling space to o(r) + O(1) words.
+
+24
+
+ISASAixxii−1yyi−1x−1jjx−1y−1j−1j−1y−1LFφnot a phrase beginning, x is not the ﬁrst position in a BWT run. Therefore, BWT [x−1] = BWT [x],
+from which it follows that LF (x− 1) = LF (x)− 1 = y − 1. Now let SA[x− 1] = j, that is, j = φ(i).
+Then φ(i−1) = SA[ISA[i−1]−1] = SA[y−1] = SA[LF (x−1)] = SA[x−1]−1 = j−1 = φ(i)−1. (cid:117)(cid:116)
+Lemma 20. Let [i − 1..i] be within a phrase of ISA. Then it holds DISA[i] = DISA[φ(i)].
+Proof. From the proof of Lemma 19, it follows that DISA[i] = x − y = DISA[j] = DISA[φ(i)]. (cid:117)(cid:116)
+
+As a result, Lemmas 16 and 17 apply with W = DISA, p+
+
+i = pi, where pi are
+the r positions where phrases start in ISA, and π = φ. Now λ = 2. We use a structure analogous
+to that of Section 6.2 to obtain the following result.
+
+i = pi + 1 and p−
+
+Theorem 6. Let the BWT of a text T [1..n] contain r runs. Then there exists a data structure
+using O(r log(n/r)) words that can retrieve any (cid:96) consecutive values of its inverse suﬃx array in
+time O(log(n/r) + (cid:96)).
+
+6.4 Accessing LCP, Revisited
+
+In Section 3.1 we showed how to access array LCP eﬃciently if we can access SA. However, for the
+full suﬃx tree functionality we will develop in Section 7, we will need operations more sophisticated
+than just accessing cells, and these will be carried out on a grammar-compressed representation. In
+this section we show that the diﬀerential array DLCP [1..n], where DLCP [i] = LCP [i]− LCP [i− 1]
+if i > 1 and DLCP [1] = LCP [1], can be represented by a grammar of size O(r log(n/r)).
+
+Lemma 21. Let [x − 2, x] be within a run of BWT . Then DLCP [LF (x)] = DLCP [x].
+Proof. Let i = SA[x], j = SA[x − 1], and k = SA[x − 2]. Then LCP [x] = lcp(T [i..n], T [j..n]) and
+LCP [x − 1] = lcp(T [j..n], T [k..n]). We know from Lemma 18 that, if y = LF (x), then LF (x − 1) =
+y− 1 and LF (x− 2) = y− 2. Also, SA[y] = i− 1, SA[y− 1] = j− 1, and SA[y− 2] = k− 1. Therefore,
+LCP [LF (x)] = LCP [y] = lcp(T [SA[y]..n], T [SA[y − 1]..n) = lcp(T [i − 1..n], T [j − 1..n]). Since x is
+not the ﬁrst position in a BWT run, it holds that T [j− 1] = BWT [x− 1] = BWT [x] = T [i− 1], and
+thus lcp(T [i−1..n], T [j−1..n]) = 1+lcp(T [i..n], T [j..n]) = 1+LCP [x]. Similarly, LCP [LF (x)−1] =
+LCP [y − 1] = lcp(T [SA[y − 1]..n], T [SA[y − 2]..n) = lcp(T [j − 1..n], T [k − 1..n]). Since x − 1 is not
+the ﬁrst position in a BWT run, it holds that T [k− 1] = BWT [x− 2] = BWT [x− 1] = T [j− 1], and
+thus lcp(T [j − 1..n], T [k − 1..n]) = 1 + lcp(T [j..n], T [k..n]) = 1 + LCP [x− 1]. Therefore DLCP [y] =
+LCP [y] − LCP [y − 1] = (1 + LCP [x]) − (1 + LCP [x − 1]) = DLCP [x].
+(cid:117)(cid:116)
+
+Therefore, Lemmas 16 and 17 appliy with W = DLCP , p+
+
+i = pi, where pi are
+the r positions where runs start in BWT , and π = LF . In this case, λ = 3. We use a structure
+analogous to that of Section 6.2 to obtain the following result.
+
+i = pi + 2 and p−
+
+Theorem 7. Let the BWT of a text T [1..n] contain r runs. Then there exists a data structure
+using O(r log(n/r)) words that can retrieve any (cid:96) consecutive values of its longest common preﬁx
+array in time O(log(n/r) + (cid:96)).
+
+25
+
+6.5 Accessing the Text, Revisited
+
+In Section 4 we devised a data structure that uses O(r log(n/r)) words and extracts any substring
+of length (cid:96) from T in time O(log(n/r)+(cid:96) log(σ)/w). We now obtain a result that, although does not
+improve upon the representation of Section 4, is an easy consequence of our results on accessing SA,
+ISA, and LCP , and will be used in Section 10 to shed light on the relation between run-compression,
+grammar-compression, Lempel-Ziv compression, and bidirectional compression.
+
+Let us deﬁne φ just as in Section 6.3; we also deﬁne phrases in T exactly as those in ISA. We
+
+can then use Lemma 19 verbatim on T instead of ISA, and also translate Lemma 20 as follows.
+Lemma 22. Let T [i − 1..i] be within a phrase. Then it holds T [i − 1] = T [φ(i) − 1].
+Proof. From the proof of Lemma 19, it follows that T [i− 1] = BWT [x] = BWT [x− 1] = T [j − 1] =
+T [φ(i) − 1].
+(cid:117)(cid:116)
+i = pi − 1 (so
+λ = 3), where pi are the r positions where phrases start in T , and π = φ. Therefore, there exists
+a data structure (analogous to that of Section 6.2) of size O(r log(n/r)) that gives access to any
+substring T [i..i + (cid:96) − 1] in time O(log(n/r) + (cid:96)).
+
+We can then apply Lemmas 16 and 17 again, with W = T , p+
+
+i = pi + 1 and p−
+
+7 A Run-Length Compressed Suﬃx Tree
+
+In this section we show how to implement a compressed suﬃx tree within O(r log(n/r)) words, which
+solves a large set of navigation operations in time O(log(n/r)). The only exceptions are going to a
+child by some letter and performing level ancestor queries on the tree depth. The ﬁrst compressed
+suﬃx tree for repetitive collections built on runs [65], but just like the self-index, it needed O(n/s)
+space to obtain O(s log n) time in key operations like accessing SA. Other compressed suﬃx trees
+for repetitive collections appeared later [1, 76, 27], but they do not oﬀer formal space guarantees
+(see later). A recent one, instead, uses O(e) words and supports a number of operations in time
+typically O(log n) [5]. The two space measures are not comparable.
+
+7.1 Compressed Suﬃx Trees without Storing the Tree
+
+Fischer et al. [33] showed that a rather complete suﬃx tree functionality including all the operations
+in Table 3 can be eﬃciently supported by a representation where suﬃx tree nodes v are identiﬁed
+with the suﬃx array intervals SA[vl..vr] they cover. Their representation builds on the following
+primitives:
+
+1. Access to arrays SA and ISA, in time we call tSA.
+2. Access to array LCP [1..n], in time we call tLCP .
+3. Three special queries on LCP :
+
+(a) Range Minimum Query, RMQ(i, j) = arg mini≤k≤j LCP [k], choosing the leftmost one upon
+(b) Previous/Next Smaller Value queries, PSV(i) = max({k < i, LCP [k] < LCP [i]} ∪ {0}) and
+
+ties, in time we call tRMQ.
+NSV(i) = min({k > i, LCP [k] < LCP [i]} ∪ {n + 1}), in time we call tSV.
+
+26
+
+Description
+Suﬃx tree root.
+Text position i of leaf v.
+
+String depth for internal nodes, i.e., length of string represented by v.
+Tree depth, i.e., depth of tree node v.
+Number of leaves in the subtree of v.
+Parent of v.
+First child of v.
+Next sibling of v.
+Suﬃx-link, i.e., if v represents a · α then the node that represents α, for a ∈ [1..σ].
+
+Operation
+Root()
+Locate(v)
+Ancestor(v, w) Whether v is an ancestor of w.
+SDepth(v)
+TDepth(v)
+Count(v)
+Parent(v)
+FChild(v)
+NSibling(v)
+SLink(v)
+WLink(v, a) Weiner-link, i.e., if v represents α then the node that represents a · α.
+SLinki(v)
+LCA(v, w)
+Child(v, a)
+Letter(v, i)
+LAQS(v, d)
+LAQT (v, d)
+
+Iterated suﬃx-link.
+Lowest common ancestor of v and w.
+Child of v by letter a.
+The ith letter of the string represented by v.
+String level ancestor, i.e., the highest ancestor of v with string-depth ≥ d.
+Tree level ancestor, i.e., the ancestor of v with tree-depth d.
+
+Table 3. Suﬃx tree operations.
+
+An interesting ﬁnding of Fischer et al. [33] related to our results is that array PLCP , which
+stores the LCP values in text order, can be stored in O(r) words and accessed eﬃciently; therefore
+we can compute any LCP value in time tSA (see also Fischer [31]). We obtained a generalization
+of this property in Section 3.1. They [33] also show how to represent the array TDE [1..n], where
+TDE [i] is the tree-depth of the lowest common ancestor of the (i − 1)th and ith suﬃx tree leaves
+(TDE [1] = 0). Fischer et al. [33] represent its values in text order in an array PTDE , which just
+like PLCP can be stored in O(r) words and accessed eﬃciently, giving access to TDE in time tSA.
+They use TDE to compute operations TDepth and LAQT eﬃciently.
+
+Abeliuk et al. [1] show that primitives RMQ, PSV, and NSV can be implemented using a
+simpliﬁed variant of range min-Max trees (rmM-trees) [77], consisting of a perfect binary tree on
+top of LCP where each node stores the minimum LCP value in its subtree. The three primitives are
+then computed in logarithmic time. They show that the slightly extended primitives PSV(cid:48)(i, d) =
+max({k < i, LCP [k] < d} ∪ {0}) and NSV(cid:48)(i, d) = min({k > i, LCP [k] < d} ∪ {n + 1}), can be
+computed with the same complexity tSV of the basic PSV and NSV primitives, and they can be
+used to simplify some of the operations of Fischer et al. [33].
+
+The resulting time complexities are given in the second column of Table 4, where tLF is the
+time to compute function LF or its inverse, or to access a position in BWT . Operation WLink,
+not present in Fischer et al. [33], is trivially obtained with two LF -steps. We note that most times
+appear multiplied by tLCP in Fischer et al. [33] because their RMQ, PSV, and NSV structures do not
+store LCP values inside, so they need to access the array all the time; this is not the case when we
+use rmM-trees. The times of NSibling and LAQS owe to improvements obtained with the extended
+primitives PSV(cid:48) and NSV(cid:48) [1]. The time for Child(v, a) is obtained by binary searching among the σ
+minima of LCP [vl, vr], and extracting the desired letter (at position SDepth(v)+1) to compare with
+a. Each binary search operation can be done with an extended primitive RMQ(cid:48)(i, j, m) that ﬁnds the
+mth left-to-right occurrence of the minimum in a range. This is easily done in tRMQ time on a rmMtree 
+that stores, in addition, the number of times the minimum of each node occurs below it [77].
+Finally, the complexities of TDepth and LAQT make use of array TDE . While Fischer et al. [33] use
+
+27
+
+Operation
+
+Root()
+Locate(v)
+Ancestor(v, w)
+SDepth(v)
+TDepth(v)
+Count(v)
+Parent(v)
+FChild(v)
+NSibling(v)
+SLink(v)
+WLink(v)
+SLinki(v)
+LCA(v, w)
+Child(v, a)
+Letter(v, i)
+LAQS(v, d)
+LAQT (v, d)
+
+Generic
+
+Complexity
+
+1
+tSA
+1
+
+tRMQ + tLCP
+
+tSA
+1
+
+tLCP + tSV
+
+tRMQ
+
+tLCP + tSV
+
+tLF + tRMQ + tSV
+
+tLF
+
+tSA + tRMQ + tSV
+
+tRMQ + tSV
+
+Our
+
+Complexity
+
+1
+
+log(n/r)
+
+1
+
+log(n/r)
+log(n/r)
+
+1
+
+log(n/r)
+log(n/r)
+log(n/r)
+log(n/r)
+
+log logw(n/r)
+
+log(n/r)
+log(n/r)
+
+tLCP + (tRMQ + tSA + tLF ) log σ
+
+log(n/r) log σ
+
+tSA + tLF
+
+tSV
+
+log(n/r)
+log(n/r)
+
+(tRMQ + tLCP ) log n
+
+log(n/r) log n
+
+Table 4. Complexities of suﬃx tree operations. Letter(v, i) can also be solved in time O(i· tLF ) = O(i log logw(n/r)).
+
+an RMQ operation to compute TDepth, we note that TDepth(v) = 1 + max(TDE [vl], TDE [vr + 1]),
+because the suﬃx tree has no unary nodes (they used this simpler formula only for leaves).10
+
+7.2 Exploiting the Runs
+
+m(X) = min0≤k≤|D|(cid:80)k
+
+An important result of Abeliuk et al. [1] is that they represent LCP diﬀerentially, that is, array
+DLCP , in grammar-compressed form. Further, they store the rmM-tree information in the nonterminals,
+ that is, a nonterminal X expanding to a substring D of DLCP stores the minimum
+i=1 D[i]. Thus, instead of
+a perfect rmM-tree, they conceptually use the grammar tree as an rmM-tree. They show how to
+adapt the algorithms on the perfect rmM-tree to run on the grammar, and thus solve primitives
+RMQ, PSV(cid:48), and NSV(cid:48), in time proportional to the grammar height.
+
+i=1 D[i] and its position p(X) = arg min0≤k≤|D|(cid:80)k
+
+Abeliuk et al. [1], and also Fischer et al. [33], claim that RePair compression [60] reaches size
+O(r log(n/r)). This is an incorrect result borrowed from Gonz´alez et al. [43, 44], where it was
+claimed for DSA. The proof fails for a reason we describe in Appendix A. In Section 6 we have
+shown that, instead, the use of locally consistent parsing does oﬀer a guarantee of O(r log(n/r))
+words, with a (run-length) grammar height of O(log(n/r)), for DSA, DISA, and DLCP .11
+
+The third column of Table 4 gives the resulting complexities when tSA = log(n/r), tLF =
+log logw(n/r), and tLCP = log logw(n/r) + tSA = log(n/r), as we have established in previous
+sections. To complete the picture, we describe how to compute the extended primitives RMQ(cid:48) and
+PSV(cid:48)/NSV(cid:48) on the grammar, in time tRMQ = tSV = log(n/r). While analogous procedures have
+been described before [1, 77], some particularities in our structures deserve a complete description.
+10 We observe that LAQT can be solved exactly as LAQS, with the extended PSV(cid:48)/NSV(cid:48) operations, now deﬁned on
+the array TDE instead of on LCP . However, an equivalent to Lemma 21 for the diﬀerential TDE array does not
+hold, and therefore we cannot build the structures on its grammar within the desired space bounds.
+
+11 The reason of failure is subtle and arises pathologically; in our preliminary experiments RePair actually compresses
+
+to about half the space of locally consistent parsing in typical repetitive texts.
+
+28
+
+Note that the three primitives can be solved on DLCP or on LCP , as they refer to relative
+values. The structure we use for DLCP in Section 6.4 is formed by a compressed sequence DLCP(cid:48)
+of length O(r), plus a run-length grammar of size O(r log(n/r)) and of height h = O(log(n/r)).
+The ﬁrst part of our structure is built as follows. Let DLCP [im, im+1 − 1] be the area to which
+DLCP(cid:48)[m] expands; then we build the array M [m] = minim≤k<im+1 LCP [k]. We store a succinct
+RMQ data structure on M , which requires just O(r) bits and answers RMQs on M in constant
+time, without need to access M [32, 77].
+
+As in Section 6.2, in order to give access to DLCP , we store for each nonterminal X the number
+l(X) of positions it expands to and its total diﬀerence d(X). We also store, to compute RMQ(cid:48), the
+values m(X), p(X), and also n(X), the number of times m(X) occurs inside the expansion of X.
+We also store the sampling information described in Section 6.2, now to access DLCP .
+
+To compute RMQ(cid:48)(i, j, m), we use a mechanism analogous to the one described in Section 6.2 to
+access DLCP [i..j], but do not traverse the cells one by one. Instead, we determine that DLCP [i..j]
+is contained in the area DLCP [i(cid:48)..j(cid:48)] that corresponds to DLCP(cid:48)[x..y] in the compressed sequence,
+partially overlapping DLCP(cid:48)[x] and DLCP(cid:48)[y] and completely covering DLCP(cid:48)[x + 1..y − 1] (there
+are various easy particular cases we ignore). We ﬁrst obtain in constant time the minimum position 
+of the central area, z = RMQ(x + 1, y − 1), using the O(r)-bit structure. We must then
+obtain the minimum values in DLCP(cid:48)[x](cid:104)i(cid:48) − i + 1, l(DLCP(cid:48)[x])(cid:105), DLCP(cid:48)[z](cid:104)1, l(DLCP(cid:48)[z])(cid:105), and
+DLCP(cid:48)[y](cid:104)1, l(DLCP(cid:48)[y]) + j − j(cid:48)(cid:105), where X(cid:104)a, b(cid:105) refers to the range [a..b] in the expansion of
+nonterminal X.
+
+To ﬁnd the minimum in DLCP(cid:48)[w](cid:104)a, b(cid:105), where DLCP(cid:48)[w] = X, we identify the at most 2k
+maximal nodes of the grammar tree that cover the range [a..b] in the expansion of X. Let these nodes
+be X1, X2, . . . , X2k. We then ﬁnd the minimum of m(X1), d(X1) + m(X2), d(X1) + d(X2) + m(X3),
+and so on, in O(k) time. Once the minimum is identiﬁed at Xs, we obtain the absolute value by
+extracting LCP [iw − 1 + l(X1) + . . . + l(Xs−1) + p(Xs)].
+Once we have the three minima, the smallest of the three is µ, the value of RMQ(i, j). To solve
+RMQ(cid:48)(i, j, m), we ﬁrst compute µ and then ﬁnd its mth occurrence through DLCP(cid:48)[x](cid:104)i(cid:48) − i +
+1, l(DLCP(cid:48)[x])(cid:105), DLCP(cid:48)[x + 1..y − 1], and DLCP(cid:48)[y](cid:104)1, l(DLCP(cid:48)[y]) + j − j(cid:48)(cid:105). To process X(cid:104)a, b(cid:105),
+we scan again X1, X2, . . . , X2k. For each Xs, if d(X1) + . . . + d(Xs−1) + m(Xs) = m, we subtract
+n(Xs) from m. When the result is below 1, we enter the children of Xs, Y1 and Y2, doing the same
+process we ran on X1, X2, . . . on Y1, Y2 to ﬁnd the child where m falls below 1. We recursively enter
+this child of X, and so on, until reaching the precise position in X(cid:104)a, b(cid:105) with the mth occurrence
+of µ. The position itself is computing by adding all the lengths l(Xi), l(Yi), etc. we skip along the
+process. All this takes time O(k) = O(log(n/r)).
+We might ﬁnd the answer as we traverse DLCP(cid:48)[x](cid:104)i(cid:48)−i+1, l(DLCP(cid:48)[x])(cid:105). If, however, there are
+only m(cid:48) < m occurrences of µ in there, and the minimum in DLCP(cid:48)[x + 1..y − 1] is also µ, we must
+ﬁnd the (m − m(cid:48))th occurrence of the minimum in DLCP(cid:48)[x + 1..y − 1]. This can also be done in
+constant time with the O(r)-bit structure [77]. If, in turn, there are only m(cid:48)(cid:48) < m− m(cid:48) occurrences
+of µ inside, we must ﬁnd the (m− m(cid:48) − m(cid:48)(cid:48))th occurrence of µ in DLCP(cid:48)[y](cid:104)1, l(DLCP(cid:48)[y]) + j − j(cid:48)(cid:105).
+Our grammar also has rules of the form X → Y t. It is easy to process several copies of Y in
+constant time, even if they span only some of the t copies of X. For example, the minimum in Y s
+is m(Y ) if d(Y ) ≥ 0, and (s − 1) · d(Y ) + m(Y ) otherwise. Later, to ﬁnd where µ occurs, we have
+that it can only occur in the ﬁrst copy if d(Y ) > 0, only in the last if d(Y ) < 0, and in every copy
+if d(Y ) = 0. In the latter case, if s · n(Y ) < m, then the mth occurrence is not inside the copies;
+otherwise it occurs inside the (cid:100)m/n(Y )(cid:101)th copy. The other operations are trivially derived.
+
+29
+
+Therefore, we can compute any query RMQ(cid:48)(i, j, m) in time O(log(n/r)) plus O(1) accesses to
+LCP ; therefore tRMQ = log(n/r).
+Queries PSV(cid:48)(i, d) and NSV(cid:48)(i, d) are solved analogously. Let us describe NSV(cid:48); PSV(cid:48) is similar.
+Let DLCP [i..n] intersect DLCP(cid:48)[x..y], which expands to DLCP [i(cid:48)..n], and let us subtract LCP [i(cid:48)−1]
+from d to have it in relative form. We consider DLCP(cid:48)[x](cid:104)i−i(cid:48)+1, l(DLCP(cid:48)[x])(cid:105) = X(cid:104)a, b(cid:105), obtaining
+the nonterminals X1, X2, . . . , X2k that cover X(cid:104)a, b(cid:105), and ﬁnd the ﬁrst Xs where d(X1) + . . . +
+d(Xs−1) + m(Xs) < d. Then we enter the children of Xs to ﬁnd the precise point where we fall
+below d, as before. If we do not fall below d inside X(cid:104)a, b(cid:105), we must run the query on DLCP(cid:48)[x+1..y]
+for d − d(X1) − . . . − d(X2k). Such a query boils down to the forward-search queries on large trees
+considered by Navarro and Sadakane [77, Sec. 5.1]. They build a so-called left-to-right minima tree
+where they carry out a level-ancestor-problem path decomposition [12], and have a precedessor
+structure on the consecutive values along such paths. In our case, the union of all those paths has
+O(r) elements and the universe is of size 2n; therefore predecessor queries can be carried out in O(r)
+space and O(log logw(n/r)) time [10, Thm. 14]. Overall, we can also obtain time tSV = log(n/r)
+within O(r log(n/r)) words of space.
+
+Theorem 8. Let the BWT of a text T [1..n], over alphabet [1..σ], contain r runs. Then a compressed
+suﬃx tree on T can be represented using O(r log(n/r)) words, and it supports the operations with
+the complexities given in Table 4.
+
+8 Counting in Optimal Time
+
+Powered by the results of the previous sections, we can now show how to achieve optimal counting
+time, both in the unpacked and packed settings.
+
+Theorem 9. We can store a text T [1..n] in O(r log(n/r)) words, where r is the number of runs
+in the BWT of T , such that later, given a pattern P [1..m], we can count the occurrences of P in
+optimal O(m) time.
+
+Proof. By Lemma 10, we ﬁnd one pattern occurrence in O(m + log(n/r)) time with a structure of
+O(r log(n/r)) words. By Theorem 6, we can compute the corresponding suﬃx array location p in
+O(log(n/r)) time with a structure of O(r log(n/r)) words. Our goal is to compute the BWT range
+[sp, ep] of the pattern; then the answer is ep − sp + 1. Let LCE (i, j) = lcp(T [SA[i]..], T [SA[j]..])
+denote the length of the longest common preﬁx between the i-th and j-th lexicographically smallest
+text suﬃxes. Note that p ∈ [sp, ep] and, for every 1 ≤ i ≤ n, LCE (p, i) ≥ m if and only if i ∈ [sp, ep].
+On the other hand, it holds LCE (i, j) = mini<k≤j LCP [i] [89]. We can then ﬁnd the area with the
+primitives PSV(cid:48) and NSV(cid:48) deﬁned in Section 7: sp = max(1, PSV(cid:48)(p, m)) and ep = NSV(cid:48)(p, m)− 1.
+These primitives are computed in time O(log(n/r)) and need O(r log(n/r)) space. This gives us
+count in O(m + log(n/r)) time and O(r log(n/r)) words. To speed up counting for patterns shorter
+than log(n/r), we index them using a path-compressed trie as done in Theorem 3. We store in each
+explicit trie node the number of occurrences of the corresponding string to support the queries for
+short patterns. By Lemma 14, the size of the trie and of the text substrings explicitly stored to
+(cid:117)(cid:116)
+support path compression is O(r log(n/r)). Our claim follows.
+
+Theorem 10. We can store a text T [1..n] over alphabet [1..σ] in O(rw logσ(n/r)) words, where r
+is the number of runs in the BWT of T , such that later, given a packed pattern P [1..m], we can
+count the occurrences of P in optimal O(m log(σ)/w) time.
+
+30
+
+Proof. By Lemma 11, we ﬁnd one pattern occurrence in O(m log(σ)/w + log(n/r)) time with a
+structure of O(rw logσ(n/r)) words. By Theorem 6, we compute the corresponding suﬃx array
+location p in O(log(n/r)) time with a structure of O(r log(n/r)) words. As in the proof of Theorem
+9, we retrieve the BWT range [sp, ep] of the pattern with the primitives PSV(cid:48) and NSV(cid:48) of Section 7,
+and then return ep− sp + 1. Overall, we can now count in O(m log(σ)/w + log(n/r)) time. To speed
+up counting patterns shorter than w logσ n, we index them using a z-fast trie [3, Sec. H.2] oﬀering
+O(m log(σ)/w)-time preﬁx queries, as done in Theorem 4. The trie takes O(rw logσ(n/r)) space.
+We store in each explicit trie node the number of occurrences of the corresponding string. The total
+(cid:117)(cid:116)
+space is dominated by O(rw logσ(n/r)).
+
+9 Experimental results
+
+In this section we report on preliminary experiments that are nevertheless suﬃcient to expose the
+orders-of-magnitude time/space savings oﬀered by our structure (more precisely, the simple variant
+developed in Section 3) compared with the state of the art.
+
+9.1
+
+Implementation
+
+We implemented the structure of Theorem 1 with s = 1 using the sdsl library [40]. For the runlength 
+FM-index, we used the implementation described by Prezza [84, Thm. 28] (suﬃx array
+sampling excluded), taking (1 + )r log(n/r) + r(log σ + 2) bits of space for any constant  > 0 (in
+our implementation,  = 0.5) and supporting O(log(n/r) + log σ)-time LF mapping. This structure
+employs Huﬀman-compressed wavelet trees (sdsl’s wt huff) to represent run heads, as in our
+experiments they turned out to be comparable in size and faster than Golynski et al.’s structure [42],
+which is implemented in sdsl’s wt gmr. Our locate machinery is implemented as follows. We store
+two gap-encoded bitvectors U and D marking with a bit set text positions that are the last and ﬁrst
+in their BWT run, respectively. These bitvectors are implemented using sdsl’s sd vector, take
+overall 2r(log(n/r)+2) bits of space, and answer queries in O(log(n/r)) time. We moreover store two
+permutations, DU and RD. DU maps the (D-ranks of) text positions corresponding to the last position
+of each BWT run to the (U-rank of the) ﬁrst position of the next run. RD maps ranks of BWT runs to
+the (D-ranks of) text positions associated with the last position of the corresponding BWT run. DU
+and RD are implemented using Munro et al.’s representation [71], take (1+(cid:48))r log r bits each for any
+constant (cid:48) > 0, and support map and inverse in O(1) time. These structures are suﬃcient to locate
+each pattern occurrence in O(log(n/r)) time with the strategy of Theorem 1. We choose (cid:48) = /2.
+Overall, our index takes at most r log(n/r) + r log σ + 6r + (2 + )r log n ≤ (3 + )r log n + 6r bits
+of space for any constant  > 0 and, after counting, locates each pattern occurrence in O(log(n/r))
+time. Note that this space is (2 + )r log n + O(r) bits larger than an optimal run-length BWT
+representation, and since we store 2r suﬃx array samples, this is just  r log n + O(n) bits over the
+optimum (i.e., RLBWT + samples). In the following, we refer to our index as r-index. The code
+is publicly available [83].
+
+9.2 Experimental Setup
+
+We compared r-index with the state-of-the-art index for each compressibility measure: lzi [20]
+(z), slp [20] (g), rlcsa [90] (r), and cdawg [86] (e). We tested rlcsa using three suﬃx array sample
+rates per dataset: the rate X resulting in the same size for rlcsa and r-index, plus rates X/2 and
+
+31
+
+Fig. 2. Locate time per occurrence and working space (in bits per symbol) of the indexes. The y-scale measures
+nanoseconds per occurrence reported and is logarithmic.
+
+X/4. We measured memory usage and locate times per occurrence of all indexes on 1000 patterns
+of length 8 extracted from four repetitive datasets, also published with our implementation:
+
+DNA: an artiﬁcial dataset of 629145 copies of a DNA sequence of length 1000 (Human genome)
+
+where each character was mutated with probability 10−3;
+
+boost: a dataset consisting of concatenated versions of the GitHub’s boost library;
+einstein: a dataset consisting of concatenated versions of Wikipedia’s English Einstein page;
+world leaders: a collection containing all pdf ﬁles of CIA World Leaders from January 2003 to
+
+December 2009 downloaded from the Pizza&Chili corpus.
+
+Memory usage (Resident Set Size, RSS) was measured using /usr/bin/time between index
+loading time and query time. This choice was made because, due to the datasets’ high repetitiveness,
+the number occ of pattern occurrences was very large. This impacts sharply on the working space of
+indexes such as lzi and slp, which report the occurrences in a recursive fashion. When considering
+this extra space, these indexes always use more space than r-index, but we prefer to emphasize
+the relation between the index sizes and their associated compressibility measure. The only existing
+implementation of cdawg works only on DNA ﬁles, so we tested it only on the DNA dataset.
+
+9.3 Results
+
+The results of our experiments are summarized in Figure 2. On all datasets, r-index signiﬁcantly
+deviates from the space-time curve on which all other indexes are aligned. We locate occurrences
+one to three orders of magnitude faster than all other indexes except cdawg, which however is one
+order of magnitude larger. It is also clear that r-index dominates all practical space-time tradeoﬀs
+of rlcsa (other tradeoﬀs are too spaceor 
+timeconsuming 
+to be practical). The smallest indexes,
+lzi and slp, save very little space with respect to r-index at the expense of being one to two
+orders of magnitude slower.
+
+10 New Bounds on Grammar and Lempel-Ziv Compression
+
+In this section we obtain various new relations between repetitiveness measures, inspired in our construction 
+of RLCFGs of size O(r log(n/r)) of Section 6. We consider general bidirectional schemes,
+
+32
+
+lll024682.02.53.03.54.04.55.0DNARSS (bits/symbol)time/occ (log10(ns))lll0.000.060.122.02.53.03.54.04.55.0boostRSS (bits/symbol)lll0.00.40.82.02.53.03.54.04.55.0einsteinRSS (bits/symbol)lll024682.02.53.03.54.04.55.0world_leadersRSS (bits/symbol)lrlcsalzir−indexcdawgslpwhich encompass grammar compression and Lempel-Ziv parsings, and are arguably the most general 
+mechanism to capture repetitiveness. We ﬁrst prove that the BWT runs induce a bidirectional
+scheme on T . We then obtain upper and lower bounds relating the size of the smallest bidirectional
+scheme with the number of BWT runs, the size of the smallest grammar, and the number of phrases
+in the Lempel-Ziv parse.
+
+We will use g to denote the size of the smallest CFG and grl to denote the size of the smallest
+RLCFG. Similarly, we will use z for the size of the Lempel-Ziv parse that allows overlaps between
+source and target (i.e., the original one [61]) and zno the size of the Lempel-Ziv parse that does not
+allow overlaps. Both z [61] and zno [93] are optimal left-to-right parsings allowing or not allowing
+overlaps, respectively. Therefore we have grl ≤ g and z ≤ zno. Storer and Szymanski [93] deﬁne a
+number of so-called macro schemes, which allow expressing a text T in terms of copying blocks of
+it elsewhere and having some positions given explicitly. Lempel-Ziv is a particular case, equivalent
+to the scheme they call OPM/L (i.e., “original pointer macro to the left”, where phrases can be
+copied from anywhere at the left) in the case of allowing overlaps, and otherwise OPM/TR/L (i.e.,
+adding the restriction called “topological recursion”, where a block cannot be used to deﬁne itself).
+If we remove the restriction of pointers pointing only to the left, then we can recreate T by copying
+blocks from anywhere else in T . Those are called bidirectional (macro) schemes. We are interested
+in the most general one, OPM, where sources and targets can overlap and the only restriction is
+that every character of T can be eventually deduced from copies of sources to targets. Finding the
+optimal OPM scheme, of b macros (b is called ∆OP M in their paper [93]), is NP-complete [38],
+whereas linear-time algorithms to ﬁnd the optimal unidirectional schemes, of sizes z = ∆OP M/L
+or zR = ∆OP M/R (i.e., z for the reversed T ), are well-known [93].12 Further, little is known about
+the relation between the optimal bidirectional and unidirectional parsings, except that for any
+2 + ) · min(z, zR) [93, Cor. 7.1].
+constant  > 0 there is an inﬁnite family of strings for which b < ( 1
+Given the diﬃculty of ﬁnding an optimal bidirectional parsing, the question of how much worse
+can unidirectional parsings be is of interest.
+
+10.1 Lower Bounds on r and z
+
+In this section we exhibit an inﬁnite family of strings for which z = Ω(b log n), which shows that the
+gap between bidirectionality and unidirectionality is signiﬁcantly larger than what was previously
+known. The idea is to show that the phrases we deﬁned in previous sections (i.e., starting at
+positions SA[p] where p starts a BWT run) induce a valid bidirectional macro scheme of size 2r,
+and then use Fibonacci strings as the family where z = Ω(r log n) [84].
+
+Deﬁnition 4. Let p1, p2, . . . , pr be the positions that start runs in BWT , and let s1 < s2 <
+. . . < sr be the positions {SA[pi], 1 ≤ i ≤ r} in T where phrases start (note that s1 = 1 because 
+BWT [ISA[1]] = $ is a size-1 run). Assume sr+1 = n + 1. Let also φ(i) = SA[ISA[i] − 1] if
+ISA[i] > 1 and φ(i) = SA[n] otherwise. Then we deﬁne the macro scheme of the BWT as follows:
+1. For each 1 ≤ i ≤ r, T [φ(si)..φ(si+1 − 2)] is copied from T [si..si+1 − 2].
+2. For each 1 ≤ i ≤ r, T [φ(si+1 − 1)] is stored explicitly.
+Lemma 23. The macro scheme of the BWT is a valid bidirectional macro scheme, and thus r ≥ b.
+
+12 What they call Lempel-Ziv, producing LZ phrases, does not allow source/target overlaps, so it is our zno.
+
+33
+
+Proof. Lemma 19, proved for ISA, applies verbatim on T , since we deﬁne the phrases identically.
+Thus φ(j − 1) = φ(j) − 1 if [j − 1..j] is within a phrase. From Lemma 22, it also holds T [j − 1] =
+T [φ(j) − 1]. Therefore, we have that φ(si + k) = φ(si) + k for 0 ≤ k < si+1 − si − 1, and therefore
+T [φ(si), . . . , φ(si+1 − 2)] is indeed a contiguous range. We also have that T [φ(si)..φ(si+1 − 2)] =
+T [si..si+1 − 2], and therefore it is correct to make the copy. Since φ is a permutation, every position
+of T is mentioned exactly once as a target in points 1 and 2.
+Finally, it is easy to see that we can recover the whole T from those 2r directives. We can, for
+example, follow the cycle φk(n), k = 0, . . . , n − 1 (note that T [φ0(n)] = T [n] is stored explicitly),
+(cid:117)(cid:116)
+and copy T [φk(n)] to T [φk+1(n)] unless the latter is explicitly stored.
+
+We are now ready to obtain the lower bound on bidirectional versus unidirectional parsings. We
+
+recall that, with z, we refer to the Lempel-Ziv parsing that allows source/target overlaps.
+
+Theorem 11. There is an inﬁnite family of strings over an alphabet of size 2 for which z =
+Ω(b log n).
+
+Proof. Consider the family of the Fibonacci stings, F1 = a, F2 = b, and Fk = Fk−1Fk−2 for all
+k > 2. As shown by Prezza [84, Thm. 25], for Fk we have r = O(1) [67] and z = Θ(log n) [30]. By
+(cid:117)(cid:116)
+Lemma 23, it also holds b = O(1), and therefore z = Ω(b log n).
+
+10.2 Upper bounds on g and z
+We ﬁrst prove that grl = O(b log(n/b)), and then that z ≤ 2grl. For the ﬁrst part, we will show
+that Lemmas 16 and 17 can be applied to any bidirectional scheme, which will imply the result.
+Let a bidirectional scheme partition T [1..n] into b chunks B1, . . . , Bb, such that each Bi =
+T [ti..ti + (cid:96)i − 1] is either (1) copied from another substring T [si..si + (cid:96)i − 1] with si (cid:54)= ti, which may
+overlap T [ti..ti + (cid:96)i − 1], or (2) formed by (cid:96)i = 1 explicit symbol
+We deﬁne the function f : [1..n] → [1..n] so that, in case (1), f (ti + j) = si + j for all 0 ≤ j < (cid:96)i,
+and in case (2), f (ti) = −1. Then, the bidirectional scheme is valid if there is an order in which the
+sources si + j can be copied onto the targets ti + j so that we can rebuild the whole of T .
+
+Being a valid scheme is equivalent to saying that f has no cycles, that is, there is no k > 0
+and p such that f k(p) = p: Initially we can set all the explicit positions (type (2)), and then copy
+sources with known values to their targets. If f has no cycles, we will eventually complete all the
+positions in T because, for every T [p], there is a k > 0 such that f k(p) = −1, so we can obtain T [p]
+from the symbol explicitly stored for T [f k−1(p)].
+
+Consider a locally consistent parsing of W = T into blocks. We will count the number of
+diﬀerent blocks that appear, as this is equal to the number of nonterminals produced in the ﬁrst
+round. We will charge to each chunk B the ﬁrst and the last block that intersects it. Although
+a block overlapping one or more consecutive chunk boundaries will be charged several times, we
+do not charge more than 2b overall. On the other hand, we do not charge the other blocks, which
+are strictly contained in a chunk, because they will be charged somewhere else, when they appear
+intersecting an extreme of a chunk. We show this is true in both types of blocks:
+1. If the block is a pair of leftand 
+right-alphabet symbols, W [p..p + 1] = ab, then it holds [f (p −
+1)..f (p + 2)] = [f (p)− 1..f (p) + 2] because W [p..p + 1] is strictly contained in a chunk. Moreover,
+W [f (p) − 1..f (p) + 2] = W [p − 1..p + 2]. That is, the block appears again at [f (p)..f (p) + 1],
+surrounded by the same symbols. Thus by Lemma 15, the locally consistent parsing also forms a
+
+34
+
+block with W [f (p)..f (p + 1)]. If this block is not strictly contained in another chunk, then it will
+be charged. Otherwise, by the same argument, W [f (p)− 1..f (p + 1) + 1] = W [f (p)− 1..f (p) + 2]
+will be equal to W [f 2(p) − 1..f 2(p) + 2] and a block will be formed with W [f 2(p)..f 2(p) + 1].
+Since f has no cycles, there is a k > 0 for which f k(p) = −1. Thus for some l < k it must
+be that W [f l(p) − 1..f l(p) + 2] is not contained in a chunk. At the smallest such l, the block
+W [f l(p)..f l(p)+1] will be charged to the chunk whose boundary it touches. Therefore, W [p..p+1]
+is already charged to some chunk and we do not need to charge it at W [p..p + 1].
+2. If the block is a maximal run W [p..p + (cid:96) − 1] = a(cid:96), then it also holds [f (p − 1)..f (p + (cid:96))] =
+[f (p) − 1..f (p) + (cid:96)], because all the area [p − 1..p + (cid:96)] is within the same chunk. Moreover,
+W [f (p− 1)..f (p + (cid:96))] = ba(cid:96)c = W [p− 1..p + (cid:96)] with b (cid:54)= a and c (cid:54)= a, because the run is maximal.
+It follows that the block a(cid:96) also appears in W [f (p)..f (p + (cid:96) − 1)], since the parsing starts by
+forming blocks with the maximal runs. If W [f (p)..f (p+(cid:96)−1)] is not strictly contained in a chunk,
+then it will be charged, otherwise we can repeat the argument with W [f 2(p)−1..f 2(p)+(cid:96)]. Once
+again, since f has no cycles, the block will eventually be charged at some [f l(p)..f l(p + (cid:96) − 1)],
+so we do not need to charge it at W [p..p + (cid:96) − 1].
+Therefore, we produce at most 2b distinct blocks, and the RLCFG has at most 2b nonterminals.
+ For the second round, we replace all the blocks of length 2 or more by their corresponding
+nonterminals. The new sequence, W (cid:48), is guaranteed to have length at most (3/4)n by Lemma 15.
+We deﬁne a new bidirectional scheme on W (cid:48), as follows:
+1. The symbols that were explicit in W are also explicit in W (cid:48).
+2. The nonterminals associated with the blocks of W that intersect the ﬁrst or last position of a
+3. For the non-explicit chunks Bi = W [ti..ti + (cid:96)i − 1] of W , let B(cid:48)
+
+chunk in W (i.e., those that were charged to the chunks) are stored as explicit symbols.
+i be obtained by trimming from
+i appears inside W [si..si + (cid:96)i − 1], where
+Bi the ﬁrst and last block that overlaps Bi. Then B(cid:48)
+the same sequence of blocks is formed because of the locally consistent parsing. The sequence
+of nonterminals associated with the blocks of B(cid:48)
+i therefore forms a chunk in W (cid:48), pointing to the
+identical sequence of nonterminals that appear as blocks inside W [si..si + (cid:96)i − 1].
+Let the original bidirectional scheme be formed by b1 chunks of type (1) and b2 of type (2),
+thus b = b1 + b2. Now W (cid:48) has at most b1 chunks of type (1) and b2 + 2b1 chunks of type (2). After
+k rounds, the sequence is of length at most (3/4)kn and it has at most b1 chunks of type (1) and
+b2 + 2kb1 chunks of type (2), so we have generated at most b2 + 2kb1 ≤ 2bk nonterminals. Therefore,
+if we choose to perform k = log4/3(n/b) rounds, the sequence will be of length at most b at the
+grammar size will be O(b log(n/b)). To complete the process, we add O(b) nonterminals to reduce
+the sequence to a single initial symbol.
+
+Theorem 12. Let T [1..n] have a bidirectional scheme of size b. Then there exists a run-length
+context-free grammar of size grl = O(b log(n/b)) that generates T .
+
+With Theorem 12, we can also bound the size z of the Lempel-Ziv parse [61] that allows overlaps.
+The size without allowing overlaps is known to be bounded by the size of the smallest CFG, zno ≤ g
+[88, 18]. We can easily see that z ≤ 2grl also holds by extending an existing proof [18, Lem. 9] to
+handle the run-length rules. Let us call left-to-right parse to any parsing of T where each new
+phrase is a letter or it occurs previously in T .
+
+Theorem 13. Let a RLCFG of size grl expand to a text T . Then the Lempel-Ziv parse (allowing
+overlaps) of T produces z ≤ 2grl phrases.
+
+35
+
+Proof. Consider the parse tree of T , where all internal nodes representing any but the leftmost
+occurrence of a nonterminal are pruned and left as leaves. The number of nodes in this tree is
+precisely grl. We say that the internal node of nonterminal X is its deﬁnition. Our left-to-right
+parse of T is a sequence Z[1..z] obtained by traversing the leaves of the pruned parse tree left to
+right. For a terminal leaf, we append the letter to Z. For a leaf representing nonterminal X, such
+that the subtree of its deﬁnition generated Z[i..j], we append to Z a reference to the area T [x..y]
+expanded by Z[i..j].
+Rules X → Y t are handled as follows. First, we expand them to X → Y · Y t−1, that is, the node
+for X has two children for Y , and it is annotated with t − 1. Since the right child of X is not the
+ﬁrst occurrence of Y , it must be a leaf. The left child of X may or may not be a leaf, depending on
+whether Y occurred before or not. Now, when our leaf traversal reaches the right child Y of a node
+X indicating t − 1 repetitions, we append to Z a reference to T [x..y + (t − 2)(y − x + 1)], where
+T [x..y] is the area expanded by the ﬁrst child of X. Note that source and target overlap if t > 2.
+Thus a left-to-right parse of size 2grl exists, and Lempel-Ziv is the optimal left-to-right parse [61,
+(cid:117)(cid:116)
+Thm. 1].
+
+We then obtain a result on the long-standing open problem of ﬁnding the approximation ratio
+of Lempel-Ziv compared to the smallest bidirectional scheme (the bound this is tight as a function
+of n, according to Theorem 11).
+
+Theorem 14. Let T [1..n] have a bidirectional scheme of size b. Then the Lempel-Ziv parsing of T
+allowing overlaps has z = O(b log(n/b)) phrases.
+
+We can also derive upper bounds for g, the size of the smallest CFG, and for zno, the size of the
+Lempel-Ziv parse that does not allow overlaps. It is suﬃcient to combine the results that zno ≤ g
+[88, 18] and that g = O(z log(n/z)) [39, Lem. 8] with the previous results.
+
+Theorem 15. Let T [1..n] have a bidirectional scheme of size b. Then there exists a context-free
+grammar of size g = O(b log2(n/b)) that generates T .
+
+Theorem 16. Let T [1..n] have a bidirectional scheme of size b. Then the Lempel-Ziv parsing of T
+without allowing overlaps has zno = O(b log2(n/b)) phrases.
+
+10.3 Map of the Relations between Repetitiveness Measures
+
+Figure 3 (left) illustrates the known asymptotic bounds that relate various repetitiveness measures:
+z, zno, r, g, grl, b, and e (the size of the CDAWG [16]). We do not include m, the number of maximal
+matches [6], because it can be zero for all the n! strings of length n with all distinct symbols [6],
+and thus it is below the Kolmogorov complexity. Yet, we use the fact that m ≤ e to derive other
+lower bounds on e.
+The bounds e ≥ max(m, z, r) and e = Ω(g) are from Belazzougui et al. [6, 5], zno ≤ g =
+O(zno log(n/zno)) is a classical result [88, 18] and it also holds g = O(z log(n/z)) [39, Lem. 8]; b ≤ z
+holds by deﬁnition [93]. The others were proved in this section.
+There are also several lower bounds on further possible upper bounds, for example, there are text
+families for which g = Ω(grl log n) and zno = Ω(z log n) (i.e., T = an−1$); g = Ω(zno log n/ log log n)
+[47]; e ≥ m = Ω(max(r, z) · n) [6] and thus e = Ω(g · n/ log n) since g = O(z log n); min(r, z) =
+Ω(m · n) [6]; r = Ω(zno log n) [6, 84]; z = Ω(r log n) [84]; r = Ω(g log n/ log log n) (since on a
+
+36
+
+Fig. 3. Known and new asymptotic bounds between repetitiveness measures. The bounds on the left hold for every
+string family: an edge means that the lower measure is of the order of the upper. The thicker lines were proved in this
+section. The dashed lines on the right are lower bounds that hold for some string family. The solid lines are inherited
+from the left, and since they always hold, they permit propagating the lower bounds. Note that r appears twice.
+
+de Bruijn sequence of order k on a binary alphabet we have r = Θ(n) [6], z = O(n/ log n), and
+thus g = O(z log(n/z)) = O(n log log n/ log n)). Those are shown in the right of Figure 3. We are
+not aware of a separation between z and grl. From the upper bounds that hold for every string
+family, we can also deduce that, for example, there are text families where r = Ω(z log n) and thus
+r = Ω(b log n) (since r = Ω(zno log n)); {g, grl, zno} = Ω(r log n) (since z = Ω(r log n)) and thus
+z = Ω(b log n) (since r ≥ b, see Theorem 11).
+results, on the other hand [65, 58, 6, 21], show that it typically holds z ≈ zno < m < r ≈ g (cid:28) e.
+
+Thus, there are no simple dominance relations between r and z, zno, m, g, or grl. Experimental
+
+References
+
+1. A. Abeliuk, R. C´anovas, and G. Navarro. Practical compressed suﬃx trees. Algorithms, 6(2):319–351, 2013.
+2. T. Batu, F. Erg¨un, and S. C. Sahinalp. Oblivious string embeddings and edit distance approximations. In Proc.
+
+17th Symposium on Discrete Algorithms (SODA), pages 792–801, 2006.
+
+3. D. Belazzougui, Paolo B., R. Pagh, and S. Vigna. Fast preﬁx search in little space, with applications. In Proc.
+
+18th Annual European Symposium on Algorithms (ESA), pages 427–438, 2010.
+
+4. D. Belazzougui and F. Cunial. Fast label extraction in the CDAWG. In Proc. 24th International Symposium on
+
+String Processing and Information Retrieval (SPIRE), 2017. To appear.
+
+5. D. Belazzougui and F. Cunial. Representing the suﬃx tree with the CDAWG. In Proc. 28th Annual Symposium
+
+on Combinatorial Pattern Matching (CPM), LIPIcs 78, pages 7:1–7:13, 2017.
+
+6. D. Belazzougui, F. Cunial, T. Gagie, N. Prezza, and M. Raﬃnot. Composite repetition-aware data structures.
+
+In Proc. 26th Annual Symposium on Combinatorial Pattern Matching (CPM), pages 26–39, 2015.
+
+7. D. Belazzougui, T. Gagie, P. Gawrychowski, J. K¨arkk¨ainen, A. Ord´o˜nez, S. J. Puglisi, and Y. Tabei. Queries on
+
+LZ-bounded encodings. In Proc. 25th Data Compression Conference (DCC), pages 83–92, 2015.
+
+8. D. Belazzougui, T. Gagie, S. Gog, G. Manzini, and J. Sir´en. Relative FM-indexes. In Proc. 21st International
+
+Symposium on String Processing and Information Retrieval (SPIRE), LNCS 8799, pages 52–64, 2014.
+
+9. D. Belazzougui and G. Navarro. Alphabet-independent compressed text indexing. ACM Transactions on Algorithms,
+ 10(4):article 23, 2014.
+
+10. D. Belazzougui and G. Navarro. Optimal lower and upper bounds for representing sequences. ACM Transactions
+
+on Algorithms, 11(4):article 31, 2015.
+
+11. D. Belazzougui, S. J. Puglisi, and Y. Tabei. Access, rank, select in grammar-compressed strings. In Proc. 23rd
+
+Annual European Symposium on Algorithms (ESA), LNCS 9294, pages 142–154, 2015.
+
+12. M. A. Bender and M. Farach-Colton. The level ancestor problem simpliﬁed. Theoretical Computer Science,
+
+321(1):5–12, 2004.
+
+37
+
+ggrlzznobrb log(n/b)ez log(n/z)2b log  (n/b)znoggrlelog nrlog nnzlog nn / log nbnrlog nlog n / loglog nlog n / loglog n13. P. Bille, M. B. Ettienne, I. L. Gørtz, and H. W. Vildhøj. Time-space trade-oﬀs for Lempel-Ziv compressed
+indexing. In Proc. 28th Annual Symposium on Combinatorial Pattern Matching (CPM), LIPIcs 78, pages 16:1–
+16:17, 2017.
+
+14. P. Bille, I. L. Gørtz, B. Sach, and H. W. Vildhøj. Time–space trade-oﬀs for longest common extensions. Journal
+
+of Discrete Algorithms, 25:42–50, 2014.
+
+15. P. Bille, G. M. Landau, R. Raman, K. Sadakane, S. S. Rao, and O. Weimann. Random access to grammarcompressed 
+strings and trees. SIAM Journal on Computing, 44(3):513–539, 2015.
+
+16. A. Blumer, J. Blumer, D. Haussler, R. M. McConnell, and A. Ehrenfeucht. Complete inverted ﬁles for eﬃcient
+
+text retrieval and analysis. Journal of the ACM, 34(3):578–595, 1987.
+
+17. M. Burrows and D. Wheeler. A block sorting lossless data compression algorithm. Technical Report 124, Digital
+
+Equipment Corporation, 1994.
+
+18. M. Charikar, E. Lehman, D. Liu, R. Panigrahy, M. Prabhakaran, A. Sahai, and A. Shelat. The smallest grammar
+
+problem. IEEE Transactions on Information Theory, 51(7):2554–2576, 2005.
+
+19. S. Chen, E. Verbin, and W. Yu. Data structure lower bounds on random access to grammar-compressed strings.
+
+CoRR, abs/1203.1080, 2012.
+
+20. F. Claude, A. Fari˜na, M. A. Mart´ınez-Prieto, and G. Navarro. Suite of universal indexes for highly repetitive
+
+document collections. https://github.com/migumar2/uiHRDC. Accessed: 2017-06-08.
+
+21. F. Claude, A. Fari˜na, M. Mart´ınez-Prieto, and G. Navarro. Universal indexes for highly repetitive document
+
+collections. Information Systems, 61:1–23, 2016.
+
+22. F. Claude and G. Navarro. Self-indexed grammar-based compression. Fundamenta Informaticae, 111(3):313–337,
+
+2010.
+
+23. F. Claude and G. Navarro. Improved grammar-based compressed indexes. In Proc. 19th International Symposium
+
+on String Processing and Information Retrieval (SPIRE), LNCS 7608, pages 180–192, 2012.
+
+24. H. H. Do, J. Jansson, K. Sadakane, and W.-K. Sung. Fast relative Lempel-Ziv self-index for similar sequences.
+
+Theoretical Computer Science, 532:14–30, 2014.
+
+25. T. Elsayed and D. W. Oard. Modeling identity in archival collections of email: A preliminary study. In Proc. 3rd
+
+Conference on Email and Anti-Spam (CEAS), 2006.
+
+26. M. Farach-Colton, P. Ferragina, and S. Muthukrishnan. On the sorting-complexity of suﬃx tree construction.
+
+Journal of the ACM, 47(6):987–1011, 2000.
+
+27. A. Farruggia, T. Gagie, G. Navarro, S. J. Puglisi, and J. Sir´en. Relative suﬃx trees. CoRR, abs/1508.02550,
+
+2017.
+
+28. P. Ferragina and G. Manzini. Indexing compressed texts. Journal of the ACM, 52(4):552–581, 2005.
+29. P. Ferragina, G. Manzini, V. M¨akinen, and G. Navarro. Compressed representations of sequences and full-text
+
+indexes. ACM Transactions on Algorithms, 3(2):article 20, 2007.
+
+30. G. Fici. Factorizations of the Fibonacci inﬁnite word. Journal of Integer Sequences, 18(9):article 3, 2015.
+31. J. Fischer. Wee LCP. Information Processing Letters, 110(8-9):317–320, 2010.
+32. J. Fischer and V. Heun. Space-eﬃcient preprocessing schemes for range minimum queries on static arrays. SIAM
+
+Journal on Computing, 40(2):465–492, 2011.
+
+33. J. Fischer, V. M¨akinen, and G. Navarro. Faster entropy-bounded compressed suﬃx trees. Theoretical Computer
+
+Science, 410(51):5354–5364, 2009.
+
+34. M. H.-Y. Fritz, R. Leinonen, G. Cochrane, and E. Birney. Eﬃcient storage of high throughput DNA sequencing
+
+data using reference-based compression. Genome Research, pages 734–740, 2011.
+
+35. T. Gagie, P. Gawrychowski, J. K¨arkk¨ainen, Y. Nekrich, and S. J. Puglisi. A faster grammar-based self-index. In
+Proc. 6th International Conference on Language and Automata Theory and Applications (LATA), LNCS 7183,
+pages 240–251, 2012.
+
+36. T. Gagie, P Gawrychowski, J. K¨arkk¨ainen, Y. Nekrich, and S. J. Puglisi. LZ77-based self-indexing with faster
+pattern matching. In Proc. 11th Latin American Symposium on Theoretical Informatics (LATIN), pages 731–742,
+2014.
+
+37. T. Gagie, P. Gawrychowski, and S. J. Puglisi. Approximate pattern matching in LZ77-compressed texts. Journal
+
+of Discrete Algorithms, 32:64–68, 2015.
+
+38. J. K. Gallant. String Compression Algorithms. PhD thesis, Princeton University, 1982.
+39. P. Gawrychowski. Pattern matching in Lempel-Ziv compressed strings: fast, simple, and deterministic. CoRR,
+
+abs/1104.4203, 2011.
+
+40. S. Gog, T. Beller, A. Moﬀat, and M. Petri. From theory to practice: Plug and play with succinct data structures.
+
+In Proc. 13th International Symposium on Experimental Algorithms, (SEA 2014), pages 326–337, 2014.
+
+41. S. Gog and E. Ohlebusch. Compressed suﬃx trees: Eﬃcient computation and storage of LCP-values. ACM
+
+Journal of Experimental Algorithmics, 18:article 2.1, 2013.
+
+38
+
+42. Alexander Golynski, J Ian Munro, and S Srinivasa Rao. Rank/select operations on large alphabets: a tool for
+text indexing. In Proceedings of the seventeenth annual ACM-SIAM symposium on Discrete algorithm, pages
+368–373. Society for Industrial and Applied Mathematics, 2006.
+
+43. R. Gonz´alez and G. Navarro. Compressed text indexes with fast locate. In Proc. 18th Annual Symposium on
+
+Combinatorial Pattern Matching (CPM), LNCS 4580, pages 216–227, 2007.
+
+44. R. Gonz´alez, G. Navarro, and H. Ferrada. Locally compressed suﬃx arrays. ACM Journal of Experimental
+
+Algorithmics, 19(1):article 1, 2014.
+
+45. D. Gusﬁeld. Algorithms on Strings, Trees and Sequences: Computer Science and Computational Biology. Cambridge 
+University Press, 1997.
+
+46. M. R. Henzinger. Finding near-duplicate web pages: a large-scale evaluation of algorithms. In Proc. 29th Annual
+International ACM Conference on Research and Development in Information Retrieval (SIGIR), pages 284–291,
+2006.
+
+47. D. Hucke, M. Lohrey, and C. P. Reh. The smallest grammar problem revisited.
+
+In Proc. 23rd International
+
+Symposium on String Processing and Information Retrieval (SPIRE), LNCS 9954, pages 35–49, 2016.
+
+48. T. I. Longest common extensions with recompression. In Proc. 28th Annual Symposium on Combinatorial Pattern
+
+Matching (CPM), LIPIcs 78, pages 18:1–18:15, 2017.
+
+49. A. Jez. Approximation of grammar-based compression via recompression. Theoretical Computer Science, 592:115–
+
+134, 2015.
+
+50. A. Jez. A really simple approximation of smallest grammar. Theoretical Computer Science, 616:141–150, 2016.
+51. C. Kapser and M. W. Godfrey. Improved tool support for the investigation of duplication in software. In Proc.
+
+21st IEEE International Conference on Software Maintenance (ICSM), pages 305–314, 2005.
+
+52. J. K¨arkk¨ainen, P. Sanders, and S. Burkhardt. Linear work suﬃx array construction. Journal of the ACM,
+
+53(6):918–936, 2006.
+
+53. J. K¨arkk¨ainen and E. Ukkonen. Lempel-Ziv parsing and sublinear-size index structures for string matching. In
+
+Proc. 3rd South American Workshop on String Processing (WSP), pages 141–155, 1996.
+
+54. R. M. Karp and M. O. Rabin. Eﬃcient randomized pattern-matching algorithms. IBM Journal of Research and
+
+Development, 2:249–260, 1987.
+
+55. T. Kasai, G. Lee, H. Arimura, S. Arikawa, and K. Park. Linear-time longest-common-preﬁx computation in
+suﬃx arrays and its applications. In Proc. 12th Annual Symposium on Combinatorial Pattern Matching (CPM),
+LNCS 2089, pages 181–192, 2001.
+
+56. D. K. Kim, J. S. Sim, H. Park, and K. Park. Constructing suﬃx arrays in linear time. Journal of Discrete
+
+Algorithms, 3(2-4):126–142, 2005.
+
+57. P. Ko and S. Aluru. Space eﬃcient linear time construction of suﬃx arrays. Journal of Discrete Algorithms,
+
+3(2-4):143–156, 2005.
+
+58. S. Kreft and G. Navarro. On compressing and indexing repetitive sequences. Theoretical Computer Science,
+
+483:115–133, 2013.
+
+59. S. Kuruppu, S. J. Puglisi, and J. Zobel. Relative Lempel-Ziv compression of genomes for large-scale storage
+and retrieval. In Proc. 17th International Symposium on String Processing and Information Retrieval (SPIRE),
+LNCS 6393, pages 201–206, 2010.
+
+60. J. Larsson and A. Moﬀat. Oﬀ-line dictionary-based compression. Proceedings of the IEEE, 88(11):1722–1732,
+
+2000.
+
+61. A. Lempel and J. Ziv. On the complexity of ﬁnite sequences.
+
+IEEE Transactions on Information Theory,
+
+22(1):75–81, 1976.
+
+62. V. M¨akinen, D. Belazzougui, F. Cunial, and A. I. Tomescu. Genome-Scale Algorithm Design. Cambridge
+
+University Press, 2015.
+
+63. V. M¨akinen and G. Navarro. Succinct suﬃx arrays based on run-length encoding. Nordic Journal of Computing,
+
+12(1):40–66, 2005.
+
+64. V. M¨akinen, G. Navarro, J. Sir´en, and N. V¨alim¨aki. Storage and retrieval of individual genomes. In Proc. 13th
+Annual International Conference on Computational Molecular Biology (RECOMB), LNCS 5541, pages 121–137,
+2009.
+
+65. V. M¨akinen, G. Navarro, J. Sir´en, and N. V¨alim¨aki. Storage and retrieval of highly repetitive sequence collections.
+
+Journal of Computational Biology, 17(3):281–308, 2010.
+
+66. U. Manber and G. Myers. Suﬃx arrays: a new method for on-line string searches. SIAM Journal on Computing,
+
+22(5):935–948, 1993.
+
+67. S. Mantaci, A. Restivo, and M. Sciortino. Burrows-Wheeler transform and Sturmian words. Information Processing 
+Letters, 86(5):241–246, 2003.
+
+39
+
+68. G. Manzini. An analysis of the Burrows-Wheeler transform. Journal of the ACM, 48(3):407–430, 2001.
+69. E. McCreight. A space-economical suﬃx tree construction algorithm. Journal of the ACM, 23(2):262–272, 1976.
+70. J. I. Munro, G. Navarro, and Y. Nekrich. Space-eﬃcient construction of compressed indexes in deterministic
+In Proc. 28th Annual ACM-SIAM Symposium on Discrete Algorithms (SODA), pages 408–424,
+
+linear time.
+2017.
+
+71. J Ian Munro, Rajeev Raman, Venkatesh Raman, and S Srinivasa Rao. Succinct representations of permutations.
+
+In ICALP, volume 2033, pages 345–356. Springer, 2003.
+
+72. J. C. Na, H. Park, M. Crochemore, J. Holub, C. S. Iliopoulos, L. Mouchard, and K. Park. Suﬃx tree of alignment:
+An eﬃcient index for similar data. In Proc. 24th International Workshop on Combinatorial Algorithms (IWOCA),
+LNCS 8288, pages 337–348, 2013.
+
+73. J. C. Na, H. Park, S. Lee, M. Hong, T. Lecroq, L. Mouchard, and K. Park. Suﬃx array of alignment: A practical
+index for similar data. In Proc. 20th International Symposium on String Processing and Information Retrieval
+(SPIRE), LNCS 8214, pages 243–254, 2013.
+
+74. G. Navarro and V. M¨akinen. Compressed full-text indexes. ACM Computing Surveys, 39(1):article 2, 2007.
+75. G. Navarro and Y. Nekrich. Time-optimal top-k document retrieval. SIAM Journal on Computing, 46(1):89–113,
+
+2017.
+
+76. G. Navarro and A. Ord´o˜nez. Faster compressed suﬃx trees for repetitive text collections. Journal of Experimental
+
+Algorithmics, 21(1):article 1.8, 2016.
+
+77. G. Navarro and K. Sadakane. Fully-functional static and dynamic succinct trees. ACM Transactions on Algorithms,
+ 10(3):article 16, 2014.
+
+78. Gonzalo Navarro. Compact Data Structures – A practical approach. Cambridge University Press, 2016.
+79. T. Nishimoto, T. I, S. Inenaga, H. Bannai, and M. Takeda. Dynamic index, LZ factorization, and LCE queries
+
+in compressed space. CoRR, abs/1504.06954, 2015.
+
+80. T. Nishimoto, T. I, S. Inenaga, H. Bannai, and M. Takeda. Fully dynamic data structure for LCE queries in
+compressed space. In Proc. 41st International Symposium on Mathematical Foundations of Computer Science
+(MFCS), page article 72, 2016.
+
+81. E. Ohlebusch. Bioinformatics Algorithms: Sequence Analysis, Genome Rearrangements, and Phylogenetic Reconstruction.
+ Oldenbusch Verlag, 2013.
+
+82. A. Policriti and N. Prezza. Computing LZ77 in run-compressed space. In Proc. 26th Data Compression Conference
+
+(DCC), pages 23–32, 2016.
+
+83. N. Prezza. r-index: the run-length BWT index. https://github.com/nicolaprezza/r-index. Accessed: 2017-06-08.
+84. N. Prezza. Compressed Computation for Text Indexing. PhD thesis, University of Udine, 2016.
+85. M. Przeworski, R. R. Hudson, and A. Di Rienzo. Adjusting the focus on human variation. Trends in Genetics,
+
+16(7):296–302, 2000.
+
+86. M. Raﬃnot.
+
+Locate-cdawg: replacing sampling by CDAWG localisation in BWT indexing approaches.
+
+https://github.com/mathieuraﬃnot/locate-cdawg. Accessed: 2017-06-08.
+
+87. L. M. S. Russo, G. Navarro, and A. Oliveira. Fully-compressed suﬃx trees. ACM Transactions on Algorithms,
+
+7(4):article 53, 2011.
+
+88. W. Rytter. Application of Lempel-Ziv factorization to the approximation of grammar-based compression. Theoretical 
+Computer Science, 302(1-3):211–222, 2003.
+
+89. K. Sadakane. Compressed suﬃx trees with full functionality. Theory of Computing Systems, 41(4):589–607, 2007.
+90. J. Sir´en. Convenient repository for/fork of the RLCSA library. https://github.com/adamnovak/rlcsa. Accessed:
+
+2017-06-08.
+
+91. J. Sir´en, N. V¨alim¨aki, V. M¨akinen, and G. Navarro. Run-length compressed indexes are superior for highly
+repetitive sequence collections. In Proc. 15th International Symposium on String Processing and Information
+Retrieval (SPIRE), LNCS 5280, pages 164–175, 2008.
+
+92. Z. D. Sthephens, S. Y. Lee, F. Faghri, R. H. Campbell, Z. Chenxiang, M. J. Efron, R. Iyer, S. Sinha, and G. E.
+
+Robinson. Big data: Astronomical or genomical? PLoS Biology, 17(7):e1002195, 2015.
+
+93. J. A. Storer and T. G. Szymanski. Data compression via textual substitution. Journal of the ACM, 29(4):928–951,
+
+1982.
+
+94. T. Takagi, K. Goto, Y. Fujishige, S. Inenaga, and H. Arimura. Linear-size CDAWG: New repetition-aware
+
+indexing and grammar compression. CoRR, abs/1705.09779, 2017.
+
+95. K. Tao, F. Abel, C. Hauﬀ, G.-J. Houben, and U. Gadiraju. Groundhog day: Near-duplicate detection on twitter.
+
+In Proc. 22nd International World Wide Web Conference (WWW), pages 1273–1284, 2013.
+
+96. E. Ukkonen. On-line construction of suﬃx trees. Algorithmica, 14(3):249–260, 1995.
+97. E. Verbin and W. Yu. Data structure lower bounds on random access to grammar-compressed strings. In Proc.
+
+24th Annual Symposium on Combinatorial Pattern Matching (CPM), LNCS 7922, pages 247–258, 2013.
+
+98. P. Weiner. Linear Pattern Matching Algorithms. In Proc. 14th IEEE Symp. on Switching and Automata Theory
+
+(FOCS), pages 1–11, 1973.
+
+40
+
+A Failure in the Analysis based on RePair and Relatives
+
+We show that the proofs that RePair or other related compressors reach a grammar of size
+O(r log(n/r)) in the literature [43, 44] are not correct. The mistake is propagated in other papers
+[33, 1].
+
+The root of their problem is the possibly inconsistent parsing of equal runs, that is, the same
+text may be parsed into distinct nonterminals, with the inconsistencies progressively growing from
+the run breaks. Locally consistent parsing avoids this problem. Although the run breaks do grow
+from one round to the next, locally consistent parsing reduces the text from n to (3/4)n symbols
+in each round, parsing the runs in the same way (except for a few symbols near the ends). Thus
+the text decreases fast compared to the growth in the number of runs.
+
+Note that we are not proving that those compressors can actually produce a grammar of size
+ω(r log(n/r)) on some particular string family; we only show that the proofs in the literature do not
+ensure that they always produce a grammar of size O(r log(n/r)). In fact, our experiments show
+that both are rather competitive (especially RePair), so it is possible that they actually reach this
+space bound and the right proof is yet to be found.
+
+A.1 RePair
+
+The argument used to claim that RePair compression reached O(r log(n/r)) space was simple [44].
+As we show in Lemma 16 (specialized with Lemma 18), as we traverse the permutation π = LF ,
+consecutive pairs of symbols can only change when they fall in diﬀerent runs; therefore there are
+only r diﬀerent pairs. Since RePair iteratively replaces the most frequent pair by a nonterminal [60],
+the chosen pair must appear at least n/r times. Thus the reduced text is of size n−n/r = n(1−1/r).
+Since collapsing a pair of consecutive symbols into a nonterminal does not create new runs, we can
+repeat this process on the reduced text, where there are still r diﬀerent pairs. After k iterations,
+the grammar is of size 2k and the text is of size n(1 − 1/r)k, and the result follows.
+
+To prepare for the next iteration, they do as follows. When they replace a pair ab by a nonterminal 
+A, they replace a by A and b by a hole, which we write “ ”. Then they remove all the
+positions in π that fall into holes, that is, if W [π(i)] = , they replace π(i) ← π(π(i)), as many
+times as necessary. Finally, holes are removed and the permutation is mapped to the new sequence.
+Then they claim that the number of places where W [i..i + 1] (cid:54)= W [π(i)..π(i) + 1] is still r.
+
+However, this is not so. Let us regard the chains [33] in W , which are contiguous sections of the
+cycle of π where W [i..i + 1] = W [π(i)..π(i) + 1]. The chains are also r, since we ﬁnd the r run breaks
+in another order. Consider a chain where the pair, ab, always falls at the end of runs, alternatively
+followed by c or by d. We write this as ab|c and ab|d, using the bar to denote run breaks. Now
+assume that the current step of RePair chooses the pair bd because it is globally the most frequent.
+Then every b|d will be replaced by B|
+, and the chain of abs will be broken into many chains of
+length 1, since ab is now followed by aB and aB is followed by ab. Since each run end may break
+a chain once, we have 2r chains (and runs) after one RePair step. Eﬀectively, we are adding a new
+run break preceding each existing one: ab|c becomes a|b|c and a|b|d becomes a|B|
+
+.
+
+after k replacements becomes n(cid:81)k
+
+If the runs grow by r at each iteration, the analytical result does not follow. The size of W
+i=1(1 − 1/(ir)). This is a function that does tend to zero, but
+very slowly. In particular, after k = c · r replacements, and assuming only p · r of the runs grow
+(i.e., the factors are (1 − 1/(r(1 + (i − 1))p), the product is
+Γ (cr+1/p)Γ ((r−1)/(rp)) , which tends to n
+
+nΓ (cr+(r−1)/(rp))
+
+41
+
+as r tends to inﬁnity for any constants c and p. That is, the text has not been signiﬁcantly reduced
+after adding O(r) rules.
+Even if we avoid replacing pairs that cross run breaks, there are still problems. Consider a
+substring W [i..i + 2] = abc, where we form the rule A → ab and replace the string by A c. Now
+let W [j..j + 1] = |bc start a run (so it does not have to be preceded by a), and that π(j) = i + 1.
+Now, since i + 1 is a hole, we will replace π(j) ← π(i + 1), which breaks the chain at the edge
+j → i + 1. We have eﬀectively created a new run starting at W [j + 1], |b|c, and the number of runs
+could increase by r in this way.
+
+RePair can be thought of as choosing the longest chain at each step, and as such it might insist
+on a long chain that is aﬀected by all the r run breaks while reducing the text size only by n/r.
+The next method avoids this (somewhat pathological) worst-case by processing all the chains at
+each iteration, so that the r run breaks are spread across all the chains, and the text size is divided
+by a constant factor at each round. Still, their parsing is even less consistent and the number of
+runs may grow faster.
+
+A.2 Following π
+
+They [44] also propose another method, whose proof is also subtly incorrect. They follow the cycle
+of π = LF (or its inverse, Ψ ). For each chain of equal pairs ab, they create the rule A → ab and
+replace every ab by A along the chain. If some earlier replacement in the cycle changed some a
+to
+or some b to a nonterminal B, they skip that pair. When the chain ends (i.e., the next pair
+was not ab before the cycle of changes started), they switch to the new chain (and pair). This also
+produces only r pairs in the ﬁrst round, and reduces the text to at most 2n/3, so after several
+rounds, a grammar of size O(r log(n/r)) would be obtained.
+The problem is that the number of runs may grow fast from one iteration to the next, due to
+inconsistent parsing. Consider that we are following a chain, replacing the pair B → ba, until we
+hit a run break and start a new chain for the pair C → cb. At some point, this new chain may reach
+a substring cba that was converted to cB along the previous chain. Actually, this ba must have
+been the ﬁrst in the chain of ba, because otherwise the b must come from the previous element in
+the chain of ba. The chain for cb follows for some more time, without replacing cb by C because
+it collides with the B. Thus this chain has been cut into two, with pairs C and cB.
+After ﬁnishing with this chain, we enter a new chain D → dc. At some point, this chain may
+ﬁnd a dcb that was changed to dC (this is the beginning of the chain of cb, as explained before),
+and thus it cannot change the pair. For some time, all the pairs dc we ﬁnd overlap those cb of the
+previous chain, until we reach the point where the chain of cb “met” the chain of ba. Since those
+cb were not changed to C , we can now again convert dc to D . This chain has then been cut into
+three, with pairs D , dC, and then again D .
+Now we may start a new chain E → ed, which after some time touches an edc that was converted
+to eD , follows besides the chain of dc and reaches the point where dc was not converted to D
+and thus it starts generating the pairs E again. Then it reaches the point where dc was again
+converted to D and thus it produces pairs eD again. Thus the chain for ed was split into four.
+Note, however, that in the process we removed one of the three chains created by dc, since we
+replaced all those edC by E C . So we have created 2 chains from cb, 2 from dc, and 4 from ed.
+A new replacement F → f e will create 5 chains and remove one from ed, so we have 2, 2, 3, 5. Yet
+a new replacement G → gf will create 6 chains and remove 2 from f e, so we have 2, 2, 3, 3, 6.
+
+42
+
+The number of new chains (and hence runs) may then grow quadratically, thus at the end of
+
+the round we may have Θ(r2) runs and at least n/2 symbols. The sum is optimized for k = log n
+rounds, where the size of the grammar is Θ(n1−
+
+2 log r+1 ), which even for r = 2 is Θ(n2/3).
+
+1
+
+1+2 log r
+
+Note, again, that we are not proving that, for a concrete family of strings, this method does
+not produce a grammar of size O(r log(n/r)). We are just exposing a failure of the proof in the
+literature [44], where it is said that the runs do not increase without proving it, as a consistent
+parsing of the runs is assumed. Indeed, two runs, |abcdef|x and |abcdef g|, where the ﬁrst leads to
+the second by π, may be parsed in completely diﬀerent forms, aBDF and ACEg, if the chains we
+follow are F → f x, E → ef , D → de, C → cd, B → bc, and A → ab.
+
+43
+
+

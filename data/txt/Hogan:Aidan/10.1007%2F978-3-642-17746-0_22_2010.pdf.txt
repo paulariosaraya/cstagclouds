@@ -1,0 +1,1523 @@
+SAOR: Template Rule Optimisations for Distributed
+
+Reasoning over 1 Billion Linked Data Triples(cid:2)
+
+Aidan Hogan1, Jeff Z. Pan2, Axel Polleres1, and Stefan Decker1
+
+1 Digital Enterprise Research Institute, National University of Ireland, Galway
+
+{firstname.lastname}@deri.org
+
+2 Dpt. of Computing Science, University of Aberdeen
+
+jeff.z.pan@abdn.ac.uk
+
+Abstract. In this paper, we discuss optimisations of rule-based materialisation
+approaches for reasoning over large static RDF datasets. We generalise and reformalise 
+what we call the “partial-indexing” approach to scalable rule-based
+materialisation: the approach is based on a separation of terminological data,
+which has been shown in previous and related works to enable highly scalable
+and distributable reasoning for speciﬁc rulesets; in so doing, we provide some
+completeness propositions with respect to semi-na¨ıve evaluation. We then show
+how related work on template rules – T-Box-speciﬁc dynamic rulesets created
+by binding the terminological patterns in the static ruleset – can be incorporated
+and optimised for the partial-indexing approach. We evaluate our methods using
+LUBM(10) for RDFS, pD* (OWL Horst) and OWL 2 RL, and thereafter demonstrate 
+pragmatic distributed reasoning over 1.12 billion Linked Data statements
+for a subset of OWL 2 RL/RDF rules we argue to be suitable for Web reasoning.
+
+1 Introduction
+
+More and more structured data is being published on the Web in conformance with the
+Resource Description Framework (RDF) for disseminating machine-readable information,
+ forming what is often referred to as the “Web of Data”. This data is no longer
+purely academic: in particular, the Linked Data community – by promoting pragmatic
+best-practices and applications – has overseen RDF exports from, for example, corporate 
+bodies (e.g., BBC, New York Times, Freebase), community driven efforts (e.g.,
+Wikipedia, GeoNames), the biomedical domain (e.g., DrugBank, Linked Clinical Tri-
+als) and governmental bodies (e.g., data.gov, data.gov.uk). At a conservative estimate,
+there now exists tens of billions of RDF statements on the Web.
+
+Sitting atop RDF are the RDF Schema (RDFS) and Web Ontology Language (OWL)
+standards. Primarily, RDFS and OWL allow for deﬁning the relationships between the
+classes and properties used to organise and describe entities, providing a declarative
+and extensible domain of discourse through use of rich formal semantics. One could
+thereafter view the Web of Data as a massive, heterogeneous, collaboratively edited
+
+(cid:2) The work presented in this paper has been funded in part by Science Foundation Ireland under
+Grant No. SFI/08/CE/I1380 (Lion-2), by the EU MOST project, the EPSRC LITRO project,
+and by an IRCSET Scholarship.
+
+P.F. Patel-Schneider et al. (Eds.): ISWC 2010, Part I, LNCS 6496, pp. 337–353, 2010.
+c(cid:2) Springer-Verlag Berlin Heidelberg 2010
+
+338
+
+A. Hogan et al.
+
+knowledge-base amenable for reasoning: however, the prospect of applying reasoning
+over (even subsets of) the Web of Data raises unique challenges, the most obvious of
+which are the need for scale, and tolerance to noisy, conﬂicting and impudent data [6].
+Inspired by requirements for the Semantic Web Search Engine (SWSE) project [9]
+– which aims to offer search and browsing over Linked Data – in previous work we investigated 
+pragmatic and scalable reasoning for Web data through work on the Scalable
+Authoritative OWL Reasoner (SAOR) [7,8]; we discussed the formulation and suitability 
+of a set of rules inspired by pD* [16] for materialisation over Web data. We gave
+particular focus to scalability and Web tolerance showing that by abandoning completeness,
+ materialisation over a diverse Web dataset – in the order of a billion statements
+– is entirely feasible wrt. a signiﬁcant fragment of OWL semantics. From the scalability 
+perspective, we introduced a partial-indexing approach based on a separation of
+terminological data from assertional data in our rule execution model: terminological
+data – the most frequently accessed segment of the knowledge base for reasoning which
+in our scenario represents only a small fraction of the overall data [8] – is stored and
+indexed in-memory for fast access, whereas the bulk of (assertional) data is processed
+by ﬁle-scans. Related approaches have since appeared in the literature which use a separation 
+of terminological data for applying distributed RDFS and pD* reasoning over
+datasets containing hundreds of millions, billions and hundreds of billions of statements 
+[19,18,17]. However, each of these approaches has discussed completeness and
+implementation/optimisation based on the speciﬁc ruleset at hand.
+
+In this paper, we reformulate the partial-indexing approach – generalising to arbitrary 
+rulesets – and discuss when it is (i) complete with respect to standard rule closure;
+and (ii) appropriate and scalable. We then introduce generic optimisations based on
+“template rules” – where terminological data is bound by the rules prior to accessing
+the A-Box – and provide some initial evaluation over a small LUBM dataset for RDFS,
+pD*, and OWL 2 RL/RDF. Thereafter, we look to apply our optimisations for scalable
+and distributed Linked Data reasoning, initially reintroducing our authoritative reasoning 
+algorithm which incorporates provenance, detailing distribution of our approach,
+and then providing evaluation for reasoning over 1.12b Web triples.
+
+2 Preliminaries
+
+Before we continue, we brieﬂy introduce some concepts prevalent throughout the paper.
+We use notation and nomenclature as is popular in the literature (cf. [4,8]). Herein, we
+denote inﬁnite sets by S and corresponding ﬁnite subsets by S.
+
+2.1 RDF and Rules
+RDF Constant. Given the set of URI references U, the set of blank nodes B, and the
+set of literals L, the set of RDF constants is denoted by C := U ∪ B ∪ L.
+RDF Triple. A triple t := (s, p, o) ∈ (U∪B)×U×C is called an RDF triple, where s is
+called subject, p predicate, and o object. A triple t := (s, p, o) ∈ G, G := C×C×C is
+called a generalised triple, which allows any RDF constant in any triple position: hence
+
+SAOR: Template Rule Optimisations for Distributed Reasoning
+
+339
+forth, we assume generalised triples [2]. We call a ﬁnite set of triples G ⊂ G a graph.
+(For brevity, we sometimes use r: for the RDFS namespace, o: for OWL namespace,
+and f: for the well-known FOAF namespace; we use ‘a’ as a shortcut for rdf:type.)
+
+Triple Pattern, Basic Graph Pattern. A triple pattern is a generalised triple where variables 
+from the set V are allowed; i.e.: tv := (sv, pv, ov) ∈ GV, GV := (C∪V)×(C∪
+V) × (C ∪ V). We call a set (to be read as conjunction) of triple patterns GV ⊂ GV a
+basic graph pattern. We denote the set of variables in graph pattern GV by V(GV).
+Variable Bindings. Let M be the set of endomorphic variable binding mappings V ∪
+C → V ∪ C which map every constant c ∈ C to itself and every variable v ∈ V to
+an element of the set C ∪ V. A triple t is a binding of a triple pattern tv := (sv, pv,
+ov) iff there exists μ ∈ M, such that t = μ(tv) = (μ(sv), μ(pv), μ(ov)). A graph
+G is a binding of a graph pattern GV iff there exists a mapping μ ∈ M such that
+(cid:2)
+tv∈GV μ(tv) = G; we use the shorthand μ(GV) = G. We use M(GV,G) := {μ |
+μ(GV) ⊆ G, μ(v) = v if v /∈ V(GV)} to denote the set of variable binding mappings
+for graph pattern GV in graph G which map variables outside GV to themselves.
+Inference Rule. We deﬁne an inference rule r as the pair (Anter,Conr), where the
+antecedent (or body) Anter ⊂ GV and the consequent (or head) Conr ⊂ GV are basic
+graph patterns such that V(Conr) ⊆ V(Anter) (range restricted) – rules with empty
+antecedents model axiomatic triples. We write inference rules as Anter ⇒ Conr.
+
+(cid:2)
+
+(cid:2)
+
+Rule Application and Standard Closure. A rule application is the immediate consequences 
+Tr(G) :=
+μ∈M(Anter ,G)(μ(Conr) \ μ(Anter)) of a rule r on a graph G;
+accordingly, for a ruleset R, TR(G) :=
+r∈R Tr(G). Now, let Gi+1 := Gi ∪ TR(Gi)
+and G0 := G; the exhaustive application of the TR operator on a graph G is then the
+least ﬁxpoint (the smallest value for n) such that Gn = TR(Gn). We call Gn the closure
+of G wrt. ruleset R, denoted as ClR(G) , or succinctly G where the ruleset is obvious.
+The above closure takes a graph and a ruleset and recursively applies the rules over
+the union of the original graph and the inferences until a ﬁxpoint. Usually, this would
+consist of indexing all input and inferred triples; however, the cost of indexing and performing 
+query-processing over large graphs can become prohibitively expensive. Thus,
+in [7] we originally proposed an alternate method based on a separation of terminological 
+data, which we now generalise and discuss.
+
+3 Partial Indexing Approach: Separating Terminological Data
+
+In the ﬁeld of Logic Programming, the notion of a ‘linear program’ refers loosely to
+a ruleset where only one pattern in each rule is recursive [12]. Our partial indexing
+approach is optimised for linear rules, where the non-recursive segment of the data is
+identiﬁed, separated and prepared, and thereafter each recursive pattern can then be
+bound via a triple-by-triple stream: we cater for non-linear rules, but as the number
+of recursive rules, the amount of recursion, and the amount of recursive data involved
+increases, our approach performs worse than the “full-indexing” approach.
+
+340
+
+A. Hogan et al.
+
+Speciﬁcally regarding RDFS and OWL, the terminological segment of the data
+presents itself as relatively small and ‘non-recursive’ (or at least, mostly only recursive 
+within itself), which can be leveraged for partial indexing. Herein, we deﬁne our
+notion of RDF(S)/OWL terminological data. (To generalise the following, the reader
+can consider terminological data as the RDFS/OWL archetype for any non-recursive
+and sufﬁciently small element of the data commonly required during rule application.)
+
+Meta-class. We consider a meta-class as a class speciﬁcally of classes or properties;
+i.e., the members of a meta-class are themselves either classes or properties. Herein, we
+restrict our notion of meta-classes to the set deﬁned in RDF(S) and OWL speciﬁcations,
+where examples include rdf:Property, rdfs:Class, owl:Restriction, owl:-
+DatatypeProperty, owl:TransitiveProperty, etc.; rdfs:Resource, rdfs:-
+Literal, e.g., are not meta-classes.
+
+Meta-property. A meta-property is one which has a meta-class as its domain; again, we
+restrict our notion of meta-properties to the set deﬁned in RDF(S) and OWL speciﬁcations,
+ where examples include rdfs:domain, rdfs:subClassOf, owl:hasKey,
+owl:inverseOf, owl:oneOf, owl:onProperty, owl:unionOf, etc.; rdf:type,
+owl:sameAs, rdfs:label, e.g., do not have a meta-class as domain.
+Terminological Triple. We deﬁne the set of terminological triples T ⊂ G as the union
+of (i) triples with rdf:type as predicate and a meta-class as object; (ii) triples with
+a meta-property as predicate; (iii) triples forming a valid RDF list whose head is the
+object of a meta-property (e.g., a list used for owl:unionOf, etc.).
+
+Terminological/Assertional Pattern. We refer to a terminological -triple/-graph pattern
+as one whose instance can only be a terminological triple or, resp., a set thereof. An
+assertional pattern is any pattern which is not terminological.
+Given the above notions of terminological data/patterns, we now deﬁne a T -split
+
+rτ = ∅,AnteG
+| AnteT
+
+rτ
+
+rτ
+
+as the triple (AnteT
+
+rτ ,Con) where AnteT
+:= Anter \ AnteT
+
+rτ
+
+inference rule where part of the rule body is strictly matched by terminological data.
+Deﬁnition 1. T -split inference rule: Given a rule r := (Anter,Conr), we deﬁne
+a T -split rule rτ
+rτ ,AnteG
+rτ is the set of
+terminological patterns in Anter, and AnteG
+rτ . We denote the
+set of all T -split rules by Rτ , and the mapping of a rule to its T -split version as
+τ : R → Rτ ; r (cid:8)→ rτ
+|
+. We additionally give the convenient sets R∅ := {rτ
+AnteT
+rτ = ∅}, R∅G :=
+(cid:10)= ∅},
+(cid:10)= ∅,AnteG
+rτ = ∅,AnteG
+{rτ
+RG := RTG ∪ R∅G and RT := RT∅ ∪ RTG as the set of all T -split rules with an
+empty antecedent, only terminological patterns, only assertional patterns, both types
+of patterns, some terminological patterns, and some assertional pattern respectively,
+where Rτ = R∅ ∪ RT∅ ∪ R∅G ∪ RTG = R∅ ∪ RT ∪ RG. We also give the sets
+RG1 := {rτ ∈ RG : |AnteG
+rτ | > 1}, denoting
+the set of linear and non-linear rules respectively. Given a T -split ruleset Rτ , herein
+we may use, e.g., RG to denote Rτ ∩ RG.
+
+rτ = ∅}, RT∅ := {rτ | AnteT
+(cid:10)= ∅}, RTG := {rτ
+
+rτ | = 1}, RGn := {rτ ∈ RG : |AnteG
+
+rτ (cid:10)= ∅,AnteG
+| AnteT
+
+rτ
+
+SAOR: Template Rule Optimisations for Distributed Reasoning
+
+341
+Example 1. For the rule r := (?c1,r:subClassOf,?c2) ∧ (?x,a,?c1) ⇒ (?x,a,?c2),
+AnteT := {(?c1,r:subClassOf,?c2)} and AnteG := {(?x,a,?c1)}. Underlining
+AnteT
+, we write τ(r) := rτ:= (?c1,r:subClassOf,?c2)∧ (?x,a,?c1)⇒ (?x,a,?c2).
+We then deﬁne our T-Box as the set of terminological triples in a given graph which are
+required by the terminological patterns of a given ruleset.
+Deﬁnition 2. T-Box/A-Box: Given a graph G and a T -split ruleset Rτ , let RT :=
+Rτ ∩ RT represent the subset of rules in Rτ which require terminological data; the
+T-Box of G wrt. Rτ is then T(G,Rτ ) :=
+μ∈M({tv},G) μ(tv),
+representing the subset of terminological triples in G which satisfy a terminological
+rτ ) in Rτ ; where ruleset and graph are obvious, we
+pattern of a rule antecedent (AnteT
+may abbreviate T(G,Rτ ) to simply T . Our A-Box is synonymous with G: i.e., we also
+consider our T-Box as part of our A-Box in a form of unidirectional meta-modelling.
+Given the notion of a T -split rule and our T-Box, we can now deﬁne how T -split rules
+are applied, and how T -split closure is achieved wrt. a static T-Box.
+Deﬁnition 3. T -split rule application and closure. We deﬁne a T -split rule application 
+for a T -split rule rτ
+Trτ (T ,G) :=
+
+wrt. a graph G to be:
+
+(μ0 ◦ μ1)(Conrτ )
+
+tv∈AnteT
+
+rτ ∈RT
+
+(1)
+
+(cid:3)
+
+(cid:3)
+
+(cid:2)
+
+(cid:2)
+
+(cid:2)
+
+τ
+
+r
+
+μ0∈M(AnteT
+
+τ ,T )
+
+μ1∈M(μ0(AnteG
+
+τ ),G)
+
+r
+
+r
+
+0 := G ∪ T τ ∪ Ax and Gτ
+
+i ∪ TRG(T τ ,Gτ
+n). We call Gτ
+
+i+1 := Gτ
+n = TRG(T τ ,Gτ
+
+here formalising the notion that the terminological patterns of the rule are strictly instantiated 
+from a separate T-Box T . Again, for a T -split ruleset Rτ , TRτ (T ,G) :=
+(cid:2)
+rτ ∈Rτ Trτ (T ,G). Now, let Ax denote the set of axiomatic triples given by Rτ (the
+same set as for R), and T0 := T(G ∪ Ax,Rτ ) be our initial T-Box derived from G and
+axiomatic triples, and Ti+1 := Ti ∪ T(TRT∅(Ti,∅),Rτ ); we deﬁne our closed T-Box
+as Tn for the least value of n such that Tn = Tn ∪ TRT∅(Tn,∅), denoted T τ
+, representing 
+the closure of our initial T-Box wrt. rules requiring only terminological knowledge.
+Finally, let Gτ
+i ); we now deﬁne the
+exhaustive application of the TRτ operator on a graph G wrt. a static T-Box T as being
+n the T -split closure of
+upto the least ﬁxpoint such that Gτ
+G with respect to the T -split ruleset Rτ , denoted as ClRτ (T ,G) or simply Gτ
+The T -split closure algorithm consists of two main steps: (i) deriving the closed T-Box
+from axiomatic triples, the input graph, and recursively applied RT∅
+rules; (ii) applying 
+‘A-Box’ reasoning for all triples wrt. the RG rules and the static T-Box. We now
+give some propositions relating the T -split closure with the standard rule application
+closure described in the preliminaries; ﬁrstly, we must give an auxiliary proposition
+which demonstrates how mappings for sub-graphs-patterns can be combined to give
+the mappings for the entire graph pattern, which relates to the T -split rule application.
+Proposition 1. For any graph G and graph pattern GV := GV
+b , it holds that
+M(GV,G) = {μb ◦ μa | μa ∈ M(GV
+b ),G)}.
+Proof. Firstly, μb ◦ μa ∈ M since μa and μb are endomorphic. By deﬁnition, (μb ◦
+μa)(c) = c for c ∈ C. Next, we need to show that (μa ◦ μb)(v) = v if v /∈ V(GV):
+
+a ,G), μb ∈ M(μa(GV
+
+a ∪ GV
+
+.
+
+a ) = μ(GV
+
+rτ ∪AnteG
+
+0 ⊆ Gτ
+
+A. Hogan et al.
+
+a and μb(v) = v if v /∈ μa(GV
+
+b ) = μ(GV
+
+b ), and hence the proposition holds.
+
+b )) ⊆ V(GV
+
+b ) and V(GV) = V(GV
+
+342
+since by deﬁnition μa(v) = v if v /∈ GV
+b ), and since
+b ), then (μb ◦ μa)(v) = v if v /∈
+a ) ∪ V(GV
+V(μa(GV
+V(GV). By deﬁnition, μa(GV
+a )) = ∅, and μa(GV
+a ) ⊆ G and thus we have V(μa(GV
+a ) =
+b ) ⊆ G, and so (μb◦ μa)(GV
+a )∪
+a ); again by deﬁnition we have (μb◦ μa)(GV
+(μb◦ μa)(GV
+(μb ◦ μa)(GV
+b ) = (μb ◦ μa)(GV) ⊆ G. We now have μb ◦ μa ∈
+a ∪ GV
+b ) = (μb ◦ μa)(GV
+M(GV,G) for every μa ∈ M(GV
+b ),G), and need to show that
+a ,G), μb ∈ M(μa(GV
+for every μ ∈ M(GV,G), there exists a (μb ◦ μa) such that (μb ◦ μa)(GV) = μ(GV);
+by deﬁnition, we know that there exists a μa such that μa(GV
+a ) for any μ
+as deﬁned, and that for every such μa there exists a μb such that (μb ◦ μa)(GV
+b ) =
+(μ ◦ μa)(GV
+(cid:14)(cid:15)
+Theorem 1. Soundness: For any given ruleset R ⊂ R, its T -split version Rτ :=
+τ(R), and any graph G, it holds that Gτ ⊆ G.
+Proof. Clearly, Ax gives the same set of triples for Rτ and R, and thus T0 ⊆ G since
+T(G ∪ Ax,Rτ ) ⊆ G ∪ Ax ⊆ G. From Proposition 1, it follows that M(Anter,G) =
+rτ ,G) = {μ0◦μ1| μ0 ∈ M(AnteT
+rτ ),G)};
+M(AnteT
+we can then show that Tr(G) = Trτ (G,G) by replacing T with G in Equation 1, from
+which follows TR(G) = TRτ (G,G). Given that TRτ
+a ⊆ Rτ ,
+and TRτ (Ga,Gb) ⊆ TRτ (G,G) if Ga ⊆ G and Gb ⊆ G – i.e., that our rule applications
+are monotonic – we can show by induction that T τ ⊆ G: given T0 ⊆ G from above, we
+can say that Ti+1 ⊆ G iff Ti ⊆ G since T(TRT∅(Ti,∅)) ⊆ TRT∅(Ti,Ti) ⊆ TR(Ti) ⊆
+i ) ⊆ G, we
+G. Now, clearly Gτ
+can say that if Gτ
+(cid:14)(cid:15)
+Theorem 2. Conditional Completeness: If T τ = T(G τ ,Rτ ), then Gτ = G.
+Proof. First, TRτ (T(G,Rτ ),G) = TRτ (G,G) since by deﬁnition T(G,Rτ ) only removes 
+triples from G that cannot be bound by terminological patterns in Rτ . Given the
+criteria Gτ = Gτ ∪ TRG(T τ ,Gτ ) – or, rephrasing, TRG(T τ ,Gτ ) ⊆ Gτ
+– we ﬁrst know
+that Ax ∪ T τ ∪ G = Gτ
+. If T τ =
+T(Gτ ,Rτ ), then TRτ (T τ ,Gτ ) = TRτ (T(Gτ ,Rτ ),Gτ ) = TRτ (Gτ ,Gτ ) = TR(Gτ ),
+which gives G0 ⊆ Gτ ⊆ G: i.e., Gτ
+is known to be the partial closure of G. Given the
+ﬁxpoint condition G = G ∪ TR(G), then Gτ
+(cid:14)(cid:15)
+Proposition 2. A triple t ∈ T(Gτ ,Rτ ) \ T τ
+inference for a rule in RG.
+
+must be the ﬁxpoint: Gτ = G.
+can only be produced for Gτ
+
+rτ ,G), μ1∈ M(μ0(AnteG
+(G,G) ⊆ TRτ (G,G) if Rτ
+
+0 ⊆ G, and since TRG(T τ ,Gτ
+i ⊆ G, then Gτ
+
+i ) ⊆ TRτ (Gτ
+i+1 ⊆ G; by induction, Gτ ⊆ G.
+
+. Thus, TRτ (T τ ,Gτ ) = TRG(T τ ,Gτ ) ⊆ Gτ
+
+a
+
+i ,Gτ
+
+i ) = TR(Gτ
+
+through an
+
+rules over T0 are added to the closed T-Box T τ
+after deriving T τ
+
+Proof. Any T-Box triples in the original graph, or T-Box triples produced by the ‘clorules 
+are added to the initial T-Box T0. Any T-Box triples produced by
+sure’ of R∅
+the closure of RT∅
+. Since Rτ :=
+R∅ ∪ RT∅ ∪ RG, the only new triples – terminological or not – that can arise in the
+computation of Gτ
+(cid:14)(cid:15)
+We have shown that for an arbitrary ruleset and graph, the T -split closure is sound
+wrt. the standard closure, and that if no T-Box triples are produced by rules requiring
+assertional knowledge, then T -split closure is complete wrt. the standard closure. So,
+when are T-Box triples produced by RG rules? Analysis must be applied per ruleset,
+
+are from rules in RG.
+
+SAOR: Template Rule Optimisations for Distributed Reasoning
+
+343
+
+Algorithm 1. Partial indexing approach for T -split closure
+Required: R, G
+Rτ := τ (R); T0 := T(Ax, Rτ ); n := 0;
+for t ∈ G do T0 := T0 ∪ T({t}, Rτ ) ;
+while Tn+1 (cid:5)= Tn do Tn+1 := Tn ∪ T(TRT∅ (Ti, ∅), Rτ ); n++ ;
+T τ := Tn+1; Gτ := Gτ
+for tI ∈ Gτ
+0 do
+GI
+0 := ∅; GI
+n (cid:5)= GI
+while GI
+for t ∈ GI
+
+0 := G ∪ T τ ∪ Ax; A := ∅;
+
+1 := {tI}; n := 1;
+
+n−1 do
+n \ GI
+GI
+n+1 := GI
+for r ∈ RGn
+
+n−1 do
+n ∪ TRG1 (T τ , {t});
+
+do
+
+for tv ∈ AnteG
+GI
+n+1 := GI
+
+n+1 ∪ Tr (T τ , A);
+
+if ∃μ ∈ M : μ(tv ) = t then A := A ∪ {t} ;
+
+r do
+
+/* get t-split rules & ax. T-Box triples */
+/* SCAN 1: extract T-Box from main data */
+/* do T-Box reasoning */
+/* initialise A-Box structures */
+/* SCAN 2: A-Box reasoning over all data */
+/* initialise set to hold inferences from tI */
+/* while we ﬁnd new triples to reason over */
+/* scan new triples */
+/* do all ‘no A-Box join’ rules for t */
+/* for each ‘A-Box join’ rule */
+/* for each assertional pattern */
+/* index t if needed */
+
+/* apply ‘A-Box join’ rule over index */
+
+/* recurse */
+/* write set of recursive inferences for tI to output */
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+
+13
+
+14
+
+15
+
+n++;
+
+Gτ := Gτ ∪ GI
+n;
+
+Return : Gτ
+
+but for RDFS, pD* and OWL 2 RL/RDF, we informally posit that by inspection, one
+can show that such a condition can only arise through so called non-standard usage [8]:
+the assertion of terminological triples which use meta-classes and meta-properties in
+positions other than the object of rdf:type triples or predicate position respectively –
+e.g., my:subPropertyOf rdfs:subPropertyOf rdfs:subPropertyOf .
+The T -split approach can be implemented through partial indexing using two scans
+of the data: the ﬁrst separates and builds the T-Box and the second reasons over the
+A-Box – note that the ﬁrst scan can be over a separate T-Box graph. Algorithm 1 details
+this approach, which largely follows the formalisms in Deﬁnition 3: the major variance
+consists of the application of rules in RG, which one can convince themselves is equivalent 
+since all triples encountered are passed through every rule in RG. For brevity,
+we omit some implementational details such as partial duplicate detection implemented
+using an LRU locality cache. The “non-trivial” aspects of the implementation include
+the indexing of the T-Box T τ
+, and the indexing of the A-Box A. Again, as A is required 
+to store more data, the two-scan approach becomes more inefﬁcient than the
+“full-indexing” approach; in particular, a rule in RGn
+with an open pattern – e.g., OWL
+2 RL/RDF rule eq-rep-s: (?s,o:sameAs,?s
+,?p,?o) – will require 
+indexing of all data, negating the beneﬁts of the approach. Again, partial-indexing
+performs well if A remains small and performs best if RGn = ∅ – i.e., no rules require
+A-Box joins and thus A-Box indexing is not required.
+
+) ∧ (?s,?p,?o) ⇒ (?s
+
+(cid:2)
+
+(cid:2)
+
+4 Template Rules
+We now discuss optimisations for deriving T -split closure based on template rules,
+which are currently used by DLEJena [13] and also used in RIF for supporting OWL
+2 RL/RDF [15]; however, instead of manually specifying a set of template rules, we
+leverage our general notion of terminological data to create a generic template func-
+tion: after separating and closing the T-Box, we bind the T-Box patterns of rules before
+
+A. Hogan et al.
+
+rτ ), μ(Conrτ )) | μ ∈ M(AnteT
+
+344
+accessing the A-Box to create a set of new templated rules (or T -ground rules) which
+themselves ‘encode’ the T-Box, thus avoiding repetitive T-Box pattern bindings during
+the A-Box reasoning process. We now formalise these notions.
+Deﬁnition 4. Template Function: For a T -split rule rτ
+, the template function is given
+as α : Rτ × 2G → 2R; (rτ ,T ) (cid:8)→ {(μ(AnteG
+rτ ,T )}.
+Example 2. Given a simple T-Box T := {(f:Person,r:subClassOf,f:Agent)} and
+a rule rτ := (?c1,r:subClassOf,?c2)∧(?x,a,?c1) ⇒ (?x,a,?c2), then the template
+function is given as α(rτ ,T ) := {(?x,a,f:Person) ⇒ (?x,a,f:Agent)}.
+Templated rule application is synonymous with standard rule application. We may use
+α as intuitive shorthand to map a set of T -split rules to the union of the set of resulting
+templated rules. We now (i) propose that applying a T -split rule gives the same result as
+applying the respective set of templated rules wrt. arbitrary graphs T & G; (ii) describe
+the closure of a graph using templated rules; (iii) show that the templated-rule closure
+equals the T -split closure previously outlined.
+Proposition 3. For any graphs T ,G and for any rule r with a T -split rule rτ = τ(r),
+it holds that Trτ (T ,G) = Tα(rτ ,T )(G).
+Proof. Trτ (T ,G) =
+τ ,T )
+(cid:2)
+(cid:14)(cid:15)
+r∈α(rτ ,T )
+Deﬁnition 5. Templated rule closure: Given a ruleset R, its T -split version Rτ :=
+τ(R), and a graph G, let T τ
+represent the closed T-Box as derived in the T -split
+closure, and let Rα := α(RG,T τ ). Again, let Gα
+0 := G ∪ T τ ∪ Ax, but this time
+i ); as before, the templated rule closure is Gn for the smallest
+i ∪ TRα(Gα
+i+1 := Gα
+Gα
+n = TRα(Gα
+value of n such that Gα
+Theorem 3. For any graph G, and any ruleset R ⊂ R, its T -split version Rτ , and the
+respective templated ruleset Rα, we can say that Gα = Gτ
+Proof. The only divergence between the T -split closure and templated-rule closure is in
+the ﬁxpoint calculation: Gα
+i ). Using 
+induction, by def.Gτ
+i ) =
+i ∪ (cid:2)
+Gα
+(cid:14)(cid:15)
+r∈α(RG,T τ ) Trτ (Gα
+The templated rules can be applied in lieu of the RG rules in Algorithm 1. Indeed,
+a large number of rules can be templated for a sufﬁciently complex T-Box, and na¨ıve
+application of all such rules on all triples could worsen performance; however, the templated 
+rules are more amenable to further optimisations, which we now discuss.
+
+n ), denoted as ClRα(T ,Gα), or simply Gα
+
+μ∈M(Anter ,G) μ(Conr) = Tα(rτ ,T )(G).
+
+i ∪TRG(T τ ,Gτ
+rτ ∈RG Trτ (T τ ,Gα
+
+τ ),G)(μ0 ◦ μ1)(Conrτ ) =
+
+μ1∈M(μ0(AnteG
+
+0 = Gα
+
+i+1 := Gα
+0 ; if Gτ
+i ) = Gα
+
+i ∪TRα(Gα
+i = Gα
+i ∪ TRα(Gα
+
+i ) versus Gτ
+i , then Gτ
+i ) = Gα
+
+i+1 = Gα
+i+1.
+
+i+1 := Gτ
+i ∪(cid:2)
+
+(cid:2)
+
+.
+
+(cid:2)
+
+μ0∈M(AnteT
+
+r
+
+(cid:2)
+
+r
+
+.
+
+4.1 Merging Equivalent Template Rules
+
+The templating procedure may result in rules with equivalent antecedents – which can
+be aligned by variable rewriting – being produced; these rules can subsequently be
+merged. We formalise such notions here.
+
+SAOR: Template Rule Optimisations for Distributed Reasoning
+
+345
+
+j
+
+if x ∈ C
+x
+v ∈ V otherwise
+
+Deﬁnition 6. Equivalent Graph Patterns: Let N be the set of automorphic variable
+rewrite mappings containing all ν as follows:
+ν : V ∪ C (cid:2)(cid:3) V ∪ C; x (cid:8)→
+
+(cid:4)
+
+iff there exists a mapping ν ∈ N such that ν(GV
+
+(2)
+(Note: N ⊂ M). We denote by ∼ν an equivalence relation for graph patterns such that
+i ) = GV
+i ∼ν GV
+GV
+j .
+Proposition 4. The relation ∼ν is reﬂexive, symmetric and transitive.
+Proof. Reﬂexivity is trivially given by the identity morphism ν(x) = x, symmetry
+is given by the inverse morphism ν−1(GV
+j ) where ν−1 ∈ N if ν ∈ N since ν is
+automorphic, and transitivity is given by the presence of the composite morphism (νa ◦
+νb)(GV) where again νa ◦ νb ∈ N since νa and νb are automorphic.
+(cid:14)(cid:15)
+Deﬁnition 7. Rule Merge: Let ∼R be an equivalence relation – slightly abusing notation 
+– which holds between two rules such that ri ∼R rj iff Anteri ∼ν Anterj .
+Given an equivalence class [r] – a set of rules between which ∼R holds – select a
+canonical rule r ∈ [r]; we can now describe the merge of the equivalence class as
+β([r]) := (Anter,Con[r]) where Con[r] :=
+ri∈[r] νi(Conri) for some νi ∈ N such
+that νi(Anteri) = Anter. Now letting R/∼R := {[r] | r ∈ R} denote the quotient set
+of R by ∼R – the set of all equivalent classes [r] wrt. ∼R in R – we can generalise the
+rule merge function for a set of rules as β : 2R → 2R, R (cid:8)→ (cid:2){β([r]) | [r] ∈ R/∼R}.
+Example 3. Taking the two templated rules: (?x,f:img,?y) ⇒ (?x,a,f:Person) and
+(?s,f:img,?o) ⇒ (?s,f:depicts,?o); they can be merged by ν where ν(?s) = ?x,
+ν(?o) = ?y, giving (?x,f:img,?y) ⇒ (?x,a,f:Person) ∧ ( ?x,f:depicts,?y ).
+The choice of canonical rule is unimportant since ν is automorphic; we now show that
+the application of any ruleset and the respective merged ruleset are extensionally equal.
+Proposition 5. For any graph G and ∼R equivalence class [r], T[r](G) = Tβ([r])(G);
+for any ruleset R, TR(G) = Tβ(R)(G); wrt. closure, ClRα(T ,G) = Clβ(Rα)(T ,G).
+Proof. We denote β([r]) as (Anteβ,Conβ). If GV
+j , then by def. ν(GV
+i ) =
+GV
+j , and for any graph G and any mapping μ ∈ M, μ(ν(GV
+j ); i.e., if
+GV
+j ,G). Thus we give Mβ := {μ | μ(Anteβ) ⊆
+j , M(ν(GV
+i ∼ν GV
+ri∈[r]{μ | μ(νi(Anteri)) ⊆ G}. Let Mi := {μ | μ(Anteri) ⊆ G}; now,
+G} =
+it follows that Tβ([r])(G) =
+μ(νi(Conri)) =
+(cid:2)
+(cid:14)(cid:15)
+ri∈[r]
+
+μ(Conri) = T[r](G). The rest of the proposition follows naturally.
+
+i ),G) = M(GV
+
+μ(Conβ) =
+
+(cid:2)
+
+i )) = μ(GV
+
+(cid:2)
+
+ri∈[r]
+
+μ∈Mβ
+
+i ∼ν GV
+
+(cid:2)
+
+(cid:2)
+
+(cid:2)
+
+μ∈Mi
+
+(cid:2)
+
+μ∈Mβ
+
+4.2 Rule Index
+
+We have reduced the amount of templated rules through merging; however, given a
+sufﬁciently complex T-Box, we may still have a prohibitive number of rules for efﬁcient
+recursive application. We now look at the use of a rule index which maps a triple t
+to rules containing an antecedent pattern which t is a binding for, thus enabling the
+efﬁcient identiﬁcation and application of only relevant rules for a given triple.
+
+A. Hogan et al.
+
+346
+Deﬁnition 8. Rule Lookup: Given a triple t and ruleset R, the rule lookup function is
+ω : G × 2R → 2R, (t,R) (cid:8)→ {r ∈ R | ∃μ ∈ M : ∃tv ∈ Anter : (μ(tv) = t)}.
+Example 4. Given a triple t := (ex:me,a,f:Person), and a simple example ruleset
+R := {(?x,f:img,?y) ⇒ (?x,a,f:Person); (?x,a,f:Person) ⇒ (?x,a,f:Agent);
+(?x,a,?y) ⇒ (?y,a,r:Class)}, ω(t,R) returns a set containing the latter two rules.
+A triple pattern has 23 = 8 possible forms: (?, ?, ?), (s, ?, ?), (?, p, ?), (?, ?, o), (s, p, ?),
+(?, p, o), (s, ?, o), (s, p, o). Thus, we require eight indices for antecedent triple patterns,
+and eight lookups to perform ω(t,R) – to ﬁnd all relevant rules for a triple. We use
+seven in-memory hashtables storing the constants of the rule antecedent patterns as key,
+and a set of rules containing such a pattern as value; e.g., {(?x,a,f:Person)} is put
+into the (?, p, o) index with {a,f:Person} as key. Rules containing patterns without
+constants are stored in a set, as they are relevant to all triples.
+
+4.3 Rule Dependency – Labelled Rule Graph
+
+Within our rule index, there may exist rule dependencies: the application of one rule
+may/will lead to the application of another. Thus, instead of performing lookups for
+rules for each recursively inferred triple, we can model dependencies in our rule index
+using a rule graph. In Logic Programming, a rule graph is deﬁned as a directed graph
+H := (R, Ω) where (ri, rj) ∈ Ω (i.e., ri Ω rj, read “rj follows ri”) iff there exists a
+mapping μ ∈ M such that μ(tv) ∈ Conri for tv ∈ Anterj (cf. [14]).
+
+By building and encoding such a rule graph into our index, we can “wire” the recursive 
+application of rules for a given triple. However, from the merge function (or
+otherwise) there may exist rules with large consequent sets. We therefore extend the
+notion of the rule graph to a directed labelled graph with inclusion of the labelling
+; (ri, rj) (cid:8)→ {tv ∈ Conri | ∃μ ∈ M : μ−1(tv) ∈ Anterj};
+function λ : R × R → 2GV
+in simpler terms, λ(ri, rj) gives the set of consequent triple patterns in ri that would
+be matched by patterns in the antecedent of rj, labelling the edges Ω of the rule graph
+with the consequent patterns that give the dependency.
+Example 5. For a rule ri := (?x,f:img,?y) ⇒ (?x,a,f:Person) ∧ (?y,a,f:Image),
+and a rule rj := (?s,a,f:Person) ⇒ (?s,a,f:Agent), we say that ri Ω rj, where
+λ(ri, rj) = {(?x,a,f:Person)}.
+In practice, our rule index stores sets of elements of a linked list, where each element
+contains a rule and links to rules which are relevant for that rule’s consequent patterns.
+ Thus, for each input triple, we can retrieve all relevant rules for all eight possible
+patterns, apply those rules, and if successful, follow the respective labelled links to
+recursively ﬁnd relevant rules without re-accessing the index until the next input triple.
+
+4.4 Rule Saturisation
+
+We very brieﬂy describe one ﬁnal and intuitive optimisation technique we investigated
+– which later evaluation demonstrates to be mostly disadvantageous – involving the saturisation 
+of rules; we say that a subset of dependencies in the rule graph are strong
+
+SAOR: Template Rule Optimisations for Distributed Reasoning
+
+347
+
+Algorithm 2. Partial-indexing approach using templated rule optimisations
+
+Required: R, G
+and Rτ as in Algorithm 1;
+derive T τ
+Rα := α(RG); Rβ := β(Rα);
+build ω index for Rβ encoding graph H with edges λ;
+0 := G ∪ T τ ∪ Ax; A := ∅;
+Gτ := Gτ
+for tI ∈ Gτ
+0 do
+0 := ∅; RGI
+RGI
+while RGI
+for (r, t) ∈ RGI
+
+n (cid:5)= RGI
+n−1 do
+n \ RGI
+Grt := ∅; RGI
+if |Anter| >1 then
+for tv ∈ AnteG
+
+n−1 do
+n+1 := RGI
+n;
+
+1 := {(r, tI ) | r ∈ ω(tI , Rβ )}; n := 1;
+
+/* SCAN 1: See Algorithm 1 */
+/* template and merge T -split rules */
+/* build rule index w/ dependencies */
+/* init A-Box structures */
+/* SCAN 2: A-Box reasoning over all data */
+/* initialise relevant rules for tI */
+/* while we ﬁnd new rule/triple pairs to reason over */
+/* scan new rule/triple pairs */
+/* initialise state for rule triple pair */
+/* if rule requires A-Box join */
+/* for each assertional pattern */
+/* index t if needed */
+
+/* apply ‘A-Box join rule’ over index */
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+
+13
+14
+15
+16
+17
+18
+19
+
+20
+
+21
+
+if ∃μ ∈ M : μ(tv ) = t then A := A ∪ {t} ;
+
+r do
+Grt := Tr(T τ , A);
+Grt := Tr(T τ , {t});
+
+else
+
+if Grt (cid:5)= ∅ then
+
+for r+ : (r, r+) ∈ Ω do
+
+for tv
+
+n ∈ λ(r, r+) do
+RGI
+n+1 := RGI
+
+/* apply ‘non A-Box join rule’ for t */
+/* if rule creates inference */
+/* ﬁnd successive rules in graph */
+/* for the consequent patterns bound */
+/* add rule/triple pair */
+
+n+1 ∪ {(r+, tn) | tn ∈ Grt)};
+
+n++;
+
+Gτ := Gτ ∪ {t | (r, t) ∈ RGI
+
+n};
+
+Return : Gτ
+
+/* recurse for unique rule/triple pair */
+/* write recursive inferences for tI to output */
+
+dependencies, where the successful application of one rule will always lead to the successful 
+application of another. For linear rules, we can saturate rules by pre-computing
+the recursive rule application of its dependencies; we give the gist with an example:
+Example 6. Take rules ri := (?x,f:img,?y) ⇒ (?x,a,f:Person) ∧ (?y,a,f:Image),
+rj := (?s,a,f:Person) ⇒ (?s,a,f:Agent), rk := (?x,a,?y) ⇒ (?y,a,r:Class)}.
+We can see that ri Ω rj, ri Ω rk, rj Ω rk. We can remove the links from ri to rj and rk
+(and similarly from rj to rk) by saturating ri to (?x,f:img,?y) ⇒ (?x,a,f:Person)∧
+(?y,a,f:Image)∧ (?x,a,f:Agent)∧(f:Person,a,r:Class)∧(f:Image,a,r:Class)
+∧ (f:Agent,a,r:Class)}.
+As we will see in Sections 4.6 & 5.2, saturisation produces more duplicates and thus
+puts more load on the duplicate-removal cache, negatively affecting performance.
+
+4.5 Optimised Partial Indexing Approach Using Template Rules
+
+We now integrate the above notions as optimisations for the partial indexing approach,
+with the new procedure detailed in Algorithm 2. We no longer need to bind T-Box
+patterns during A-Box access; we mitigate the cost of extra templated rules by ﬁrst
+merging rules, and instead of brute-force applying all rules to all triples in the A-Box
+reasoning scan, we use our linked rule index to retrieve only relevant rules for a given
+triple and to ﬁnd recursively relevant rules. We now initially evaluate our methods.
+
+348
+
+A. Hogan et al.
+
+Table 1. Details of reasoning for LUBM(10) given different reasoning conﬁgurations
+
+input
+fragment
+inferred
+tmpl. rules
+after merge
+config.
+time (s)
+
+RDFS
+748k
+149
+87
+
+LUBM(10) - 1.27M data triples, 295 ontology triples
+
+pD*
+1,328k
+
+OWL 2 RL
+
+1,597k
+
+175
+108
+T
+
+378
+119
+T
+
+81
+rule apps (m) 16.5 15.5 308 11.3 9.9
+
+69 365 391 734 227 221
+7.8 62.5
+
+N NI
+T
+99 117 404
+
+TI TIM TIMS
+89
+
+% success 43.4 46.5 2.4 64.2 62.6 52.3 18.8 23.4 2.6 51.5 48.7 61.3
+
+4.2 5.6
+
+cache hit (m) 10.8 10.8 8.2 8.2 8.2
+
+8.1 19.1 19.1 15.1 15.1 14.9 38.7 16.5 16.5 13.1
+
+N NI
+
+N NI
+
+TI TIM TIMS
+
+TI TIM TIMS
+465
+50 468 22.9 21.1 13.9 149 110 1,115 81.8 78.6 75.6
+15
+13 12.7 34.4
+
+225 858 940 1,690 474 443
+
+0.8 10.5 6.8
+
+4.6 Preliminary Performance Evaluation
+
+In order to initially evaluate the above optimisations, we applied small-scale reasoning
+for RDFS (minus the inﬁnite rdf: n axiomatic triples [4]), pD* and OWL 2 RL/RDF
+over LUBM(10) [3], consisting of about 1.3m triples – note that we do exclude lg/gl
+rules for RDFS/pD* since we allow generalised triples [2]. All evaluation in this paper 
+has been run on single-core 2.2GHz Opteron x86-64 machine(s) with 4GB of main
+memory. Table 1 gives the performance for the following partial-indexing conﬁgura-
+tions: (i) N: ‘normal’ T -split closure; (ii) NI: normal T -split closure with linked rule
+index; (iii) T: T -split closure wrt. templated rules; (iv) TI: T -split closure wrt. linked
+templated rule index; (v) TIM: T -split closure wrt. linked & merged templated rule
+index; (vi) TIMS: T -split closure wrt. linked, merged & saturated templated rule index.
+In all approaches, exhaustively applying templated rules demonstrates the worst performance;
+ after indexing the approach becomes the most efﬁcient. RDFS gains little in
+the way of improvement, but in fact only contains 8 rules requiring A-Box data: the
+reduction in rule applications given by templating and indexing is modest. OWL 2 RL
+and pD* take just over half the time for TI* vs. N* approaches. A correlation between
+increased rule applications and increased inferencing time is evident, but sometimes
+fails: e.g., for pD*, TIMS gives less rule applications than TIM, but takes more time –
+in such cases, we see the cache encountering more duplicates – as mentioned, saturated
+rules can immediately produce a batch of duplicates that would otherwise halt a chain
+of inferences mid-way. OWL 2 RL creates more templated rules than pD* due to expanded 
+T-Box level reasoning, but these are merged to a number just above pD*: OWL
+2 RL supports intersection-of inferencing used by LUBM and not in pD*. LUBM does
+not contain OWL 2 constructs, but redundant rules are factored out during templating.
+Although we improve the performance of pD* and OWL 2 RL/RDF inferencing, we
+perform A-Box joins in-memory, and in fact cannot scale much beyond the limited scale
+above for these fragments: again our optimisations focus on linear rules. We now reunite
+with our original use-case of Linked Data reasoning, focussing on the application of
+linear rules and shifting up three orders of magnitude.
+
+5 Reasoning for Linked Data
+
+Again, we aim at reasoning over Linked Data for the SWSE project. In previous works,
+we have investigated the unique challenges of reasoning over the open Web, and
+identiﬁed the need for scale, incompleteness, and consideration of the source of data.
+
+SAOR: Template Rule Optimisations for Distributed Reasoning
+
+349
+
+In [8], we applied reasoning over 1 billion Linked Data triples using T-Box optimisations 
+speciﬁc to a subset of pD*; we (i) demonstrated that aside from equality reasoning,
+pD* rules which do not require A-Box joins covered 99% of inferences possible in our
+Web dataset, based on the observation that the most commonly instantiated vocabularies 
+on the Web typically use lightweight RDFS and OWL terms supportable by linear
+rules; (ii) discussed the dangers of applying materialisation over open Web data, which
+can na¨ıvely lead to an explosion of inferences: for example, one document1 deﬁnes
+owl:Thing to be a member of 55 union classes, another deﬁnes nine properties as the
+domain of rdf:type2, etc. Observation (i) ties in with our linear-rule optimisations;
+however, equality reasoning requires A-Box joins: we see owl:sameAs related inferencing 
+as very important for data integration within the Linked Data use-case, but prefer
+a decoupling of such reasoning – which entails its own requirements and challenges –
+and have analysed the issue separately in previous works [10]. Observation (ii) motivates 
+our next discussion: we now reintroduce our notion of authoritative reasoning.
+
+5.1 Authoritative Reasoning
+
+In order to curtail the possible side-effects of open Web data publishing, we include
+the source of data in inferencing. Our methods are based on the view that a publisher
+instantiating a vocabulary’s term (class/property) thereby accepts the inferencing mandated 
+by that vocabulary (and recursively referenced vocabularies) for that term. Thus,
+once a publisher instantiates a term from a vocabulary, only that vocabulary and its
+references should inﬂuence what inferences are possible through that instantiation.
+
+Firstly, we must deﬁne the relationship between a term and a vocabulary. We view
+a term as an RDF constant, and a vocabulary as a Web document: we give the function
+http : U → 2G as the mapping from a URI (a Web location) to an RDF graph it may
+provide by means of a given HTTP lookup. In Linked Data principles, dereferencable
+URIs are encouraged; dereferencing can be seen as a function deref : U → U which
+maps one URI to another by means of HTTP dereferencing mechanisms (this may include 
+removal of a URI fragment identiﬁer and recursive but ﬁnite redirects, and maps a
+URI to itself in case of failure; such functions are ﬁxed to the time the data was crawled).
+
+We then give the authoritative function:
+auth : U → 2C; u (cid:8)→ {c | c ∈ B, c ∈ t ∈ http(u) or c ∈ U, deref(c) = u}
+
+(3)
+
+where a Web document is authoritative for URIs which dereference to it and the blank
+nodes it contains; e.g., the FOAF vocabulary is authoritative for terms in its namespace.
+To negate the effects of non-authoritative axioms on reasoning over Web data, we
+apply restrictions to the T -split rule application of rules in RTG, whereby, for the
+mapping μ of the rule application as before, there must additionally exist a μ(v) such
+that v ∈ V(AnteT ) ∩ V(AnteG), μ(v) ∈ auth(u), μ(AnteT ) ⊆ http(u).3
+1 http://lsdis.cs.uga.edu/˜oldham/ontology/wsag/wsag.owl
+2 http://www.eiao.net/rdf/1.0
+3 Note here that we restrict the T-Box segment of a RTG rule to be instantiated by one document;
+ this is not so restrictive where in OWL 2 RL/RDF, all such rules contain one ‘T-Box
+axiom’, possibly described using multiple triples; cf. [8]. Also, we do not consider the results
+of T-Box level reasoning as authoritative.
+
+A. Hogan et al.
+
+rτ )∩V(AnteG
+
+350
+Example 7. Take rule rτ := (?c1,r:subClassOf,?c2)∧(?x,a,?c1) ⇒ (?x,a,?c2).
+Here, V(AnteT
+rτ ) = {?c1}. Take an A-Box triple (ex:me,a,f:Person);
+μ(?c1) = f:Person. Let deref (f:Person) = f: the FOAF spec; now, {u | μ(?c1) ∈
+auth(u)} = {f:}. Any triple of the form (f:Person,r:subClassOf,?c2) must come
+from f: for the rule to be authoritatively applied. Note that ?c2 can be arbitrarily bound;
+i.e., FOAF can extend any classes they like.
+We refer the reader to [8] for more detail on authoritative reasoning. Note that the previous 
+two examples from documents in Footnotes 1 & 2 are ignored by the authoritative
+reasoning. Since authoritativeness is on a T-Box level, we can apply the above additional 
+restriction to our templating function when binding the terminological patterns
+of the rules to derive a set of authoritative templated rules.
+
+5.2 Linked Data Reasoning Evaluation
+We now give evaluation over 1.12b quads (947m unique triples) of Linked Data crawled
+for SWSE in May 2010. Note that we use a GZip compressed ﬁle of quadruples as input
+to the reasoning process: the fourth element element encodes the provenance (Web
+source) of the contained triple; we also require information about redirects encountered
+in the crawl to reconstruct the deref function. We output a ﬂat ﬁle of GZipped triples.
+We perform reasoning over a subset of OWL 2 RL/RDF containing 42 rules: ﬁrstly, we
+omit datatype reasoning which can lead to the inference of near-inﬁnite triples (e.g.,
+xsd:float); secondly, we currently omit
+1.000
+inconsistency checking rules (we will examine use-cases for these rules in later work);
+thirdly, we omit rules which infer ‘tautologies’ – statements that hold for every term
+in the graph, such as reﬂexive owl:sameAs statements (we also ﬁlter these from the
+output). Given our use-case SWSE, we wish to infer a circumspect amount of data
+with utility for query-answering – completeness is not a requirement (cf. [5] for related
+discussion). For reasons of efﬁciency as described, we omit rules which require ABox 
+joins. Thus, our subset consists of the OWL 2 RL/RDF axiomatic rules, ‘schema
+rules’[2, Table 9], and rules with one assertional pattern which we give in Table 3.
+
+xsd:float owl:sameAs 1.00
+
+∧∧
+
+∧∧
+
+Reasoning over the dataset described inferred 1.58b raw triples, which were ﬁltered
+to 1.14b triples removing non-RDF generalised triples and ‘tautological statements’ –
+post-processing revealed that 962m (∼61%) were unique and had not been asserted
+(roughly a 1:1 reasoned:asserted ratio). The ﬁrst step – extracting 1.1m T-Box triples
+from the dataset – took 8.2 hrs. Subsequently, Figure 1 gives the results for reasoning
+on one machine for each approach as before. T-Box level processing – e.g., templating,
+rule indexing, etc. – took roughly the same time. For A-Box reasoning, saturation causes
+the same problems with extra duplicate triples as before, and so the fastest approach is
+TIM, which takes ∼15% of the time for the na¨ıve T -split closure algorithm; we also
+show the linear performance of TIM in Figure 1 (we would expect all methods to be
+similarly linear). 301k templated rules with 2.23m links are merged to 216k with 1.15m
+links; after saturation, each rule has an average of 6 consequent patterns and all links are
+successfully removed. Note that with 301k templated rules without indexing, applying
+all rules to all statements would take approx. 19 years.
+
+Since all of our rules are linear, we can also distribute our approach by ﬂooding
+the templated rules to all machines. In Table 2, we give the performance of such an
+
+SAOR: Template Rule Optimisations for Distributed Reasoning
+
+351
+
+T-Box (min) A-Box (hr)
+118.4
+121.3
+171609a
+22.1
+17.7
+19.5
+
+8.9
+8.9
+8.9
+8.9
+8.9
+8.9
+
+N
+NI
+T
+TI
+TIM
+TIMS
+
+a Estimated as a linear product from
+
+one day of reasoning.
+
+s
+t
+
+n
+e
+m
+e
+
+t
+
+a
+
+t
+s
+ 
+
+#
+
+ 1.6e+009
+
+ 1.4e+009
+
+ 1.2e+009
+
+ 1e+009
+
+ 8e+008
+
+ 6e+008
+
+ 4e+008
+
+ 2e+008
+
+ 0
+
+ 0
+
+input
+output
+
+ 200
+
+ 400
+
+ 600
+
+ 800
+
+ 1000
+
+time (min)
+
+Fig. 1. Performance for reasoning over 1.1B statements on one machine for all approaches (left),
+and detailed throughput performance for A-Box reasoning using the fastest approach TIM (right)
+
+Table 2. Distributed reasoning in minutes using TIM for 1, 2, 4 & 8 machines
+
+Machines Extract T-Box Build T-Box Reason A-Box Total
+1062 1565
+465 719
+239 383
+121 201
+
+8.9
+10.2
+10.4
+9.8
+
+1
+2
+4
+8
+
+492
+240
+131
+67
+
+approach for 1, 2, 4, and 8 machines using a simple RMI architecture [9]. Note that
+the most expensive aspects of the reasoning process – extracting the T-Box from the
+dataset and reasoning over the A-Box – can be executed independently in parallel. The
+only communication required between machines is the aggregation of the T-Box, and
+creation of the shared templated-rule index: this takes ∼10 mins, and becomes the lower
+bound for time taken for distributed evaluation with arbitrary machine count. In summary,
+ we perform reasoning over 1.12b Linked Data triples in 3.35 hours using 8 machines,
+ deriving 1.58b inferred triples, of which 962m are novel and unique.
+
+6 Related Work
+
+We have discussed our previous work on SAOR throughout the paper. Following initial
+work on SAOR – which had not yet demonstrated distribution – a number of scalable
+distributed reasoners adopted a similar approach to partial indexing herein reformalised.
+Weaver et al. [19] discuss a similar approach for distributed reasoning over RDFS;
+however, their experiments were solely over LUBM and their discussion was speciﬁc
+to RDFS. Urbani et al. [18] use MapReduce for distributed reasoning for RDFS over
+850m Linked Data triples; they do not consider authority and produce 30b triples which
+is too much for our SWSE use-case – interestingly, they also tried pD* on 35m Web
+triples and stopped after inferring 3.8b inferences in 12 hours, lending strength to our
+arguments for authoritative reasoning. In very recent work, the same authors [17] apply 
+incomplete but comprehensive pD* to 100b LUBM triples, discussing rule-speciﬁc
+
+352
+
+A. Hogan et al.
+
+optimisations for performing join rules over pD*: however, we feel that materialisation
+wrt. rules over 1b triples of arbitrary Linked Data is still an open research goal.
+
+A viable alternative approach to Web reasoning employed by Sindice [1] – the relation 
+to which is discussed in depth in [8] – is to consider merging small “per-document”
+closures which quarantines reasoning to a given document and the related documents it
+either implicitly or explicitly imports. Works on LDSR select clean subsets of Linked
+Data ∼0.9b triples and apply reasoning using the proprietary BigOWLIM reasoner [11].
+With respect to template rules, DLEJena [13] uses the Pellet DL reasoner for T-Box
+level reasoning, and uses the results to template rules for the Jena rule engine; they
+only demonstrate methods on synthetic datasets up to a scale of ∼1M triples. We take
+a somewhat different direction, discussing optimisations for partial-indexing.
+
+Table 3. OWL 2 RL/RDF rules we apply for Web reasoning with exactly one assertional pattern.
+Authoritative variable positions are given in bold. Not shown are axiomatic and schema rules [2].
+
+RG1
+
+: only one assertional pattern in antecedent
+
+Antecedent
+
+OWL2RL
+
+terminological
+
+?p rdfs:range ?c .
+
+eq-sym -
+prp-dom ?p rdfs:domain ?c .
+prp-rng
+prp-symp ?p a owl:SymmetricProperty .
+prp-spo1 ?p1 rdfs:subPropertyOf ?p2 .
+prp-eqp1 ?p1 owl:equivalentProperty ?p2 .
+prp-eqp2 ?p1 owl:equivalentProperty ?p2 .
+prp-inv1
+prp-inv2
+cls-int2
+cls-uni
+cls-svf2
+cls-hv1
+cls-hv2
+cax-sco
+cax-eqc1 ?c1 owl:equivalentClass ?c2 .
+cax-eqc2 ?c1 owl:equivalentClass ?c2 .
+
+?p1 owl:inverseOf ?p2 .
+?p1 owl:inverseOf ?p2 .
+?c owl:intersectionOf (?c1 ... ?cn) .
+?c owl:unionOf (?c1 ... ?ci ... ?cn) .
+?x owl:someValuesFrom owl:Thing ; owl:onProperty ?p . ?u ?p ?v .
+?x owl:hasValue ?y ; owl:onProperty ?p .
+?u a ?x .
+?x owl:hasValue ?y ; owl:onProperty ?p .
+?u ?p ?y .
+?c1 rdfs:subClassOf ?c2 .
+?x a ?c1 .
+?x a ?c1 .
+?x a ?c2 .
+
+Consequent
+
+assertional
+?x owl:sameAs ?y . ?y owl:sameAs ?x .
+?x ?p ?y .
+?x ?p ?y .
+?x ?p ?y .
+?x ?p1 ?y .
+?x ?p1 ?y .
+?x ?p2 ?y .
+?x ?p1 ?y .
+?x ?p2 ?y .
+?x a ?c .
+?x a ?ci
+
+?x a ?c .
+?y a ?c .
+?y ?p ?x .
+?x ?p2 ?y .
+?x ?p2 ?y .
+?x ?p1 ?y .
+?y ?p2 ?x .
+?y ?p1 ?x .
+?x a ?c1...?cn .
+?x a ?c .
+?u a ?x .
+?u ?p ?y .
+?u a ?x .
+?x a ?c2 .
+?x a ?c2 .
+?x a ?c1 .
+
+7 Conclusion
+
+We have introduced the notion of terminological data for RDF(S)/OWL, and have generalised 
+and formalised the notion of partial indexing techniques which are optimised
+for application of linear rules and which rely on a separation of terminological data –
+a non-recursive segment of the data; we then related the derived closure to semi-na¨ıve
+evaluation. We subsequently discussed inclusion of a template function in such an algorithm,
+ showing that na¨ıvely, templated rules worsen performance, but with rule merging,
+indexing and linking techniques, templated rules outperform the base-line T -split closure 
+esp. for a complex T-Box. This work, along with DLEJena, supports uncited claims
+within the recently standardised RIF working group that rule templating offers a more
+efﬁcient solution for supporting OWL 2 RL than a direct translation of OWL 2 RL/RDF
+rules [15, Section 1]. We then reintroduced some discussion relating to reasoning over
+Linked Data, including our notion of authoritativeness, and demonstrated scalable distributed 
+reasoning over a subset of OWL 2 RL for 1.1b quads (without need for manual
+
+SAOR: Template Rule Optimisations for Distributed Reasoning
+
+353
+
+T-Box massaging or pre-selection). The SAOR system is actively used to provide reasoned 
+data to the SWSE system [9] for live search and browsing over Linked Data:
+http://swse.deri.org/.
+
+References
+
+1. Delbru, R., Polleres, A., Tummarello, G., Decker, S.: Context Dependent Reasoning for Semantic 
+Documents in Sindice. In: Proc. of 4th SSWS Workshop (October 2008)
+
+2. Grau, B.C., Motik, B., Wu, Z., Fokoue, A., Lutz, C.: OWL 2 Web Ontology Language:
+
+Proﬁles. W3C Recommendation (October 2009)
+
+3. Guo, Y., Pan, Z., Heﬂin, J.: LUBM: A benchmark for OWL knowledge base systems. J. Web
+
+Sem. 3(2-3), 158–182 (2005)
+
+4. Hayes, P.: RDF semantics. W3C Recommendation (February 2004)
+5. Hitzler, P., van Harmelen, F.: A Reasonable Semantic Web. Semantic Web Journal 1(1) (to
+
+appear 2010), http://www.semantic-web-journal.net/
+
+6. Hogan, A., Harth, A., Passant, A., Decker, S., Polleres, A.: Weaving the Pedantic Web. In:
+
+Proc. of 3rd Workshop (April 2010)
+
+7. Hogan, A., Harth, A., Polleres, A.: SAOR: Authoritative Reasoning for the Web. In:
+Domingue, J., Anutariya, C. (eds.) ASWC 2008. LNCS, vol. 5367, pp. 76–90. Springer,
+Heidelberg (2008)
+
+8. Hogan, A., Harth, A., Polleres, A.: Scalable Authoritative OWL Reasoning for the Web. Int.
+
+J. Semantic Web Inf. Syst. 5(2) (2009)
+
+9. Hogan, A., Harth, A., Umbrich, J., Kinsella, S., Polleres, A., Decker, S.: Searching and
+Browsing Linked Data with SWSE: the Semantic Web Search Engine. Technical Report
+DERI-TR-2010-07-23 (2010)
+
+10. Hogan, A., Polleres, A., Umbrich, J., Zimmermann, A.: Some entities are more equal than
+others: statistical methods to consolidate Linked Data. In: Proc. of NeFoRS Workshop (2010)
+11. Kiryakov, A., Ognyanoff, D., Velkov, R., Tashev, Z., Peikov, I.: LDSR: a Reason-able View
+
+to the Web of Linked Data. In: Proc. of 7th Semantic Web Challenge (2009)
+
+12. Lloyd, J.W.: Foundations of Logic Programming, 2nd edn. Springer, Heidelberg (1987)
+13. Meditskos, G., Bassiliades, N.: DLEJena: A practical forward-chaining OWL 2 RL reasoner
+
+combining Jena and Pellet. J. Web Sem. 8(1), 89–94 (2010)
+
+14. Ramakrishnan, R., Srivastava, D., Sudarshan, S.: Rule Ordering in Bottom-Up Fixpoint Evaluation 
+of Logic Programs. In: Proc. of 16th VLDB, pp. 359–371 (1990)
+
+15. Reynolds, D.: OWL 2 RL in RIF. W3C Working Group Note (June 2010)
+16. ter Horst, H.J.: Completeness, decidability and complexity of entailment for RDF Schema
+
+and a semantic extension involving the OWL vocabulary. J. Web Sem. 3, 79–115 (2005)
+
+17. Urbani, J., Kotoulas, S., Maassen, J., van Harmelen, F., Bal, H.E.: OWL reasoning with
+WebPIE: Calculating the closure of 100 billion triples. In: Aroyo, L., Antoniou, G., Hyv¨onen,
+E., ten Teije, A., Stuckenschmidt, H., Cabral, L., Tudorache, T. (eds.) The Semantic Web:
+Research and Applications. LNCS, vol. 6088, pp. 213–227. Springer, Heidelberg (2010)
+
+18. Urbani, J., Kotoulas, S., Oren, E., van Harmelen, F.: Scalable Distributed Reasoning Using
+MapReduce. In: Bernstein, A., Karger, D.R., Heath, T., Feigenbaum, L., Maynard, D., Motta,
+E., Thirunarayan, K. (eds.) ISWC 2009. LNCS, vol. 5823, pp. 634–649. Springer, Heidelberg
+(2009)
+
+19. Weaver, J., Hendler, J.A.: Parallel Materialization of the Finite RDFS Closure for Hundreds
+of Millions of Triples. In: Bernstein, A., Karger, D.R., Heath, T., Feigenbaum, L., Maynard,
+D., Motta, E., Thirunarayan, K. (eds.) ISWC 2009. LNCS, vol. 5823, pp. 682–697. Springer,
+Heidelberg (2009)
+
+

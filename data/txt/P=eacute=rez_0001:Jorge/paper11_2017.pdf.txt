@@ -1,0 +1,675 @@
+An Initial Analysis of Facebook’s GraphQL Language
+
+Olaf Hartig1 and Jorge Pérez2
+
+1 Dept. of Computer and Information Science (IDA), Linköping University, Sweden
+
+olaf.hartig@liu.se
+
+2 Department of Computer Science, Universidad de Chile
+
+jperez@dcc.uchile.cl
+
+Abstract Facebook’s GraphQL is a recently proposed, and increasingly adopted,
+conceptual framework for providing a new type of data access interface on the
+Web. The framework includes a new graph query language whose semantics has
+been speciﬁed informally only. The goal of this paper is to understand the properties 
+of this language. To this end, we ﬁrst provide a formal query semantics.
+Thereafter, we analyze the language and show that it has a very low complexity 
+for evaluation. More speciﬁcally, we show that the combined complexity of
+the main decision problems is in NL (Nondeterministic Logarithmic Space) and,
+thus, they can be solved in polynomial time and are highly parallelizable.
+
+Introduction
+
+1
+After developing and using it internally for three years, in 2016, Facebook released
+a speciﬁcation [2] and a reference implementation3 of its GraphQL framework. This
+framework introduces a new type of Web-based data access interfaces that presents an
+alternative to the notion of REST-based interfaces [6]. Since its release GraphQL has
+gained signiﬁcant momentum and has been adopted by an increasing number of users.4
+A core component of the GraphQL framework is a query language that is used to
+express the data retrieval requests issued to GraphQL-aware Web servers. While there
+already exist a number of implementations of this language (which is not to be confused 
+with an earlier graph query language of the same name [5]), a more fundamental
+understanding of the properties of the language is missing. This paper presents preliminary 
+work towards closing this gap, which is important to identify fundamental
+limitations and optimization opportunities of possible implementations and to compare
+the GraphQL framework to other Web-based data access interfaces such as REST services 
+[6], SPARQL endpoints [3], and other Linked Data Fragments interfaces [8].
+
+Before we describe the contributions of our work, we brieﬂy sketch the idea of
+queries and querying in the GraphQL framework: Syntactically, GraphQL queries resemble 
+the JavaScript Object Notation (JSON) [1]. However, in contrast to arbitrary
+JSON objects, GraphQL queries are written in terms of a so-called schema which the
+queried Web server supports [2]. Informally, such a schema deﬁnes types of objects by
+specifying a set of so-called ﬁelds for which the objects may have values; the possible
+values can be restricted to a speciﬁc type of scalars or objects. For instance, Figure 1
+presents a GraphQL schema speciﬁcation about Star Wars movies, which is also given
+in a JSON-like syntax [2] (we describe the elements in the schema speciﬁcation in more
+detail below). Figure 2(a) presents a corresponding GraphQL query that, for the hero of
+
+3 http://graphql.org/code/
+4 http://graphql.org/users/ (note that popular sites such as Coursera, Github, Pinterest are users)
+
+type Starship {
+
+id: ID!
+name: String!
+length(unit: String): Float
+
+interface Character {
+
+id: ID!
+name: String!
+friends: [Character]
+appearsIn: [Episode]!
+
+type Droid implements Character {
+
+id: ID!
+name: String!
+friends: [Character]
+appearsIn: [Episode]!
+primaryFunction: String
+
+}
+
+}
+
+}
+
+type Human implements Character {
+
+id: ID!
+name: String!
+friends: [Character]
+appearsIn: [Episode]!
+starships: [Starship]
+totalCredits: Int
+
+}
+
+}
+
+union SearchResult = Human | Droid | Starship
+
+enum Episode { NEWHOPE, EMPIRE, JEDI }
+
+type Query {
+
+hero(episode: Episode!): Character
+droid(id: ID!): Droid
+node(id: ID!): SearchResult
+
+Figure 1. Example GraphQL schema (from http://graphql.org/learn/schema/).
+
+the JEDI episode, returns the name and the episodes that the hero appears in; additionally,
+ the query returns the value of either the totalCredits or the primaryFunction
+ﬁeld, depending on whether the hero is a human or a droid. The GraphQL speciﬁcation
+deﬁnes the semantics of such queries by using an operational deﬁnition that assumes
+an “internal function [...] for determining the [...] value of [any possible] ﬁeld” of any
+given object [2]. This internal function is not speciﬁed any further and, instead, it is left
+to the implementation what exactly this function does. Hence, the given query semantics
+is not formally grounded in any speciﬁc data model. However, the data that is exposed
+via a GraphQL interface can be conceived of as a virtual, graph-based view of an underlying 
+dataset; this view is established by the implementation of the aforementioned
+internal function and it takes the form of a graph that is similar to a Property Graph [7].
+As a basis for our work we deﬁne a logical data model that formally captures the
+notion of this graph, as well as the corresponding notion of a GraphQL schema (cf. Section 
+2). Thereafter, based on our data model, we formalize the semantics of GraphQL
+queries by using a compositional approach (cf. Section 3). These are the main conceptual 
+contributions of the paper. As a technical contribution we use our formalization
+to study the computational complexity of the language (cf. Section 4). We show that,
+even though the size of query results may be exponential in the size of the queries, the
+evaluation decision problem lies in a very low complexity class; it can be solved in
+Nondeterministic Logarithmic Space and, thus, is highly parallelizable.
+
+2 Data Model
+The GraphQL speciﬁcation does not provide a deﬁnition of a data model that is used as
+the foundation of GraphQL. However, the speciﬁcation implicitly assumes a logical data
+model that is implemented as a virtual, graph-based view over some underlying DBMS.
+In this section we make this logical data model explicit by providing a formal deﬁnition
+thereof. For each concept of the GraphQL speciﬁcation that our deﬁnitions capture, we
+refer to corresponding section of the speciﬁcation that introduces the concept.
+
+2.1 GraphQL Schema
+We consider the following inﬁnite countable sets: Fields (ﬁeld names, §2.5 of [2]),
+Arguments (argument names, §2.6 of [2]), Types (type names, §3.1 of [2]) , and we
+assume that Fields, Arguments and Types are disjoint and that there exists a ﬁnite
+
+hero[episode:JEDI]{
+
+name
+appearsIn
+on Human{ totalCredits }
+on Droid{ primaryFunction }
+
+}
+
+(a)
+
+hero{
+
+name:"R2-D2"
+appearsIn:[NEWHOPE EMPIRE JEDI]
+primaryFunction:null
+
+}
+
+(b)
+
+Figure 2. Example query and result.
+
+set Scalars (scalar type names, §3.1.1 of [2])5 which is a subset of Types. We also
+consider a set Vals of scalar values, and a function values : Scalars → 2Vals that
+assigns a set of values to every scalar type.
+GraphQL schemas and graphs are deﬁned over ﬁnite subsets of the above sets. Let
+F, A, and T be ﬁnite sets such that F ⊂ Fields, A ⊂ Arguments, and T ⊂ Types. We
+also assume that T is the disjoint union of OT (object types, §3.1.2 of [2]), IT (interface
+types, §3.1.3 of [2]), UT (union types, §3.1.4 of [2]) and Scalars, and we denote by LT
+the set {[ t ] | t ∈ T} of list types constructed from T (cf. §3.1.7 of [2]).
+
+We now have all the necessary to deﬁne a GraphQL schema over (F, A, T).
+
+Deﬁnition 1. A GraphQL schema S over (F, A, T) is composed of three assignments:
+– ﬁeldsS : (OT ∪ IT) → 2F that assigns a set of ﬁelds to every object or interface type,
+– argsS : F → 2A that assigns a set of arguments to every ﬁeld,
+– typeS : F ∪ A → T ∪ L that assigns a type or a list type to every ﬁeld and argument,
+where arguments are assigned scalar types; i.e., typeS(a) ∈ Scalars for all a ∈ A,
+
+and functions that deﬁne interface and union types:
+– unionS : UT → 2OT that assigns a nonempty set of object types to every union type,
+– implementationS : IT → 2OT that assigns a set of object types to every interface.
+Additionally, S contains a distinguished type qS ∈ OT called the query type.
+
+For the sake of avoiding an overly complex formalization, in our deﬁnition of a
+GraphQL schema we ignore the additional notions of input types (cf. §3.1.6 of [2]),
+non-null types (cf. §3.1.8 of [2]), and a mutation type (§3.3 of [2]). However, we capture
+the concept of interfaces and their implementation (cf. §3.1.3 of [2]) by introducing a
+notion of consistency. Informally, a GraphQL schema is consistent if every object type
+that implements an interface type i deﬁnes at least all the ﬁelds that i deﬁnes. Formally,
+S is consistent if ﬁeldsS(i) ⊆ ﬁeldsS(t) for every t ∈ implementationS(i). From now
+on we assume that all GraphQL schemas in this paper are consistent.
+Example 1. The schema speciﬁed in Figure 1 may be captured as S over (F, A, T) with
+
+primaryFunction, length, hero, droid, node},
+
+F = {id f , name, friends, appearsIn, starships, totalCredits,
+A = {ida, unit, episode}, and
+T = OT ∪ IT ∪ UT ∪ Scalars such that:
+
+OT = {Human, Droid, Starship, Query},
+Scalars = {ID, String, Int, Float, Episode},
+
+IT = {Character},
+UT = {SearchResult}.
+
+5 For the sake of simplicity, we assume that Scalars includes the enum types that are treated
+
+separately in the GraphQL speciﬁcation (cf. §3.1.5 of [2]).
+
+As we can see in Figure 1, in the original GraphQL syntax, object types are deﬁned
+using the keyword type, interface types with the keyword interface, and union
+types with the keyword union. Also notice that the schema in Figure 1 introduces
+both a ﬁeld and an argument with name id. To avoid ambiguities we have used two
+diﬀerent names: id f and ida. The values for the scalar types are implicit in their
+names (String, Float, Int) except for ID which is a special scalar type used for
+unique identiﬁers in a GraphQL schema speciﬁcation (cf. §3.1.1.5 of [2]), and Episodes
+which is an enum type such that values(Episodes) = {NEWHOPE, EMPIRE, JEDI}. Regarding 
+the functions that compose S we have that ﬁeldsS deﬁnes the assignments:
+
+Starship → {id f , name, length},
+Character → {id f , name, friends, appearsIn},
+
+Droid → {id f , name, friends, appearsIn, primaryFunction},
+Human → {id f , name, friends, appearsIn, starships, totalCredits},
+Query → {hero, droid, node}.
+
+argsS deﬁnes the assignments:
+
+length → {unit},
+droid → {ida},
+
+hero → {episode},
+node → {ida},
+
+and typeS deﬁnes the assignments:
+
+ida → ID,
+id f → ID,
+
+droid → Droid,
+
+episode → Episode,
+friends → [Character],
+appearsIn → [Episode],
+
+totalCredits → Int,
+
+primaryFunction → String,
+
+unit → String,
+name → String,
+hero → Character,
+node → SearchResult,
+
+length → Float,
+
+The functions that deﬁne union and interface types, respectively, are such that
+
+unionS(SearchResult) = {Human, Droid, Starship},
+
+implementationS(Character) = {Human, Droid}.
+
+2.2 GraphQL Graphs
+The logical data model assumed by GraphQL considers data that can be represented
+in a graph-based form. Such a graph is a directed, edge-labeled multigraph in which
+each node has a type and properties. We deﬁne this graph by using the aforementioned
+domain (F, A, T). Then, each node in the graph is associated with an object type from T.
+The edge labels, as well as the names of node properties, consist of a ﬁeld name from F
+and a set of arguments, where such an argument is a pair consisting of a distinct argument 
+name from A and a corresponding value (note that the set of arguments may be
+empty). The value of each node property is either a single scalar value or a sequence
+thereof. The following deﬁnition captures our notion of a GraphQL graph formally.
+Deﬁnition 2. A GraphQL graph over (F, A, T) is a tuple G = (N, E, τ, λ) where:
+
+– N is a set of nodes,
+– E is a set of edges of the form (u, f[α], v) where u, v ∈ N, f ∈ F, and α is a partial
+– τ : N → OT is a total function that assigns a type to every node, and
+
+mapping from A to Vals,
+
+Figure 3. Example GraphQL graph.
+
+– λ is a partial function that assigns a scalar value v ∈ Vals or a sequence [v1 ··· vn]
+of scalar values (vi ∈ Vals) to some pairs of the form (u, f[α]) where u ∈ N, f ∈ F,
+and α is a partial mapping from A to Vals.
+
+Example 2. Figure 3 illustrates a small GraphQL graph Gex = (Nex, Eex, τex, λex) over
+the domain (F, A, T) as given in Example 1. Gex contains two nodes, Nex = {n0, n1}, and
+three edges, including (n0, droid[α1], n1) ∈ Eex with α1(ida) = 2001. Function τex
+deﬁnes the assignments:
+
+n0 → Query,
+
+n1 → Droid,
+
+and function λex deﬁnes the assignments:
+
+(n1, id f [α∅]) → 2001,
+
+(n1, name[α∅]) → "R2-D2",
+
+(n1, appearsIn[α∅]) → [NEWHOPE EMPIRE JEDI].
+Observe that Deﬁnition 2 introduces the notion of a GraphQL graph independent of
+any particular GraphQL schema. However, for the purpose of deﬁning queries over such
+a graph, the graph is assumed to conform to a given schema. Informally, the conditions
+that conformance to a schema imposes on a GraphQL graph are summarized as follows:
+For every edge, the ﬁeld name that labels the edge is among the ﬁeld names that the
+schema speciﬁes for the type of the source node of the edge. The type that the schema
+associates with this ﬁeld name must match the type of the target node of the edge,
+and if this type associated with the ﬁeld name is not a list type, then the target node
+is the only node connected to the source node by an edge with the given ﬁeld name.
+Moreover, for every argument associated with an edge, the argument name must be
+among the argument names that the schema associates with the ﬁeld name that labels the
+edge, and the value of the argument must be of the type associated with that argument
+name. In addition to these conditions for the edge labels, there exist similar conditions
+for the node properties. Finally, the graph must contain a designated node whose type
+is the query type of the schema. Providing a formal deﬁnition of these conditions is
+straightforward. Due to space limitations, we therefore omit the deﬁnition in this paper.
+Example 3. The GraphQL graph in Example 2 conforms to the schema in Example 1.
+
+3 Deﬁnition of the GraphQL Query Language
+
+In this section we provide a formal deﬁnition of the GraphQL query language. In particular,
+ we ﬁrst deﬁne a concise syntax of GraphQL queries that resembles closely the
+JSON-like syntax introduced in the GraphQL speciﬁcation (cf. §2 of [2]). Thereafter,
+we deﬁne a formal semantics of these queries. However, before going into the formal
+deﬁnitions, we give some intuition of the expressions based on which GraphQL queries
+may be constructed and how these expressions are evaluated over a GraphQL graph.
+
+The most basic construction in our syntax of GraphQL queries are expressions of the
+form f[α]. Informally, when evaluated over a GraphQL graph, such an expression can
+
+be used to match node properties whose name has the same form. Then, assuming the
+value of the property is a scalar value v, or a sequence [v1 ··· vn] of scalar values, then
+the result of the evaluation is a string of the form f:v, or f:[v1 ··· vn]. An alternative
+to the construction f[α] is (cid:96):f[α] which captures the notion of “ﬁeld aliases” (cf.
+§2.7 of [2]). Such aliases can be used to rename the ﬁeld names that appear in the query
+result. That is, when using this alternative construction, the results will be strings of the
+form (cid:96):v or (cid:96):[v1 ··· vn].
+
+To match edges, expressions of the form f[α]{ϕ} can be used, where ϕ is a subquery 
+to be evaluated in the context of the target nodes. Then, for the case of a single
+matching edge, the result is a string of the form f:{ρ} with ρ being the string resulting
+from the evaluation of the subquery ϕ. On the other hand, if the number of matching
+edges may be greater than one (which may be the case if the type associated with ﬁeld f
+is a list type), then the result string is of the form f:[{ρ1}··· {ρn}]. Expressions of the
+form f[α]{ϕ} can also be preﬁxed with a ﬁeld alias: (cid:96):f[α]{ϕ}.
+Our query syntax introduces two more constructions: on t{ϕ} and ϕ1 ··· ϕn. While
+the latter is simply an enumeration of multiple subexpressions whose results are meant
+to be concatenated, the former captures the notion of a “type condition” that is given
+by what the GraphQL speciﬁcation refers to as an “inline fragment” (cf. §2.8.2 of [2]).
+Hence, t is either an object type, an interface type, or a union type, and ϕ is a subquery 
+to be evaluated only for non-terminal nodes whose associated (object) type is
+compatible with t (a formal deﬁnition of this notion of compatibility follows shortly).
+Readers who are familiar with the query syntax introduced in the GraphQL speciﬁcation 
+may notice that we do not capture a number of additional language features,
+namely, (non-inline) “fragments” (§2.8 of [2]), “variables” (§2.10 of [2]), and “direc-
+tives” (§2.12 of [2]). We emphasize that these features are merely syntactic sugar that
+a query parser may resolve by using the features captured in the presented syntax.
+
+The following deﬁnition formalizes our syntax of GraphQL queries.
+
+Deﬁnition 3. A GraphQL query over (F, A, T) is an expression constructed from the
+following grammar where [, ], {, }, :, and on are terminal symbols, f ∈ F, (cid:96) ∈ Fields,
+t ∈ OT ∪ IT ∪ UT, and α represents a partial mapping from A to Vals.
+
+ϕ ::= f[α] |
+
+(cid:96):f[α] | f[α]{ϕ} |
+
+(cid:96):f[α]{ϕ} | on t{ϕ} | ϕ··· ϕ
+
+For the sake of conciseness (and in correspondence with the original GraphQL syn-
+tax), for sub-expressions of the form f[α] with α the empty mapping, we just write f.
+To deﬁne a formal semantics of GraphQL queries we ﬁrst observe that the query
+semantics described in the GraphQL speciﬁcation assume that queries satisfy a notion
+of validity w.r.t. a given GraphQL schema (cf. §5 of [2]). We make the same assumption.
+To this end, we deﬁne validity of queries in terms of our formalization as follows.
+Deﬁnition 4. Let S be a GraphQL schema over (F, A, T), let Q be a GraphQL query
+over (F, A, T), and let t∗ be a type in OT ∪ IT ∪ UT ⊆ T. Then, Q conforms to S in the
+context of t∗, denoted by Q |=t∗ S, if Q satisﬁes the following conditions:
+1. If Q is of the form f[α] or (cid:96):f[α], then
+
+– t∗ (cid:60) UT, f ∈ ﬁeldsS(t∗), dom(α) ⊆ argsS(f), and
+– assuming typeS(f) = t or typeS(f) = [t], t ∈ Scalars.
+– t∗ (cid:60) UT, f ∈ ﬁeldsS(t∗), dom(α) ⊆ argsS(f), and
+
+2. If Q is of the form f[α]{ϕ} or (cid:96):f[α]{ϕ}, then
+
+– assuming typeS(f) = t or typeS(f) = [t], t (cid:60) Scalars and ϕ |=t S.
+
+3. If Q is of the form on t{ϕ}, then ϕ |=t S.
+4. If Q is of the form ϕ1 ··· ϕn, then ϕi |=t∗ S for every ϕi ∈ {ϕ1, ... , ϕn}.
+Moreover, we say that Q conforms to S if Q |=qS S (where qS is the query type of S).
+Example 4. The GraphQL query in Figure 2(a) conforms to the schema in Example 1.
+
+As a last preliminary for formalizing the query semantics of GraphQL we require a
+deﬁnition of the notion of a result that a GraphQL query may return. As for the queries,
+we use expressions that resemble the expressions used in the GraphQL speciﬁcation.
+
+(cid:96):{ρ} |
+
+(cid:96):[v1 ··· vn] |
+
+Deﬁnition 5. A GraphQL result object is constructed from the following grammar where
+(cid:96) ∈ Fields, v, v1, ... , vn ∈ Vals, and {, }, [, ], :, and null are terminal symbols:
+ρ ::= (cid:96):v |
+(cid:96):null
+We now are ready to deﬁne a formal semantics of GraphQL queries. To this end,
+we introduce an evaluation function that, for any GraphQL query and any GraphQL
+graph (both conforming to a given schema), deﬁnes the corresponding query result.
+Deﬁnition 6. Let G = (N, E, τ, λ) be a GraphQL graph over (F, A, T), let Q be a GraphQL
+query over (F, A, T), and let S be a GraphQL schema over (F, A, T) such that G and Q
+conform to S. The S-specific evaluation of Q over G from node u ∈ N, denoted by
+
+(cid:96):[{ρ}··· {ρ}] | ρ··· ρ |
+
+G, is a GraphQL result object that is deﬁned recursively as follows.
+
+(cid:74)Q(cid:75)u
+
+(cid:40)
+(cid:40)
+
+
+
+
+
+G =
+
+G =
+
+G =
+
+G }
+
+G =
+
+(cid:96):null
+
+G }
+
+G =
+
+f:null
+
+(cid:96):λ(u, f[α])
+(cid:96):null
+
+f:λ(u, f[α])
+f:null
+
+G }··· {(cid:74)ϕ(cid:75)vk
+G }··· {(cid:74)ϕ(cid:75)vk
+
+G }] if typeS(f) ∈ LT and {v1, ... , vk} = {vi | (u, f[α], vi) ∈ E}
+if typeS(f) (cid:60) LT and (u, f[α], v) ∈ E
+if typeS(f) (cid:60) LT and there is no v ∈ N s.t. (u, f[α], v) ∈ E
+
+if (u, f[α]) ∈ dom(λ)
+else.
+if (u, f[α]) ∈ dom(λ)
+else.
+
+f:[{(cid:74)ϕ(cid:75)v1
+f:{(cid:74)ϕ(cid:75)v
+(cid:96):[{(cid:74)ϕ(cid:75)v1
+(cid:96):{(cid:74)ϕ(cid:75)v
+(cid:74)ϕ(cid:75)u
+G if t ∈ OT and τ(u) = t
+(cid:74)ϕ(cid:75)u
+G if t ∈ IT and τ(u) ∈ implementationS(t)
+(cid:74)ϕ(cid:75)u
+G if t ∈ UT and τ(u) ∈ unionS(t)
+(ε denotes the empty word)
+G =(cid:74)ϕ1(cid:75)u
+G ···(cid:74)ϕk(cid:75)u
+
+(cid:74)f[α](cid:75)u
+(cid:74)(cid:96):f[α](cid:75)u
+(cid:74)f[α]{ϕ}(cid:75)u
+(cid:74)(cid:96):f[α]{ϕ}(cid:75)u
+(cid:74)on t{ϕ}(cid:75)u
+(cid:74)ϕ1 ··· ϕk(cid:75)u
+Finally, the S-specific evaluation of Q over G, denoted by(cid:74)ϕ(cid:75)G, is simply(cid:74)ϕ(cid:75)G =(cid:74)ϕ(cid:75)u
+In the third and fourth cases in Deﬁnition 6 whenver typeS(f) ∈ LT the evaluation
+produces a sequence from a set of nodes {v1, ... , vk}. Notice that the order of the sequence 
+depends on the order in which we consider the nodes in the previous set. The
+
+G }] if typeS(f) ∈ LT and {v1, ... , vk} = {vi | (u, f[α], vi) ∈ E}
+if typeS(f) (cid:60) LT and (u, f[α], v) ∈ E
+if typeS(f) (cid:60) LT and there is no v ∈ N s.t. (u, f[α], v) ∈ E
+
+where u is the single node in G such that τ(u) = qS.
+
+ε
+
+in other case.
+
+G
+
+G
+
+original GraphQL speciﬁcation implicitly assumes an order associated to every outgoing 
+edge in the graph, and this order is used to produce the mentioned sequences. To
+keep our formalization as simple as possible we did not formally introduce these order
+relations in this paper.
+Example 5. Consider the GraphQL query in Figure 2(a) and the GraphQL schema S
+introduced in Example 1. Figure 2(b) illustrates the result of the S-specific evaluation
+of this example query over the graph in Example 2.
+
+4 Complexity Results
+
+Notice that a GraphQL query has as solution always a single result object, nevertheless,
+this result may be of exponential size as stated in the following proposition.
+
+Proposition 1. For every GraphQL query ϕ and GraphQL graph G it holds that(cid:74)ϕ(cid:75)G
+is of size O(|G||ϕ|). Moreover, there exists a family of queries {ϕn}n≥1 and a graph G,
+such that every query ϕn is of size O(n) but the evaluation(cid:74)ϕn(cid:75)G is of size Ω(2n).
+
+Proof (sketch). Consider a schema with an object type Person with ﬁelds name and
+knows such that name is a scalar, and knows is a list in which every element is of
+type Person. Additionally, the query type qS has a single ﬁeld query of type Person.
+Let G = (V, E, τ, λ) be such that V = {u, v, w, x}, E = {(u, query, v), (v, knows, w),
+(v, knows, x), (w, knows, v), (x, knows, v)}, τ(u) = qS, τ(v) = τ(w) = τ(x) = Person,
+λ(v, name) = Alice. Consider now the queries given by the following recurrence
+
+α1 = name,
+
+and
+
+αi = knows{knows{αi−1}} (for every i > 1),
+
+over the evaluation function in Deﬁnition 6.
+
+in(cid:74)ϕn(cid:75)G. The exponential upper bound can be proved by a simple induction argument
+
+and deﬁne ϕn as query{αn}. It is clear that the size of ϕn is linear in n but the evaluation
+of ϕn over G is of size exponential in n; in fact, the name Alice occurs 2n−1 times
+(cid:117)(cid:116)
+We now go to some of the related decision problems for GraphQL. Notice that the
+result of a GraphQL query is not a set of tuples (as it is for more classical query lan-
+guages). Thus, we need to introduce some further notions to properly deﬁne the evaluation 
+decision problem in our context. Given two GraphQL result objects ρ and ρ(cid:48), we
+say that ρ occurs in ρ(cid:48) if ρ is a substring of ρ(cid:48). Notice that a result object may occur several 
+times in another. We next introduce the notion of removing a result object. Assume
+that ρ occurs in ρ(cid:48), then the result object obtained by removing ρ from ρ(cid:48) is the substring 
+of ρ(cid:48) obtained from deleting an (arbitrary) occurrence of ρ and then recursively
+performing the following procedure:
+
+1. delete every substring of the form {},
+2. delete every substring of the form (cid:96):[] (with (cid:96) ∈ Fields),
+3. repeat the two above steps until no further deletion is possible.
+
+The above procedure ensures that removing a result object from another produces a
+
+valid result object. For instance, consider the following result objects:
+
+ρ1 = p:{n:Alice knows:[{n:Bob}{n:Charly}] son:{n:Dylan knows:[{n:Ed}]}}
+ρ2 = n:Dylan knows:[{n:Ed}]
+ρ3 = p:{n:Alice knows:[{n:Bob}{n:Charly}]}
+ρ4 = p:{n:Alice knows:[{n:Bob}]}
+ρ5 = knows:[{n:Bob}]
+
+Then ρ2 occurs in ρ1. Also notice that, although ρ3 does not occur in ρ1, result object ρ3
+is obtained from ρ1 by removing ρ2. Now, we say that ρ is a reduction of ρ(cid:48) if ρ can be
+obtained from ρ(cid:48) by removing some result objects that occur in it. Finally, we say that
+ρ is a subresult of ρ(cid:48) if ρ occurs in a reduction of ρ(cid:48). Considering our example above,
+we have that ρ4 is a reduction of ρ3 and thus is also a reduction of ρ1. Moreover, since
+ρ5 occurs in ρ4, we have that ρ5 is a subresult of ρ1. Intuitively, when ρ is a subresult
+of ρ(cid:48), we know that all the data in ρ appears in ρ(cid:48) respecting the structure of the original
+result object. With these deﬁnitions we can formalize the following decision problem:
+
+Problem : GqlEval
+Input
+
+Question : is ρ a subresult of(cid:74)ϕ(cid:75)G?
+
+: a GraphQL query ϕ, a graph G, and a result object ρ
+
+Theorem 1. GqlEval is NL-complete.
+
+Proof (Sketch). One main ingredient in the proof is to see GraphQL queries and result
+objects as trees. Intuitively, a query can be seen as a edge-labeled tree that follows the
+structure of the {} symbols. For instance the GraphQL query a{b{c d} e{f}} can be
+represented as a tree in which the root has a single outgoing a-labeled edge to a node,
+say n, with two outgoing edges labeled with b and e. The b-child of n has two outgoing
+edges labeled with c and d, while the e-child of n has only one f-labeled outgoing edge.
+For result objects the situations is similar but structures of the form a:[{ρ1}··· {ρk}]
+represents several a-labeled edges to every one of the trees constructed from ρ1, ... , ρk,
+and structures of the form a:v with v a scalar, represent an edge pointing to a leaf node
+labeled with v. With this representation we can talk about root, paths, and leaves in
+GraphQL queries and result objects, respectively. Another observation is that we can
+traverse a query by following its tree structure, that is, going from one label up to its
+parent, down to one of its children, or left/right to its siblings, by using logarithmic
+space. A similar traversal can be done for result objects.
+
+We now have all the necessary to sketch the NL membership of GqlEval. First we
+guess the position, say p, of a label in ϕ, and a node, say u, in G. The intuition is that p
+represents the part of the query ϕ that when evaluated over G from node u contains ρ as
+a subresult object. This last property can be checked in NL as follows. We ﬁrst check
+that ρ matches the schema of query ϕ at position p. To this end, we consider every edge
+of the form a:v (that is, an edge to a leaf node) in ρ and its corresponding path from
+the root of ρ. Lets denote by Pa:v this path (which is essentially a sequence of labels).
+Then we check that there is a path in the query ϕ starting at p that matches Pa:v. Notice
+that we are performing reachability tests that can de done in NL (actually in L since the
+reachability is on trees). We still need to check two further properties: (1) that node u
+can be reached from the query node in G by following the corresponding path in ϕ from
+the root to position p, and that (2) the data in result object ρ can actually be obtained
+
+from G starting at node u. Check (1) can be done in NL by a standard reachability test.
+To check (2) we only need to iterate over all leaves of the form a:v in ρ and check that
+there exists a path in G from u to a node v that matches the labels of the path from the
+root of ρ to a:v, and such that λ(v, a) = v. It can be proven that these checks are a
+
+necessary and suﬃcient condition to check that ρ is a subresult of(cid:74)ϕ(cid:75)G.
+
+NL-hardness follows easily from the reachability problem in directed graphs. Given
+a directed graph G with N nodes and two nodes u and v, we create a GraphQL graph G(cid:48)
+by adding a label, say a to every edge, an initial query node q to G, an edge labeled q
+from q to u, and a data value, say 1, associated to attribute b in node v. Types of nodes
+in G(cid:48) are arbitrary. Then we consider the sequence of queries constructed recursively as
+α0 = b and αi = b a{αi−1}, and the query ϕ = q{αN−1}. It is not diﬃcult to argue that
+G(cid:48) and ϕ can be constructed from G by using logarithmic space. Moreover, the result
+(cid:117)(cid:116)
+
+object b:1 is a subresult of(cid:74)ϕ(cid:75)G(cid:48) if and only if v is reachable from u in G.
+
+5 Concluding Remarks and Future Work
+
+We have embarked on the study of Facebook’s GraphQL language; that is, we have
+formalized its syntax and semantics and presented some initial complexity results. This
+new language opens several interesting directions for future research.
+
+Our current ongoing work includes a complexity study and algorithm design for
+more practical problems related to GraphQL, including the parallel evaluation of queries
+and the estimation of the size of a result object before computing the result. Our initial
+ﬁndings show that, as for the case of the evaluation decision problems, these problems
+also have a very low computational complexity.
+
+As another important topic for future research we plan to compare the GraphQL
+query language with classical query languages. An immediate candidate in terms of
+expressive power and complexity is the language of acyclic conjunctive queries (ACQs).
+The (combined) complexity of ACQs is LOGCFL-complete [4] and, since it is believed
+that NL (cid:40) LOGCFL, the membership of GqlEval in NL shows an important diﬀerence
+in terms of complexity between the two languages.
+
+References
+
+1. ECMA. ECMA-404: The JSON Data Interchange Format. ECMA (European Association for
+
+Standardizing Information and Communication Systems), Geneva, Switzerland, 2013.
+
+2. Facebook, Inc. GraphQL. Working Draft, Oct. 2016. Online at http://facebook.github.io/
+
+graphql, retrieved on Dec. 12, 2016.
+
+3. L. Feigenbaum and G. T. Williams. SPARQL 1.1 Protocol for RDF. W3C Rec., 2013.
+4. G. Gottlob, N. Leone, and F. Scarcello. The complexity of acyclic conjunctive queries. J.
+
+ACM, 48(3):431–498, 2001.
+
+5. H. He and A. K. Singh. Graphs-at-a-time: Query Language and Access Methods for Graph
+Databases. In Proceedings of the ACM SIGMOD International Conference on Management
+of Data, pages 405–418, 2008.
+
+6. L. Richardson, M. Amundsen, and S. Ruby. RESTful Web APIs. O’Reilly Media, Inc., 2013.
+7. I. Robinson, J. Webber, and E. Eifrém. Graph Databases. O’Reilly Media, 2013.
+8. R. Verborgh, M. Vander Sande, O. Hartig, J. Van Herwegen, L. De Vocht, B. De Meester,
+G. Haesendonck, and P. Colpaert. Triple Pattern Fragments: a Low-cost Knowledge Graph
+Interface for the Web. Journal of Web Semantics, 37–38:184–206, 2016.
+
+

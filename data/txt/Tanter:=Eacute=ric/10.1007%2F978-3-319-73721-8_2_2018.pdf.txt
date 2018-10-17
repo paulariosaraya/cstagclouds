@@ -1,0 +1,1368 @@
+Gradual Program Veriﬁcation
+
+Johannes Bader1, Jonathan Aldrich2, and Éric Tanter3
+
+1 Microsoft Corporation, Redmond, USA,
+
+jobader@microsoft.com
+
+2 Institute for Software Research, Carnegie Mellon University, Pittsburgh, USA
+
+3 PLEIAD Lab, Computer Science Dept (DCC), University of Chile, Santiago, Chile
+
+jonathan.aldrich@cs.cmu.edu
+
+etanter@dcc.uchile.cl
+
+Abstract. Both static and dynamic program veriﬁcation approaches
+have signiﬁcant disadvantages when considered in isolation. Inspired by
+research on gradual typing, we propose gradual veriﬁcation to seamlessly 
+and ﬂexibly combine static and dynamic veriﬁcation. Drawing on
+general principles from abstract interpretation, and in particular on the
+recent Abstracting Gradual Typing methodology of Garcia et al., we systematically 
+derive a gradual veriﬁcation system from a static one. This
+approach yields, by construction, a gradual veriﬁcation system that is
+compatible with the original static system, but overcomes its rigidity by
+resorting to dynamic veriﬁcation when desired. As with gradual typing,
+the programmer can control the trade-oﬀ between static and dynamic
+checking by tuning the (im)precision of preand 
+postconditions. The
+formal semantics of the gradual veriﬁcation system and the proofs of
+its properties, including the gradual guarantees of Siek et al., have been
+fully mechanized in the Coq proof assistant.
+
+1
+
+Introduction
+
+Program veriﬁcation techniques have the potential to improve the correctness
+of programs, by exploiting preand 
+postconditions speciﬁed in formulas drawn
+from a given logic, such as Hoare logic [8]. Unfortunately, traditional approaches
+to veriﬁcation have a number of shortcomings, as illustrated next.
+
+Example 1.
+int withdraw (int balance , int amount )
+
+requires ( balance ≥ amount ) ensures ( balance ≥ 0) {
+return balance - amount ; // returns the new balance
+
+}
+
+int balance : = 100;
+balance : = withdraw ( balance , 30);
+balance : = withdraw ( balance , 40);
+
+c(cid:2) Springer International Publishing AG 2018
+I. Dillig and J. Palsberg (Eds.): VMCAI 2018, LNCS 10747, pp. 25–46, 2018.
+https://doi.org/10.1007/978-3-319-73721-8_2
+
+25
+
+26
+
+J. Bader et al.
+
+In this case, we reason about a variable balance representing some bank account.
+The contract (preand 
+postconditions) of withdraw speciﬁes that it may only be
+called if the balance is high enough to withdraw the given amount, ensuring that
+no negative balance is reached. There are a number of ways to verify Example 1.
+We brieﬂy discuss static and dynamic veriﬁcation, including hybrid approaches.
+We then introduce gradual veriﬁcation as an approach that has the potential to
+overcome a number of their shortcomings.
+
+Static veriﬁcation. Formal methods like Hoare logic are used to establish
+statically that a program is valid, i.e. satisﬁes its speciﬁcation. In Example 1, the
+static veriﬁer proves both that withdraw itself complies with its contract and
+that the three statements below are valid, e.g. that the precondition of withdraw
+is satisﬁed prior to both calls.
+
+A lack of detailed contracts may prevent the veriﬁer from establishing that a
+program is valid. In Example 1, veriﬁcation of the second call to withdraw in fact
+fails: after the ﬁrst call, the veriﬁer knows from the postcondition that (balance
+≥ 0), which is insuﬃcient to justify that (balance ≥ 40) as required for the
+second call. Deriving such knowledge would require a stronger postcondition such
+as balance = old(balance) - amount. However, this is not the postcondition
+that was provided by the programmer, perhaps intentionally (e.g. if the intent
+was to focus on some weaker correctness properties) or perhaps due to limited
+expressiveness of the underlying logic (notation such as old(x) may not exist).
+In general, a veriﬁcation tool might also fail to prove program properties due to
+undecidability of the underlying logic or practical limitations of the speciﬁc tool
+implementation.
+
+Hoare logic has been extended to more powerful logics like separation logic
+[15] and implicit dynamic frames [20]. Yet, the requirement of rigorous annotation 
+of contracts remains an issue in these settings. Due to space limitations 
+and to capture the core ideas of gradual veriﬁcation, this paper focuses 
+on a simple Hoare logic. We have formalized an extension to implicit
+dynamic frames and implemented a prototype, which can both be found at
+http://olydis.github.io/GradVer/impl/HTML5wp/
+
+Dynamic veriﬁcation. An alternative approach is to use dynamic veriﬁcation 
+to ensure that a program adheres to its speciﬁcation at runtime, by turning
+the contract into runtime checks. A contract violation causes a runtime exception
+to be thrown, eﬀectively preventing the program from entering a state that contradicts 
+its speciﬁcation. In Example 1, a dynamic veriﬁcation approach would
+not raise any error because the balance is in fact suﬃcient for both calls to
+succeed. Note that because contracts are checked at runtime, one can even use
+arbitrary programs as contracts, and not just formulas drawn from a logic [6].
+Meyer’s Design by Contract methodology [12] integrated writing contracts in
+this way as an integral part of the design process, with the Eiﬀel language automatically 
+performing dynamic contract veriﬁcation [11]. Dynamic veriﬁcation
+has also notably been used to check JML speciﬁcations [3], and has been extended 
+to the case of separation logic by Nguyen et al. [14]. Note that unlike the
+static approach, the dynamic approach only requires programmers to encode the
+
+Gradual Program Veriﬁcation
+
+27
+
+properties they care about as preand 
+postconditions, and does not require extra 
+work for the sake of avoiding false negatives. However, the additional checks
+impose runtime overhead that may not always be acceptable. Furthermore, violations 
+of the speciﬁcation are no longer detected ahead of time.
+
+Hybrid approaches. Recognizing that static and dynamic checking have
+complementary advantages, some approaches to combine them have emerged. In
+particular, with the Java Modeling Language (JML) [2] and Code Contracts [5],
+it is possible to use the same speciﬁcations for either static or dynamic veriﬁcation.
+ Additionally, Nguyen et al. explored a hybrid approach to reduce the
+overhead of their approach to runtime checking for separation logic, by exploiting
+static information [14].
+
+Although useful, these techniques do not support a smooth continuum between 
+static and dynamic veriﬁcation. With the JML approach, engineers enable
+static or dynamic veriﬁcation; the two checking regimes do not interact. Nguyen
+et al. use the static checker to optimize runtime checks, but do not try to report
+static veriﬁcation failures because it is diﬃcult to distinguish failures due to contradictions 
+in the speciﬁcation (which the developer should be warned about)
+from failures due to leaving out parts of the speciﬁcation (which could have been
+intentional underspeciﬁcation, and thus should not produce a warning). Their
+runtime checking approach also requires the speciﬁcation of heap footprints to
+match in preand 
+post-conditions, which like many static checking approaches
+forces programmers to do extra speciﬁcation work to avoid false negatives.
+
+Gradual veriﬁcation. Because this tension between static and dynamic
+veriﬁcation is reminiscent of the tension between static and dynamic type checking,
+ we propose to draw on research on gradual typing [18,17,7] to develop a
+ﬂexible approach to program veriﬁcation, called gradual veriﬁcation. Gradual
+typing supports both static and dynamic checking and the entire spectrum in
+between, driven by the precision of programmer annotations [19]. Similarly, gradual 
+veriﬁcation introduces a notion of imprecise contracts, supporting a continuum 
+between static and dynamic veriﬁcation. A static checker can analyze a
+gradually-speciﬁed program and warn the programmer of inconsistencies between 
+speciﬁcations and code, including contracts that are intended to be fully
+precise but are not strong enough, as well as contracts that contradict one another 
+despite possible imprecision in each. On the other hand, the static checker
+will not produce warnings that arise from a contract that is intentionally imprecise;
+ in these cases, runtime checking is used instead. Programmers can rely on
+a gradual guarantee stating that reducing the precision of speciﬁcations never
+breaks the veriﬁability (and reduceability) of a program. This guarantee, originally 
+formulated by Siek et al. in the context of gradual types [19], ensures
+that programmers can choose their desired level of precision without artiﬁcial
+constraints imposed by the veriﬁcation technology.
+
+It is worth noting that the similarly named work “The Gradual Veriﬁer”
+[1] focuses on measuring the progress of static veriﬁcation. Their veriﬁcation
+technique “GraVy” is neither sound nor complete and does not comply with the
+gradual guarantee.
+
+28
+
+J. Bader et al.
+
+Gradual veriﬁcation is not only useful in cases of missing information (e.g.
+when reusing a library that is not annotated) but also to overcome limitations
+of the static veriﬁcation system as motivated by Example 1. Furthermore, programmers 
+can gradually evolve and reﬁne static annotations. As they do so, they
+are rewarded by progressively increased static correctness guarantees and progressively 
+decreased runtime checking, supporting a pay-as-you-go cost model.
+Speciﬁcally, we support imprecision by introducing an unknown formula
+? that acts like a wildcard during static veriﬁcation. Semantically, the static
+checker will optimistically accept a formula containing ? as long as there exists
+some interpretation of ? that makes the formula valid. As we learn more information 
+about the program state at runtime, the dynamic checker ensures that
+some valid instantiation still exists. Crucially, the unknown formula can be combined 
+with static formulas, forming imprecise formulas. For instance, going back
+to Example 1, we can write the imprecise postcondition (balance ≥ 0) /\ ? in
+order to enable gradual reasoning, resulting in an optimistic interpretation of ?
+as (balance ≥ 40) when statically proving the precondition of the second call.
+At runtime, this interpretation is checked, to ensure soundness.
+Note that the postcondition we suggest is only partially unknown, preserving
+the static knowledge (balance ≥ 0). This not only allows us to prove certain
+goals (e.g. (balance 6= -10)) without requiring any dynamic checks, but also
+to statically reject programs that provably contradict this knowledge (e.g. if a
+subsequent call had balance = -10 as precondition).
+
+Contributions. This paper is the ﬁrst development of the ideas of gradual typing 
+in the context of program logics for veriﬁcation. More precisely, we ﬁrst
+introduce a simple statically-veriﬁed language called SVL, along with its associated 
+program logic. We then adapt the Abstracting Gradual Typing methodology
+(AGT) [7] to the veriﬁcation setting and show in section 3 how the static semantics 
+of a gradually-veriﬁed language GVL can be derived from SVL using principles 
+of abstract interpretation. Section 4 develops GVL’s dynamic semantics.
+Here, we deviate from the AGT approach and instead propose injecting a minimal 
+amount of runtime assertion checks, yielding a pay-as-you-go cost model.
+Finally, Section 5 brieﬂy discusses GVLIDF, an extension of our approach to
+heap-allocated objects and an extended logic with implicit dynamic frames [20].
+
+Limitations. Our approach for dynamic semantics requires assertions to be evaluable 
+at runtime, naturally limiting the logic usable for annotations. The AGT
+methodology (based on combining the proof-trees at runtime) is not restricted
+that way, so it may be the ideal starting point for gradual veriﬁcation in presence
+of higher-order logic assertions.
+
+The formal semantics of GVL and the proofs of its properties have been fully
+mechanized in the Coq proof assistant and can be found at http://olydis.
+github.io/GradVer/impl/HTML5wp/. The site also includes a report with the
+formal treatment of the extended logic, as well as an interactive online prototype
+of GVLIDF. Due to limited space, some ﬁgures contain only selected parts of
+deﬁnitions. Complete deﬁnitions can be found online as well.
+
+Gradual Program Veriﬁcation
+
+29
+
+program ::= procedure s
+procedure ::= T m(T x) contract { s }
+
+contract ::= requires φ ensures φ
+
+T ::= int
+⊕ ::= + | - | ...
+(cid:12) ::= = | =/ | < | ...
+
+and syntactic sugar
+
+return e
+
+s ∈ Stmt ::= skip | s1; s2 | T x | x := e
+
+| x := m(x) | assert φ
+
+e ∈ Expr ::= v | x | (e ⊕ e)
+x ∈ Var ::= result | ident | old(ident)
+v ∈ Val ::= n
+
+φ ∈ Formula ::= true | (e (cid:12) e) | φ /\ φ
+def= T x; x := e
+
+T x := e
+
+def= result := e
+
+and
+
+Fig. 1. SVL: Syntax
+
+2 SVL: Statically Veriﬁed Language
+
+In the following sections, we describe a simple statically veriﬁed language called
+SVL. We formalize its syntax, semantics and soundness.
+
+2.1 Syntax
+Figure 1 shows the syntax of SVL. Programs consist of a collection of procedures
+and a designated statement resembling the entry point (“main procedure”). We
+include the empty statement, statement sequences, variable declarations, variable 
+assignments, procedure calls, and assertions. All statements are in A-normal
+form, which is not essential semantically but does simplify the formalism. Procedures 
+have contracts consisting of a preand 
+postcondition, which are formulas.
+Formulas can be the constant true, binary relations between expressions, and a
+conjunction /\ . Expressions can occur within a formula or variable assignment,
+and consist of variables, constants and arithmetic operations. 4
+
+For the remainder of this work we only consider well-formed programs: variables 
+are declared before use, procedure names are unique and contracts only
+contain variables that are in scope. More speciﬁcally, a precondition may only
+contain the procedure’s parameters xi, a postcondition may only contain the
+special variable result and the dummy variables old(xi).
+
+To simplify the presentation of semantics, we will give rules for procedures
+
+that have exactly one parameter.
+
+2.2 Dynamic Semantics
+We now describe the dynamic semantics of SVL. SVL has a small-step semantics
+· −→ · : State * State (see Fig. 2) that describes discrete transitions between
+program states. Program states that are not in the domain of this partial function
+are said to be stuck, which happens if an assertion does not hold or a contract is
+4 Our approach is directly applicable to, say, further control structures, a richer type
+
+system or formulas that are arbitrary boolean expressions.
+
+30
+
+J. Bader et al.
+
+violated before/after a call. In Section 2.3, we deﬁne a static veriﬁcation system
+whose soundness result implies that valid SVL programs do not get stuck.
+
+Program states. Program states consist of a stack, i.e. State = Stack where:
+
+S ∈ Stack ::= E · S | nil
+
+where
+
+E ∈ StackFrame = Env × Stmt
+
+A stack frame consists of a local variable environment ρ ∈ Env = Var * Val
+and a continuation statement.
+
+Evaluation. An expression e is evaluated according to a big-step evaluation
+relation ρ ‘ e ⇓ v, yielding value v using local variable environment ρ ∈ Env of
+the top-most stack-frame. The deﬁnition is standard: variables are looked up in
+ρ, and the resulting values are combined according to standard arithmetic rules.
+Example: [x 7→ 3] ‘ x + 5 ⇓ 8
+The evaluation of a formula in a given environment is speciﬁed by the predicate 
+· (cid:15) · ⊆ Env × Formula. We assume standard evaluation semantics for
+standard concepts like equality. We also say that a formula describes a certain
+(inﬁnite) set of environments (exactly the environments under which it holds),
+yielding natural deﬁnitions for formula satisﬁability and implication.
+
+Deﬁnition 1 (Denotational Formula Semantics).
+
+Deﬁnition 2 (Formula Satisﬁability). A formula φ is satisﬁable if and only
+
+LetJ·K : Formula → P(Env) be deﬁned asJφK def= { ρ ∈ Env | ρ (cid:15) φ }
+ifJφK 6= ∅. Let SatFormula ⊂ Formula be the set of satisﬁable formulas.
+Deﬁnition 3 (Formula Implication). φ1 ⇒ φ2 if and only ifJφ1K ⊆Jφ2K
+
+Reduction rules. We deﬁne a standard small-step reduction semantics for statements 
+(Fig. 2). SsAssert ensures that assertions are stuck if the asserted formula 
+is not satisﬁed. SsCall sets up a new stack frame and makes sure that the
+procedure’s precondition is satisﬁed by the newly set up context. Similarly, SsCallExit 
+ensures that the postcondition is satisﬁed before returning control to
+the call site. Note our use of auxiliary functions procedure and mpost in order to
+retrieve a procedure’s deﬁnition or postcondition using that procedure’s name.
+Formally, we assume all rules and deﬁnitions are implicitly parameterized with
+the “executing” program p ∈ Program from which to extract this information.
+When required for disambiguation, we explicitly annotate reduction arrows with
+the executing program p, as in −→p.
+
+Note that SsCall also initializes old(x0), which allows assertions and most
+importantly the postcondition to reference the parameter’s initial value. In reality,
+ no additional memory is required to maintain this value since it is readily
+available as ρ(x), i.e. it lives in the stack frame of the call site. For a program to
+be well-formed, it may not write to old(x0) in order to enable this reasoning.
+
+Gradual Program Veriﬁcation
+
+31
+
+ρ (cid:15) φ
+
+hρ, assert φi · S −→ hρ, skipi · S
+
+SsAssert
+
+ρ ‘ e ⇓ v
+
+0 = ρ[x 7→ v]
+
+ρ
+
+hρ, x := ei · S −→ hρ
+
+0
+
+, skipi · S
+
+SsAssign
+
+procedure(m) = Tr m(T x
+
+ρ ‘ x ⇓ v
+hρ, y := m(x); si · S −→ hρ
+
+0 = [x
+
+ρ
+
+0 7→ v, old(x
+
+0) 7→ v]
+
+0 (cid:15) φp
+, ri · hρ, y := m(x); si · S
+
+ρ
+
+0
+
+0) requires φp ensures φq { r }
+
+SsCall
+
+post(m) = φq
+
+0 (cid:15) φq
+
+ρ
+
+0
+
+hρ
+
+, skipi · hρ, y := m(x); si · S −→ hρ[y 7→ ρ
+
+0(result)], si · S
+
+SsCallExit
+
+Fig. 2. SVL: Small-step semantics (selected rules)
+
+WLP(skip, φ)
+= φ
+WLP(x := e, φ)
+= φ[e/x]
+WLP(y := m(x), φ) = max
+⇒
+
+WLP(s1; s2, φ)
+WLP(assert φa, φ) = φa /\ φ
+
+= WLP(s1, WLP(s2, φ))
+
+0 | y 6∈ FV(φ0) ∧
+
+{ φ
+φ0 ⇒ mpre(m)[x/mparam(m)] ∧
+(φ0 /\ mpost(m)[x, y/old(mparam(m)), result]) ⇒ φ }
+
+Fig. 3. SVL: Weakest precondition (selected rules)
+
+2.3 Static Veriﬁcation
+We deﬁne the static veriﬁcation of SVL contracts through a weakest liberal precondition 
+calculus [4]. This syntax-directed approach (compared to, say, Hoare
+logic, which has an existential in its sequence rule) will be useful for the dynamic
+semantics of our gradual language (will be pointed out again later).
+Deﬁnition 4 (Valid Procedure).
+A procedure with contract requires φp ensures φq, parameter x and body s is
+considered valid if φp ⇒ WLP(s, φq)[x/old(x)] holds.
+We deﬁne WLP : Stmt × Formula * Formula as shown in Figure 3. WLP is
+standard for the most part. The rule for calls computes a maximal formula φ0
+(i.e. minimum information content) that is suﬃcient to imply both the proce-
+dure’s precondition and the overall postcondition φ with the help of the proce-
+dure’s postcondition.
+Deﬁnition 5 (Valid Program). A program with entry point statement s is
+considered valid if true ⇒ WLP(s, true) holds and all procedures are valid. 5
+5 Note that one can demand more than true to hold at the ﬁnal state by simply ending
+
+the program with an assertion statement.
+
+32
+
+J. Bader et al.
+
+sWLP(s · nil, φ)
+sWLP(s · (y := m(x); s
+
+= WLP(s, φ) · nil
+
+0) · s, φ) = WLP(s, mpost(m)) · sWLP((y := m(x); s
+
+0) · s, φ)
+
+Fig. 4. Weakest precondition across call boundaries
+
+Example 2 (Static Checker of SVL). We demonstrate the resulting behavior of
+SVL’s static checker using example 1, but with varying contracts:
+requires (balance ≥ amount)
+ensures (result = old(balance) - old(amount))
+
+withdraw is valid since the WLP of the body, given the postcondition, is
+(balance - amount = old(balance) - old(amount)). Substitution gives
+(balance - amount = balance - amount) which is trivially implied by
+the precondition. The overall program is also valid since the main proce-
+dure’s WLP is (100 ≥ 70) which is implied by true.
+requires (balance ≥ amount) ensures (result ≥ 0)
+(as in example 1)
+withdraw is valid since the body’s WLP is (balance - amount ≥ 0) which
+matches the precondition. However, the program is not valid: The WLP of the
+second call is (balance ≥ 40) which is not implied by the postcondition of
+the ﬁrst call. As a result, the WLP of the entire main procedure is undeﬁned.
+
+requires (balance ≥ 0) ensures (result ≥ 0)
+
+Validating withdraw fails since the body’s WLP (same as above) is not implied 
+by the precondition.
+
+2.4 Soundness
+
+Veriﬁed programs should respect contracts and assertions. We have formulated
+the runtime semantics of SVL such that they get stuck if contracts or assertions
+are violated. As a result, soundness means that valid programs do not get stuck.
+In particular, we can use a syntactic progress/preservation argument [22].
+
+If the WLP of a program is satisﬁed by the current state, then execution
+will not get stuck (progress) and after each step of execution, the WLP of the
+remaining program is again satisﬁed by the new state (preservation). We use a
+progress and preservation formulation of soundness not just because it allows us
+to reason about non-terminating programs, but mainly because this will allow
+us to naturally deal with the runtime checking needs of gradual veriﬁcation.
+
+To simplify reasoning about states with multiple stack frames, we extend
+the deﬁnition of WLP to accept a stack of statements and return a stack of
+preconditions, as shown in Figure 4. Note that WLP as deﬁned previously can
+only reason about procedure calls atomically since an element of Stmt cannot
+encode intermediate states of an ongoing procedure call. In contrast sWLP works
+across call boundaries by accepting a stack of statements and recursively picking
+up the postconditions of procedures which are currently being executed.
+
+While before we deﬁned what makes procedures as a whole valid, we can now
+
+validate arbitrary intermediate program states, e.g. we can say that
+
+return balance - amount
+
+b2 := withdraw(b1, a)
+
+·
+·
+nil
+
+sWLP
+
+, (b2 6= -1) /\ (a = 4)
+
+Gradual Program Veriﬁcation
+
+33
+
+ =
+
+(balance - amount ≥ 0)
+(b1 ≥ a) /\ (a = 4)
+
+·
+·
+nil
+
+where withdraw is deﬁned as in example 1. If s are the continuations of some
+arbitrary program state π ∈ State, then sWLP(s, true) is the precondition for
+s. If sWLP(s, true) holds in the variable environments ρ of π, respectively, then
+soundness guarantees that the program does not get stuck. In the following, we
+extend the notion of validity to arbitrary intermediate program states in order
+to formalize progress and preservation. Validity of states is an invariant that
+relates the static and dynamic semantics of valid SVL programs.
+Deﬁnition 6 (Valid state). We call the state hρn, sni· ...·hρ1, s1i·nil ∈ State
+valid if ρi (cid:15) sWLPi(sn · ... · s1 · nil, true) for all 1 ≤ i ≤ n. (sWLPi(s, φ) is the
+i-th component of sWLP(s, φ))
+Validity of the initial program state follows from validity of the program (Def. 5).
+Proposition 1 (SVL: Progress). If π ∈ State is a valid state and π 6∈
+{hρ, skipi · nil | ρ ∈ Env} then π −→ π0 for some π0 ∈ State.
+Proposition 2 (SVL: Preservation). If π is a valid state and π −→ π0 for
+some π0 ∈ State then π0 is a valid state.
+
+3 GVL: Static Semantics
+Having deﬁned SVL, we can now derive its gradual counterpart GVL, which
+supports gradual program veriﬁcation thanks to imprecise contracts. We follow
+the abstract interpretation perspective on gradual typing [7], AGT for short.
+In this sense, we introduce gradual formulas as formulas that can include the
+unknown formula, denoted ?:
+
+eφ ::= φ | φ /\ ?
+We deﬁne eFormula as the set of all gradual formulas. The syntax of GVL
+requireseφ ensureseφ. In Sections 3.2 to 3.4 we lift the predicates and functions
+
+is unchanged save for the use of gradual formulas in contracts: contract ::=
+
+and standalone formula ? as syntactic sugar for true /\ ?
+
+SVL uses for veriﬁcation from the static domain to the gradual domain, yielding
+a gradual veriﬁcation logic for GVL.
+
+Interpretation of Gradual Formulas
+
+3.1
+We call φ in φ /\ ? static part of the imprecise formula and deﬁne a helper
+
+function static :eFormula → Formula that extracts the static part of a gradual
+
+formula, i.e. static(φ) = φ and static(φ /\ ?) = φ. Following the AGT approach,
+a gradual formula is given meaning by concretization to the set of static formulas
+that it represents.
+
+34
+
+J. Bader et al.
+
+Deﬁnition 7 (Concretization of gradual formulas).
+
+γ :eFormula * PFormula is deﬁned as:
+
+γ(φ) = { φ }
+γ(φ /\ ?) = { φ0 ∈ SatFormula | φ0 ⇒ φ }
+γ(φ /\ ?) undeﬁned otherwise
+
+if φ ∈ SatFormula
+
+A fully-precise formula concretizes to the singleton set. Importantly, we only
+concretize imprecise formulas to precise formulas that are satisﬁable. Note that
+the concretization of any gradual formula always implies the static part of that
+formula. The notion of precision between formulas, reminiscent of the notion of
+precision between gradual types [19], is naturally induced by concretization [7]:
+
+Deﬁnition 8 (Precision). eφ1 is more precise than eφ2, written eφ1 v eφ2 if and
+only if γ(eφ1) ⊆ γ(eφ2).
+
+3.2 Lifting Predicates
+The semantics of SVL makes use of predicates that operate on formulas, namely
+formula implication and formula evaluation. As GVL must operate on gradual 
+formulas, these predicates are lifted in order to deal with gradual formulas
+in a consistent way. We propose the following deﬁnitions of consistent formula
+evaluation and implication.
+Deﬁnition 9 (Consistent Formula Evaluation).
+Let
+Deﬁnition 10 (Consistent Formula Implication).
+Let
+
+· e(cid:15) · ⊆ Env ×eFormula be deﬁned as ρe(cid:15) eφ ⇐⇒ ρ (cid:15) static(eφ)
+·f⇒ · ⊆eFormula ×eFormula be deﬁned inductively as
+φ1 ⇒ static(eφ2)
+φ ⇒ static(eφ2)
+eImplGrad
+φ1 /\ ?f⇒ eφ2
+φ1 f⇒ eφ2
+In ruleeImplGrad, φ represents a plausible formula represented by φ1 /\ ?.
+Deﬁnition 11 (Consistent Predicate Lifting). The consistent lifting eP ⊆
+eFormula ×eFormula of a predicate P ⊆ Formula × Formula is deﬁned as:
+
+Abstract interpretation. Garcia et al. [7] deﬁne consistent liftings of predicates
+as their existential liftings:
+
+eImplStatic
+
+φ ∈ SatFormula
+
+φ ⇒ φ1
+
+eP(eφ1,eφ2)
+
+Our deﬁnitions above are proper predicate liftings.
+Lemma 1 (Consistent Formula Evaluation and Implication).
+
+def⇐⇒ ∃φ1 ∈ γ(eφ1), φ2 ∈ γ(eφ2). P(φ1, φ2)
+and ·f⇒ ·
+
+· (cid:15) ·
+
+(Def. 9) is a consistent lifting of
+
+consistent lifting of
+
+· ⇒ · .
+
+· e(cid:15) ·
+
+(Def. 10) is a
+
+Gradual Program Veriﬁcation
+
+35
+
+3.3 Lifting Functions
+Deriving gradual semantics from SVL also involves lifting functions that operate
+on formulas, most importantly WLP (Deﬁnition 3). Figure 5 gives the deﬁnition
+
+of ]WLP : Stmt ×eFormula * eFormula, the consistent lifting of WLP. For
+]WLP(skip,eφ)
+=eφ
+= ]WLP(s1, ]WLP(s2,eφ))
+=eφ[e/x]
+]WLP(x := e,eφ)
+(cid:26)φ0
+]WLP(y := m(x),eφ) =
+00 | y 6∈ FV(φ00) ∧ (φ00 e⇒ mpre(m)[x/mparam(m)]) ∧
+(φ00 /\ mpost(m)[x, y/old(mparam(m)), result]) e⇒ eφ }
+
+]WLP(s1; s2,eφ)
+]WLP(assert φa,eφ) = φa /\ eφ
+if eφ, mpre(m), mpost(m) ∈ Formula
+
+where φ0 = max
+⇒
+
+φ0 /\ ? otherwise
+{ φ
+
+Fig. 5. GVL: Weakest precondition (selected rules)
+
+most statements ]WLP is deﬁned almost identical to WLP, however, calls are more
+
+complex. Note that for calls, ]WLP not only has to deal with the fact that eφ is a
+
+gradual formula, but also that procedure m may now have imprecise contracts.
+In a sense, the function is lifted w.r.t. three formula parameters, two of them
+referenced through the procedure’s name. To accomplish this, we ﬁrst determine
+the static part φ0 of the result which is analogous to the WLP, but resorting to
+lifted predicates. Next, we determine whether it would be suﬃcient to return φ0
+unmodiﬁed, or whether it is plausible that the precondition must be stronger. If
+all three inﬂuencing formulas are precise ]WLP should coincide with WLP, so φ0 is
+returned. Otherwise, φ0 might have been chosen too weak, which is counteracted
+by making it imprecise.
+
+Abstract interpretation. Again, AGT [7] formalizes the notion of consistent functions 
+using an abstraction function α that maps a set of static formulas back to
+the most precise gradual formula that represents this set, such that hγ, αi forms
+a Galois connection.
+Deﬁnition 12 (Abstraction of formulas). Let α : PSatFormula
+
+*eFormula
+be deﬁned as α(φ) = minv { eφ ∈eFormula | φ ⊆ γ(eφ) }
+α is partial since minv does not necessarily exist, e.g. α({(x 6= x), (x = x)})
+is undeﬁned. Using concretization for gradual parameters and abstraction for
+return values one can consistently lift (partial) functions:
+Formula * Formula, its consistent lifting ef : eFormula * eFormula is
+Deﬁnition 13 (Consistent Function Lifting). Given a partial function f :
+deﬁned as ef(eφ) = α({ f(φ) | φ ∈ γ(eφ) })
+
+36
+
+J. Bader et al.
+
+Lemma 2 (Consistent WLP). ]WLP is a consistent lifting of WLP.
+
+3.4 Lifting the Veriﬁcation Judgment
+Gradual veriﬁcation in GVL must deal with imprecise contracts. The static
+veriﬁer of SVL uses WLP and implication to determine whether contracts and
+the overall program are valid (Def. 4, 5). Because contracts in GVL may be
+imprecise, we have to resort to ]WLP (Fig. 5) and consistent implication (Def. 10).
+Example 3 (Static Checker of GVL). Static semantics of SVL and GVL coincide
+for precise contracts, so example 2 applies to GVL without modiﬁcation. We
+extend the example with imprecise contracts:
+requires (balance ≥ amount) ensures (result ≥ 0) /\ ?
+
+Note the similarity to the precise contract in example 1 which causes GVL’s
+static checker to reject the main procedure. However, with the imprecise
+
+postcondition we now have (balance ≥ 0) /\ ?f⇒ (balance ≥ 40).
+
+As a result, the static checker optimistically accepts the program. At the
+same time, it is not guaranteed that the precondition is satisﬁed at runtime
+without additional checks. We expect GVL’s runtime semantics (Section 4)
+to add such checks as appropriate. These runtime checks should succeed for
+the main procedure of example 1, however they should fail if we modify the
+main program as follows, withdrawing more money than available:
+int b : = 100; b : = withdraw (b, 30); b : = withdraw (b, 80);
+
+Static checking succeeds since (b ≥ 0) /\ ?f⇒ (b ≥ 80), but b’s value at
+
+runtime will not satisfy the formula. Note that the presence of imprecision
+does not necessarily imply success of static checking:
+int b : = 100; b : = withdraw (b, 30); assert (b < 0);
+
+It is implausible that this program is valid since (b ≥ 0) /\ ?f⇒ (b < 0)
+
+does not hold. However, further weakening withdraw’s postcondition to ?
+would again result in static acceptance but dynamic rejection.
+
+requires ? ensures (result = old(balance) - old(amount)) /\ ?
+
+This contract demonstrates that imprecision must not necessarily result in
+runtime checks. The body’s ]WLP is ?, which is implied by the annotated
+precondition ? without having to be optimistic (i.e. resort to the plausibility
+interpretation). We expect that an eﬃcient runtime semantics, like the one
+we discuss in Section 4.3, adds no runtime overhead through checks here.
+
+4 GVL: Dynamic Semantics
+
+Accepting a gradually-veriﬁed program means that it is plausible that the program 
+remains valid during each step of its execution, precisely as it is guaranteed
+by soundness of SVL. To prevent a GVL program from stepping from a valid
+
+Gradual Program Veriﬁcation
+
+37
+
+state into an invalid state, we extend the dynamic semantics of SVL with (desirably 
+minimal) runtime checks. As soon as the validity of the execution is no
+longer plausible, these checks cause the program to step into a dedicated error
+state. Example 3 motivates this behavior.
+
+Soundness. We revise the soundness deﬁnition of SVL to the gradual setting
+which will guide the upcoming eﬀorts to achieve soundness via runtime assertion
+checks. Validity of states (Def. 6) relies on sWLP (Fig. 4) which itself consumes
+postconditions of procedures. Hence, GVL uses a consistent lifting of sWLP which
+we deﬁne analogous to Fig. 4, but based on ]WLP. Save for using s]WLP instead
+of sWLP, valid states of GVL are deﬁned just like those of SVL.
+
+We expect there to be error derivations π g−→ error whenever it becomes
+extend State, but instead deﬁne · g−→ · ⊆ State × (State ∪ {error}). As a
+
+implausible that the remaining program can be run safely. Note that we do not
+
+result, we can leave Prop. 2 (Preservation) untouched.
+
+In Section 4.1 we derive a naive runtime semantics driven by the soundness
+criteria of GVL. We then examine the properties of the resulting gradually veriﬁed 
+language. In Section 4.3 we discuss optimizing this approach by combining
+
+]WLP with strongest preconditionsfSP in order to determine statically-guaranteed
+
+information that can be used to minimize the runtime checks ahead of time.
+
+4.1 Naive semantics
+We start with a trivially correct but expensive strategy of adding runtime assertions 
+to each execution step, checking whether the new state would be valid
+(preservation), right before actually transitioning into that state (progress). 6
+
+1..m, ρ1..n ∈ Env, s
+0
+Let ρ
+If hρ
+0
+m, s
+
+mi · ... · hρ
+0
+
+0
+1, s
+
+1..m, s1..n ∈ Stmt
+0
+
+1i · nil −→ hρn, sni · ... · hρ1, s1i · nil holds7, then
+0
+
+hρn, sni · ... · hρ1, s1i · nil
+if (ρne(cid:15) eφn) ∧ ... ∧ (ρ1e(cid:15) eφ1)
+where eφn · ... ·eφ1 · nil = s]WLP(sn · ... · s1 · nil, true)
+
+1i · nilg−→
+
+0
+
+otherwise
+
+hρ
+
+0
+m, s
+
+mi · ... · hρ
+0
+
+0
+1, s
+
+error
+
+Before showing how to implement the above semantics, we conﬁrm its sound-
+ness: Progress of GVL follows from progress of SVL. The same is true for preser-
+vation: in the ﬁrst reduction case, validity of the resulting state follows from
+preservation of SVL.
+6 Note the diﬀerence between runtime assertions and the assert statement. The former 
+checks assertions at runtime, transitioning into a dedicated exceptional state
+on failure. The latter is a construct of a statically veriﬁed language, and is hence
+implementable as a no-operation.
+
+Thus, we adjust those rules to use consistent evaluation e(cid:15) instead of (cid:15) . Since e(cid:15)
+
+7 SsCall and SsCallExit as deﬁned in Fig. 2 are not deﬁned for gradual formulas.
+coincides with (cid:15) for precise formulas, this is a conservative extension of SVL.
+
+38
+
+J. Bader et al.
+
+While we can draw the implementation of · −→ · from SVL, implementing
+
+the case condition (ρn e(cid:15) eφn)∧ ...∧ (ρ1 e(cid:15) eφ1) results in overhead. As a ﬁrst step,
+ρn−1, ..., ρ1, sn−1, ..., s1 stay untouched. It follows that eφi for 1 ≤ i < n remains
+Fig. 4). As a result, it is suﬃcient to check ρn e(cid:15) s]WLPn(sn · ... · s1 · nil, true).
+
+we can heavily simplify this check using inductive properties of our language:
+Stack frames besides the topmost one are not changed by a single reduction, i.e.
+unchanged since changes in sn do not aﬀect lower components of s]WLP (see
+
+Recall how we argued that a weakest precondition approach is more suited
+for the dynamic semantics of GVL than Hoare logic. Due to the syntax-directed
+sequence rule, all potentially occurring s]WLPn are partial results of statically
+precomputed preconditions. Contrast this with a gradual sequence rule of Hoare
+logic: {?}skip; skip{?} could be accepted statically by, say, instantiating the
+existential with (x = 3), which is allowed if both premises of the rule are lifted
+independently. However, the partial result {(x = 3)}skip{?} has no (guaran-
+teed) relationship with the next program state since the existential was chosen
+too strong. Any attempt to ﬁx the gradual sequence rule by imposing additional
+restrictions on the existential must necessarily involve a weakest precondition
+calculus, applied to the suﬃx of the sequence.
+
+4.2 Properties of GVL
+Before discussing practical aspects of GVL, we turn to its formal properties:
+GVL is a sound, gradual language. The following three properties are formalized
+and proven in Coq.
+Soundness. Our notion of soundness for GVL coincides with that of SVL, save
+for the possibility of runtime errors. Indeed, it is up to the dynamic semantics
+of GVL to make up for the imprecisions that weaken the statics of GVL.
+Lemma 3 (Soundness of GVL). GVL is sound:
+Progress If π ∈ State is a valid state and π 6∈ {hρ, skipi · nil | ρ ∈ Env} then
+
+π g−→ π0 for some π0 ∈ State or π g−→ error.
+Preservation If π is a valid state and π g−→ π0 for some π0 ∈ State then π0
+We call the state hρn, sni· ...·hρ1, s1i·nil valid if ρi e(cid:15) s]WLPi(sn · ...· s1 ·nil, true)
+
+for all 1 ≤ i ≤ n.
+Conservative extension. GVL is a conservative extension of SVL, meaning that
+both languages coincide on fully-precise programs. This property is true by construction.
+ Indeed, the deﬁnition of concretization and consistent lifting captures
+this property, which thus percolates to the entire veriﬁcation logic. In order
+for the dynamic semantics to be a conservative extension, GVL must progress
+whenever SVL does, yielding the same continuation. This is the case since the
+reduction rules of GVL coincide with those of SVL for fully-precise annotations
+(the runtime checks succeed due to preservation of SVL, so we do not step to
+error).
+
+is a valid state.
+
+Gradual Program Veriﬁcation
+
+39
+
+q if φ1
+
+Gradual guarantees. Siek et al. formalize a number of criteria for graduallytyped 
+languages [19], which we can adapt to the setting of program veriﬁcation.
+In particular, the gradual guarantee captures the smooth continuum between
+static and dynamic veriﬁcation. More precisely, it states that typeability (here,
+veriﬁability) and reducibility are monotone with respect to precision. We say a
+program p1 is more precise than program p2 (p1 v p2) if p1 and p2 are equivalent
+except in terms of contracts and if p1’s contracts are more precise than p2’s
+contracts. A contract requires φ1
+q is more precise than contract
+p ensures φ1
+q v φ2
+p v φ2
+p and φ1
+q.
+requires φ2
+In particular, the static gradual guarantee for veriﬁcation states that a valid
+
+p ensures φ2
+
+gradual program is still valid when we reduce the precision of contracts.
+Proposition 3 (Static gradual guarantee of veriﬁcation).
+Let p1, p2 ∈ Program such that p1 v p2. If p1 is valid then p2 is valid.
+The dynamic gradual guarantee states that a valid program that takes a step
+still takes the same step if we reduce the precision of contracts.
+Proposition 4 (Dynamic gradual guarantee of veriﬁcation).
+Let p1, p2 ∈ Program such that p1 v p2 and π ∈ State.
+
+If π g−→p1 π0 for some π0 ∈ State then π g−→p2 π0.
+
+This also means that if a gradual program fails at runtime, then making its
+contracts more precise will not eliminate the error. In fact, doing so may only
+make the error manifest earlier during runtime or manifest statically. This is
+a fundamental property of gradual veriﬁcation: a runtime veriﬁcation error reveals 
+a fundamental mismatch between the gradual program and the underlying
+veriﬁcation discipline.
+
+4.3 Practical aspects
+Residual checks. Compared to SVL, the naive semantics adds a runtime assertion
+to every single reduction. Assuming that the cost of checking an assertion is
+proportional to the formula size, i.e. proportional to the size of the WLP of the
+remaining statement, this is highly unsatisfying. The situation is even worse if
+the entire GVL program has fully-precise annotations, because then the checks
+are performed even though they are not necessary for safety.
+
+We can reduce formula sizes given static information, expecting formulas to
+vanish (reduce to true) in the presence of fully-precise contracts and gradually
+grow with the amount of imprecision introduced, yielding a pay-as-you-go cost
+model. Example 4 illustrates this relationship.
+Example 4 (Residual checks). Consider the following variation of withdraw:
+int withdraw (int balance , int amount )
+
+requires ? ensures result ≥ 0 {
+
+// WLP: ( balance - amount ≥ 0) /\ ( amount > 0)
+assert amount > 0;
+
+40
+
+J. Bader et al.
+
+// WLP: balance - amount ≥ 0
+balance = balance - amount ;
+// WLP: balance ≥ 0
+return balance ;
+// WLP: result ≥ 0
+
+}
+Precomputed preconditions are annotated. Following the naive semantics (Section 
+4.1), these are to be checked before entering the corresponding state, to
+ensure soundness. However, many of these checks are redundant. When entering
+the procedure (i.e. stepping to the state prior to the assertion statement), we
+must ﬁrst check φ1 = (balance - amount ≥ 0) /\ (amount > 0). According
+to the naive semantics, in order to execute the assertion statement, we would
+then check φ2 = (balance - amount ≥ 0). Fortunately, it is derivable statically 
+that this check must deﬁnitely succeed: The strongest postcondition of
+assert amount > 0 given φ1 is again φ1. Since φ1 ⇒ φ2 there is no point in
+checking φ2 at runtime. Similar reasoning applies to both remaining statements,
+making all remaining checks redundant. Only the initial check remains, which is
+itself directly dependent on the imprecision of the precondition. Preconditions
+(balance - amount ≥ 0) /\ ? or (amount > 0) /\ ? would allow dropping
+the corresponding term of the formula, the conjunction of both (with or without
+a ?) allows dropping the entire check.
+
+The above example motivates the formalization of a strongest postcondition
+
+function fSP and function fdiﬀ which takes a formula eφa to check, a formula eφk
+known to be true and calculates a residual formula fdiﬀ(eφa,eφk) suﬃcient to check
+in order to guarantee that eφa holds.
+Deﬁnition 14 (Strongest postcondition). Let SP : Stmt × Formula *
+Furthermore let fSP : Stmt ×eFormula * eFormula be the consistent lifting
+Formula be deﬁned as: SP(s, φ) = min⇒ { φ0 ∈ Formula | φ ⇒ WLP(s, φ0) }
+(Def. 13) of SP.
+Deﬁnition 15 (Reducing formulas).
+Let diﬀ : Formula × Formula * Formula be deﬁned as:
+diﬀ(φa, φk) = max⇒ { φ ∈ Formula | (φ /\ φk ⇒ φa) ∧
+Furthermore let fdiﬀ :eFormula ×eFormula *eFormula be deﬁned as:
+fdiﬀ(φa,eφk) = diﬀ(φa, static(eφk))
+fdiﬀ(φa /\ ?,eφk) = diﬀ(φa, static(eφk)) /\ ?
+min/max. Likewise, an implementation of fSP may err towards imprecision. As
+8 Even a worst case implementation of fSP(s,eφ) as ? will only result in no reduction
+
+Both SP and diﬀ can be implemented approximately by only approximating
+
+a result, the residual formulas may be larger than necessary. 8
+
+(φ /\ φk ∈ SatFormula) }
+
+of the checks, but not aﬀect soundness.
+
+Gradual Program Veriﬁcation
+
+41
+
+hρ
+hρ
+
+n, (s; sn)i · ... −→ hρn, sni · ...
+0
+0
+
+hρn−1, (y := m(x); sn−1)i · ... −→ hρn, mbody(m)i · ...
+
+n, (s; sn)i · ...g−→ hρn, sni · ... eSsLocal
+ρne(cid:15) fdiﬀ(]WLP(mbody(m), mpost(m)), mpre(m))
+hρn−1, (y := m(x); sn−1)i · ...g−→ hρn, mbody(m)i · ... eSsCall
+fSP(y := m(x), s]WLPn((y := m(x); sn) · ..., true)))
+n, (y := m(x); sn)i · ...g−→ hρn, sni · ...
+
+n, (y := m(x); sn)i · ... −→ hρn, sni · ...
+0
+
+n+1, skipi · hρ
+0
+
+hρ
+
+ρne(cid:15) fdiﬀ(s]WLPn(sn · ..., true),
+
+n+1, skipi · hρ
+0
+
+hρ
+
+0
+
+eSsCallExit
+
+Fig. 6. Dynamic semantics with reduced checks.
+
+Deﬁnition 16 (Approximate algorithm for fdiﬀ).
+eFormula fdiﬀ(eFormula eφa, eFormula eφb)
+let eφ1 /\ eφ2 /\ ... /\ eφn := eφa ( such that all eφi are atomic )
+if JeφbK ∩Jeφ1 /\ ... /\ eφi−1 /\ eφi+1 ... /\ eφnK ⊆JeφaK
+eφi := true
+return eφ1 /\ ... /\ eφn
+
+// one may drop the true terms
+
+for i from 1 to n
+
+Figure 6 shows the dynamic semantics using residual checks (omitting error
+reductions). Runtime checks of reductions operating on a single stack frame
+vanish completely as there exists no source of imprecision in that subset of
+GVL. This property can be formalized as: For all s ∈ Stmt that do not contain
+
+a call, fdiﬀ(s]WLPn(sn · ..., true),fSP(s, s]WLPn((s; sn) · ..., true))) ∈ {true, ?}
+The check ineSsCall vanishes if mpre(m) is precise. The check ineSsCallExit
+
+vanishes if mpost(m) is precise. Recall that Example 4 demonstrates this eﬀect:
+We concluded that only the initial check is necessary and derived that it also
+vanishes if the precondition is precise.
+
+If mpost(m) is imprecise, the assertion is equivalent to
+
+ρn e(cid:15) fdiﬀ(fdiﬀ(s]WLPn(sn · ..., true),mpre(m)[x/mparam(m)]),
+
+mpost(m)[x, y/old(mparam(m)), result])
+which exempliﬁes the pay-as-you-go relationship between level of imprecision and
+run-time overhead: both mpre(m) and mpost(m) contribute to the reduction of
+s]WLPn(sn · ..., true), i.e. increasing their precision results in smaller residual
+checks.
+
+Pay-as-you-go. To formally establish the pay-as-you-go characteristic of gradual
+veriﬁcation, we introduce a simple cost model for runtime contract checking.
+
+42
+
+J. Bader et al.
+
+Let size(eφ) be the number of conjunctive terms of (the static part of) eφ, e.g.
+
+size((x = 3) /\ (y 6= z) /\ ?) = 2. We assume that measure to be proportional 
+to the time needed to evaluate a given formula. Let checksize(p) be the
+sum of the size of all residual checks in program p.
+Proposition 5 (Pay-as-you-go overhead).
+a) Given programs p1, p2 such that p1 v p2, then checksize(p1) ≤ checksize(p2).
+b) If a program p has only precise contracts, then checksize(p) = 0.
+
+5 Scaling up to Implicit Dynamic Frames
+We applied our approach to a richer program logic, namely implicit dynamic
+frames (IDF) [20], which enables reasoning about shared mutable state. The
+starting point is an extended statically veriﬁed language similar to Chalice [10],
+called SVLIDF. Compared to SVL, the language includes classes with publiclyaccessible 
+ﬁelds and instance methods. We add ﬁeld assignments and object creation.
+ Formulas may also contain ﬁeld accessibility predicates acc from IDF and
+use the separating conjunction * instead of regular (non-separating) conjunction
+/\ . An accessibility predicate acc(e.f) denotes exclusive access to the ﬁeld e.f.
+It justiﬁes accessing e.f both in the source code (e.g. x.f := 3 or y := x.f)
+and in the formula itself (e.g. acc(x.f) * (x.f 6= 4)), which is called framing.
+Compared to SVL, the main challenge in gradualizing SVLIDF is framing.
+
+The linear logic ensures that accessibility predicates cannot be duplicated,
+hence entitling them to represent exclusive access to a ﬁeld. SVLIDF can statically
+prove that any ﬁeld access during execution is justiﬁed. To formalize and prove
+soundness, SVLIDF has a reference dynamic semantics that tracks, for each stack
+frame, the set of ﬁelds that it has exclusive access to; deciding at runtime whether
+a formula holds depends on this information. Of course, thanks to soundness, an
+implementation of SVLIDF needs no runtime tracking.
+
+Recall that our approach to derive a gradual language includes the insertion
+of runtime checks, which requires that formulas can be evaluated at runtime.
+Therefore, the overhead of the reference semantics of SVLIDF carries over to a
+naive implementation semantics. Additionally, it is no longer clear how accessibility 
+is split between stack frames in case of a call: SVLIDF transfers exclusive
+access to ﬁelds that are mentioned in the precondition of a procedure from the
+call site to the callee’s (fresh) stack frame. As we allow ? to also plausibly represent 
+accessibility predicates, an imprecise precondition poses a challenge.
+
+A valid strategy is to conservatively forward all accesses from caller to callee.
+As for GVL, we can devise an eﬃcient implementation strategy for accessibility 
+tracking that results in pay-as-you-go overhead.The fact that reducing
+the precision of contracts may now result in a divergence of program states
+(speciﬁcally, the accessible ﬁelds) asks for an adjustment of the dynamic part
+of the gradual guarantee, which originally requires lock-step reduction behavior.
+ We carefully adjust the deﬁnition, preserving the core idea that reducing
+precision of a valid program does not alter the observable behavior of that program.
+ The formalization of SVLIDF and GVLIDF are available in a companion
+
+Gradual Program Veriﬁcation
+
+43
+
+report available online, along with an interactive prototype implementation at
+http://olydis.github.io/GradVer/impl/HTML5wp/.
+
+The prototype implementation of GVLIDF displays the static and dynamic
+semantics of code snippets interactively, indicating the location of inserted runtime 
+checks where necessary. It also displays the stack and heap at any point of
+execution. A number of predeﬁned examples are available, along with an editable
+scratchpad. In particular, Example 2 demonstrates how imprecision enables safe
+reasoning about a recursive data structure that was not possible in SVLIDF,
+because SVLIDF lacks recursive predicates. This illustrates that, similarly to
+gradual types, imprecision can be used to augment the expressiveness of the
+static veriﬁcation logic. In this case, the example does not even require a single
+runtime check.
+
+6 Related Work
+
+We have already related our work to the most-closely related research, including
+work on the underlying logics [8,4,15,20], the theory of gradual typing [18,17,19,7],
+closely related approaches to static [10] and dynamic [6,12,11,3] veriﬁcation, as
+well as hybrid veriﬁcation approaches [2,14]. Additional related work includes
+gradual type systems that include notions of ownership or linearity; one can
+think of the acc predicate as representing ownership of a piece of the heap, and
+acc predicates are treated linearly in the implicit dynamic frames methodology 
+[20]. [21] developed a gradual typestate checking system, in which the state
+of objects is tracked in a linear type system. Similar to acc predicates, permissions 
+to objects with state are passed linearly from one function to another,
+without being duplicated; if a strong permission is lost (e.g. due to a gradual
+speciﬁcation), it can be regained with a runtime check, as long as no conﬂicting
+permission exist.
+
+The gradual ownership approach of [16] is also related in that, like implicit
+dynamic frames, it aids developers in reasoning (gradually) about heap data
+structures. In that work, developers can specify containment relationships between 
+objects, such that an owned object cannot be accessed from outside its
+owner. These access constraints can be checked either statically using a standard
+ownership type system, but if the developer leaves out ownership annotations
+from part of the program, dynamic checks are inserted.
+
+Typestate and ownership are ﬁnite-state and topological properties, respectively,
+ whereas in this work we explore gradual speciﬁcation of logical contracts
+for the ﬁrst time. Neither of these prior eﬀorts beneﬁted from the Abstracting
+Gradual Typing (AGT) methodology [7], which guided more principled design
+choices in our present work. Additionally, it is unclear whether the gradual guarantee 
+of Siek et al. [19] holds in these proposals, which were developed prior to
+the formulation of the gradual guarantee.
+
+One contrasting eﬀort, which was also a stepping-stone to our current paper,
+ is recent work on gradual reﬁnement types [9]. In that approach, the AGT
+methodology is applied to a functional language in which types can be reﬁned by
+
+44
+
+J. Bader et al.
+
+logical predicates drawn from a decidable logic. The present work is in a diﬀerent 
+context, namely ﬁrst-order imperative programs as opposed to higher-order
+pure functional programs. This diﬀerence has a strong impact on the technical
+development. The present work is simpler in one respect, because formulas do
+not depend on their lexical context as in the gradual reﬁnement setting. However,
+ we had to reformulate gradual veriﬁcation based on a weakest precondition
+calculus, whereas the prior work could simply extend the type system setting
+used when the AGT methodology was proposed. In addition, we provide a runtime 
+semantics directly designed for the gradual veriﬁcation setting, rather than
+adapting the evidence-tracking approach set forth by the AGT methodology and
+used for gradual reﬁnement types. In fact, we investigated using the evidencebased 
+approach for the runtime semantics of gradual veriﬁcation, and found that
+it was semantically equivalent to what we present here but introduces unnecessary 
+complexities. Overall, by adapting the AGT methodology to the veriﬁcation
+setting, this work shows that the abstract interpretation approach to designing
+gradual languages can scale beyond type systems.
+
+7 Conclusion
+
+We have developed the formal foundations of gradual program veriﬁcation, taking 
+as starting point a simple program logic. This work is the ﬁrst adaptation
+of recent fundamental techniques for gradual typing to the context of program
+veriﬁcation. We have shown how to exploit the Abstracting Gradual Typing
+methodology [7] to systematically derive a gradual version of a weakest precondition 
+calculus. Gradual veriﬁcation provides a continuum between static and
+dynamic veriﬁcation techniques, controlled by the (im)precision of program annotations;
+ soundness is mediated through runtime checks.
+
+Later, we brieﬂy discuss how we applied our strategy to a more advanced
+logic using implicit dynamic frames (IDF) [20] in order to reason about mutable
+state. The use of IDF presents an additional challenge for obtaining a full pay-
+as-you-go model for gradual veriﬁcation, because the footprint has to be tracked.
+We point to our prototype implementation which also references a formalization
+of graualizing SVLIDF. Further optimization of this runtime tracking is an interesting 
+direction of future work. Another interesting challenge is to exercise our
+approach with other, richer program logics, as well as to study the gradualization
+of type systems that embed logical information, such as Hoare Type Theory [13],
+establishing a bridge between this work and gradual reﬁnement types [9].
+
+References
+
+Gradual Program Veriﬁcation
+
+45
+
+1. Arlt, S., Rubio-González, C., Rümmer, P., Schäf, M., Shankar, N.: The gradual
+
+veriﬁer. In: NASA Formal Methods Symposium. pp. 313–327. Springer (2014)
+
+2. Burdy, L., Cheon, Y., Cok, D.R., Ernst, M.D., Kiniry, J.R., Leavens, G.T., Leino,
+K.R.M., Poll, E.: An overview of jml tools and applications. International Journal
+on Software Tools for Technology Transfer 7(3), 212–232 (2005), http://dx.doi.
+org/10.1007/s10009-004-0167-4
+
+3. Cheon, Y., Leavens, G.T.: A runtime assertion checker for the java modeling language 
+(jml) (2002)
+
+2010),
+
+4. Dijkstra, E.W.: Guarded commands, nondeterminacy and formal derivation of
+programs. Commun. ACM 18(8), 453–457 (Aug 1975), http://doi.acm.org/10.
+1145/360933.360975
+
+5. Fahndrich, M., Barnett, M., Logozzo, F.: Embedded contract
+
+In: ACM SAC - OOPS. Association for Computing Machinery,
+(March
+embedded-contract-languages/
+
+languages.
+Inc.
+https://www.microsoft.com/en-us/research/publication/
+
+6. Findler, R.B., Felleisen, M.: Contracts for higher-order functions. In: Proceedings
+of the 7th ACM SIGPLAN Conference on Functional Programming (ICFP 2002).
+pp. 48–59. Pittsburgh, PA, USA (Sep 2002)
+
+7. Garcia, R., Clark, A.M., Tanter, E.: Abstracting gradual typing. In: Proceedings
+of the 43rd Annual ACM SIGPLAN-SIGACT Symposium on Principles of Programming 
+Languages. pp. 429–442. POPL ’16, ACM, New York, NY, USA (2016),
+http://doi.acm.org/10.1145/2837614.2837670
+
+8. Hoare, C.A.R.: An axiomatic basis for computer programming. Communications
+
+of the ACM 12(10), 576–580 (1969)
+
+9. Lehmann, N., Tanter, É.: Gradual reﬁnement types. In: Proceedings of the 44th
+ACM SIGPLAN-SIGACT Symposium on Principles of Programming Languages
+(POPL 2017). pp. 775–788. Paris, France (Jan 2017)
+
+10. Leino, K.R.M., Müller, P., Smans, J.: Veriﬁcation of concurrent programs with
+chalice. In: Foundations of Security Analysis and Design V, pp. 195–222. Springer
+(2009)
+
+11. Meyer, B.: Eiﬀel: A language and environment for software engineering. Journal of
+
+Systems and Software 8(3), 199–246 (1988)
+
+12. Meyer, B.: Object-Oriented Software Construction. Prentice Hall (1988)
+13. Nanevski, A., Morrisset, G., Birkedal, L.: Hoare type theory, polymorphism and
+
+separation. Journal of Functional Programming 5-6, 865–911 (2008)
+
+14. Nguyen, H.H., Kuncak, V., Chin, W.N.: Runtime checking for separation logic. In:
+International Workshop on Veriﬁcation, Model Checking, and Abstract Interpretation.
+ pp. 203–217. Springer (2008)
+
+15. Reynolds, J.C.: Separation logic: A logic for shared mutable data structures. In:
+Logic in Computer Science, 2002. Proceedings. 17th Annual IEEE Symposium on.
+pp. 55–74. IEEE (2002)
+
+16. Sergey, I., Clarke, D.: Gradual ownership types. In: Proceedings of the 21st
+European Conference on Programming Languages and Systems. pp. 579–599.
+ESOP’12, Springer-Verlag, Berlin, Heidelberg (2012), http://dx.doi.org/10.
+1007/978-3-642-28869-2_29
+
+17. Siek, J., Taha, W.: Gradual typing for objects. In: European Conference on ObjectOriented 
+Programming. pp. 2–27. Springer (2007)
+
+46
+
+J. Bader et al.
+
+18. Siek, J.G., Taha, W.: Gradual typing for functional languages. In: Scheme and
+
+Functional Programming Workshop. vol. 6, pp. 81–92 (2006)
+
+19. Siek, J.G., Vitousek, M.M., Cimini, M., Boyland, J.T.: Reﬁned criteria for gradual
+typing. In: LIPIcs-Leibniz International Proceedings in Informatics. vol. 32. Schloss
+Dagstuhl-Leibniz-Zentrum fuer Informatik (2015)
+
+20. Smans, J., Jacobs, B., Piessens, F.: Implicit dynamic frames: Combining dynamic
+frames and separation logic. In: European Conference on Object-Oriented Programming.
+ pp. 148–172. Springer (2009)
+
+21. Wolﬀ, R., Garcia, R., Tanter, É., Aldrich, J.: Gradual typestate. In: European
+
+Conference on Object-Oriented Programming. pp. 459–483. Springer (2011)
+
+22. Wright, A., Felleisen, M.: A syntactic approach to type soundness. Inf. Comput.
+
+115(1), 38–94 (Nov 1994), http://dx.doi.org/10.1006/inco.1994.1093
+
+

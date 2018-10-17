@@ -1,0 +1,1063 @@
+Assembling Omnitigs using Hidden-Order de
+Bruijn Graphs∗
+Diego Díaz-Domínguez1,2, Djamal Belazzougui3, Travis Gagie1,4,
+Veli Makinen5, Gonzalo Navarro1,2, and Simon J. Puglisi5
+
+1 CeBiB — Center for Biotechnology and Bioengineering, Chile
+2 Department of Computer Science, University of Chile, Chile.
+
+{diediaz,gnavarro}@dcc.uchile.cl
+
+3 CERIST, Algeria. djamal.belazzougui@gmail.com
+4
+
+School of Computer Science and Telecommunications, Diego Portales
+University, Chile. travis.gagie@gmail.com
+
+5 Department of Computer Science, University of Helsinki, Finland.
+
+{veli.makinen,simon.puglisi}@helsinki.fi
+
+Abstract
+
+De novo DNA assembly is a fundamental task in Bioinformatics, and ﬁnding Eulerian paths on
+de Bruijn graphs is one of the dominant approaches to it. In most of the cases, there may be no
+one order for the de Bruijn graph that works well for assembling all of the reads. For this reason,
+some de Bruijn-based assemblers try assembling on several graphs of increasing order, in turn.
+Boucher et al. (2015) went further and gave a representation making it possible to navigate in
+the graph and change order on the ﬂy, up to a maximum K, but they can use up to lg K extra
+bits per edge because they use an LCP array. In this paper, we replace the LCP array by a
+succinct representation of that array’s Cartesian tree, which takes only 2 extra bits per edge and
+still lets us support interesting navigation operations eﬃciently. These operations are not enough
+to let us easily extract unitigs and only unitigs from the graph but they do let us extract a set
+of safe strings that contains all unitigs. Suppose we are navigating in a variable-order de Bruijn
+graph representation, following these rules:
+if there are no outgoing edges then we reduce the
+order, hoping one appears; if there is exactly one outgoing edge then we take it (increasing the
+current order, up to K); if there are two or more outgoing edges then we stop. Then we traverse
+a (variable-order) path such that we cross edges only when we have no choice or, equivalently, we
+generate a string appending characters only when we have no choice. It follows that the strings
+we extract are safe. Our experiments show we extract a set of strings more informative than the
+unitigs, while using a reasonable amount of memory.
+
+1998 ACM Subject Classiﬁcation J.3 Life and Medical Sciences, E.1 Data Structures, G.2.2
+Graph Theory
+
+Keywords and phrases Genome assembly, de Bruijn graph, Omnitigs, Succinct ordinal trees
+
+Digital Object Identiﬁer 10.4230/LIPIcs.CVIT.2016.23
+
+1
+
+Introduction
+
+De novo DNA assembly is one of the oldest problems in Bioinformatics. It consists of inferring
+the sequences of a genome from a set of sequencing reads. The classical approach is to ﬁrst
+
+∗ Partially supported by EU grant H2020-MSCA-RISE-2015 BIRDS690 No. 690941; by Basal Funds
+
+FB0001, Conicyt, Chile; by a Conicyt PhD Scholarship; and by Fondecyt Grant 1-171058, Chile.
+
+8
+1
+0
+2
+
+ 
+
+y
+a
+M
+4
+1
+
+ 
+
+ 
+ 
+]
+S
+D
+.
+s
+c
+[
+ 
+ 
+
+1
+v
+8
+2
+2
+5
+0
+
+.
+
+5
+0
+8
+1
+:
+v
+i
+X
+r
+a
+
+© Diego Díaz-Domínguez, Travis Gagie, Djamal Belazzougui, Veli Makinen, Simon Puglisi and Gonzalo
+
+Navarro;;
+
+licensed under Creative Commons License CC-BY
+
+42nd Conference on Very Important Topics (CVIT 2016).
+Editors: John Q. Open and Joan R. Acces; Article No. 23; pp. 23:1–23:14
+
+Leibniz International Proceedings in Informatics
+Schloss Dagstuhl – Leibniz-Zentrum für Informatik, Dagstuhl Publishing, Germany
+
+23:2
+
+Assembling Omnitigs using Hidden-Order de Bruijn Graphs
+
+create a de Bruijn graph of order K from the reads and then ﬁnding Eulerian paths in that
+graph. The choice of K is always a major concern, especially when the sequencing coverage
+is not uniform. If K is too short, then the graph becomes too dense and uninformative. On
+the other hand, if K is too big, the graph becomes disconnected. There exist some tools [6]
+that help choose a good K. However, in most cases, the Eulerian paths of maximum length
+cannot be obtained with just one K. For this reason, some de Bruijn-based assemblers, such
+as SPAdes [2] and IDBA [13], try assembling on several graphs of increasing order, in turn.
+Lin and Pevzner [10] went a step further and proposed manifold de Bruijn graphs, in which
+the vertices are strings of possibly many diﬀerent lengths — but they provide no practical
+implementation. Boucher et al. [4] oﬀered an implementation and more by adding a longest
+common preﬁx (LCP) array to Bowe et al.’s [5] representation of de Bruijn graphs, based on
+the Burrows-Wheeler Transform (BWT), making it possible to navigate in the graph and
+change order on the ﬂy (up to the order for which Bowe et al.’s underlying representation is
+built). Whereas Bowe et al.’s representation takes only 4 bits per edge in the graph, however,
+Boucher et al. can use up to lg K extra bits per edge, where K is its maximum order.
+
+In this paper, we replace the LCP array by a succinct representation of its Cartesian
+tree, which takes only 2 extra bits per edge and still lets us support interesting navigation
+operations eﬃciently: e.g., report the labels on the out-edge leaving a vertex, cross an
+out-edge with a given label (increasing the order by 1, up to K), and reduce the order until
+the set of distinct labels on the out-edges grows. These operations alone do not let us easily
+extract unitigs and only unitigs from the graph (i.e., the labels of paths of vertices with inand 
+out-degree 1), but they do let us extract a set of safe strings that contains all unitigs.
+Tomescu and Medvedev [15] deﬁned a string to be safe if it occurs in all valid reconstructions 
+of the genome, and they deﬁned omnitigs to be the safe strings that can be extracted
+from a particular de Bruijn graph. Although they considered only standard de Bruijn graphs,
+with equal-length strings as the vertices, their deﬁnition generalizes easily to variable-order
+de Bruijn graph representations, such as Lin and Pevzner’s or Boucher et al.’s. Suppose we
+are navigating in a variable-order de Bruijn graph representation, following these rules: if
+there are no outgoing edges, then we reduce the order, hoping one appears; if there is exactly
+one outgoing edge, then we take it (possibly increasing the current order); if there are two
+or more edges, then we stop. We traverse a (variable-order) path such that we cross edges
+only when we have no choice or, equivalently, we generate a string appending characters only
+when we have no choice. It follows that the strings we extract are safe.
+
+Implementing our data structure is the ﬁrst challenge, but there are others: when
+extracting unitigs, for example, there is no risk of being caught in cycles, or extracting the
+same substring over and over again as part of several unitigs, but we must deal with both
+these possibilities when following our rules, and varying the order makes the situation even
+more complicated. Nevertheless, our experiments show we extract a set of strings more
+informative than the unitigs, while using a reasonable amount of memory.
+
+1.1 Our contribution
+In this paper, we address the problem of generating safe strings longer than unitigs. We
+demonstrate that those omnitigs spelt by walks in the assembly graph where the nodes have
+arbitrary indegree and outdegree one, which we call right-maximal (RM) omnitigs, can be
+eﬃciently obtained from a data structure that encodes a variable-order de Bruijn graph. For
+doing that, we ﬁrst propose the hidden-order BOSS data structure (HO-BOSS), a variation
+of VO-BOSS that uses less space by not storing the orders of the de Bruijn graph. Then, we
+propose a linear-time algorithm that works over HO-BOSS to retrieve the RM omnitigs.
+
+D. Díaz-Domínguez et al.
+
+23:3
+
+Preliminaries
+
+2
+De Bruijn graphs. A complete de Bruijn Graph of order K, or DBGK, is the labelled
+directed cyclic graph G = (V, E) over the alphabet Σ = [1..σ] consisting of σK nodes and
+σK+1 edges. Each node v ∈ V is labelled with a string p ∈ ΣK and every edge e = (v, u) ∈ E
+represents the string s ∈ ΣK+1 such that the label of v is the preﬁx s[1..K], the label of u is
+the suﬃx s[2..K + 1], and the label of e is the character s[K + 1].
+K, is
+the subgraph of the complete DBGK induced by the edges that represent the set K ⊆ ΣK+1
+of all (K + 1)mers present in S.
+
+The de Bruijn graph of order K of a set of strings S = {S1, S2, . . . , Sn}, or DBGS
+
+K, or voDBGS
+
+A variable order DBGS
+K, is a graph formed by the union of all the graphs
+k , with 1 ≤ k ≤ K for S. Every DBGS
+DBGS
+k represents a context of the voDBGS
+K. In
+k , two nodes v and v0, with v ∈ DBGS
+addition to the (directed) edges of each DBGS
+k ,
+v0 ∈ DBGS
+k0, and k > k0, are connected by an undirected edge (v, v0) if the label of v0 is
+a suﬃx of the label of v. Following the edge (v, v0) from v to v0, or vice-versa, is called a
+change of order.
+
+Rank and select data structures. Rank and select dictionaries are fundamental in
+most succinct data structures. Given a sequence B[1..n] of elements over the alphabet
+Σ = [1..σ], B.rankb(i) with i ∈ [1..n] and b ∈ Σ, returns the number of times the element
+b occurs in B[1..i], while B.selectb(i) returns the position of the ith occurrence of b in
+B. For binary alphabets, B can be represented in n + o(n) bits so that rank and select
+are solved in constant time [7]. When B has m (cid:28) n 1s, a compressed representation using
+m lg n
+m + O(m) + o(n) bits, still solving the operations in constant time, is of interest [14].
+This space is o(n) if m = o(n).
+
+To support rank and select on non-binary alphabets, a popular data structure is the
+wavelet tree [8]. This structure can represent the sequence within its zero-order entropy (i.e.,
+the entropy of the distribution of its symbols) plus a sublinear term, o(n log σ) bits, and
+oﬀer access to any position in the sequence, as well as rank and select functionality, in
+time O(log σ). There are other representations oﬀering compressed space and operations in
+time O(log log σ) [3], but they are not practical enough for the small alphabets of interest in
+sequence assembly.
+
+Succinct representation of ordinal trees. An ordinal tree T with n nodes can be stored
+succinctly as a sequence of balanced parentheses (BP) encoded as a bit vector B = [1..2n].
+Every node v in T is represented by a pair of parentheses (..) that contain the encoding of
+the complete subtree rooted at v. Note that B can be easily constructed with a depth ﬁrst
+search traversal over T. Every node of T can be identiﬁed by the position in B of its open
+parenthesis.
+
+A large number of navigational operations over T can be simulated with a small set of
+primitives over B. These primitives are enclose, open, close, rank and select, where
+enclose(i) gives the position of the rightmost open parenthesis that encloses B[i] and
+open(i)/close(i) give the position of the parenthesis that pairs the close/open parenthesis
+at B[i], respectively.
+
+Navarro and Sadakane [12] showed that, for static trees, all these primitve operations,
+and consequently all the navigational operations built on them, can be answered in constant
+time using a data structure that needs 2n + o(n) bits of space.
+
+BOSS representation for de Bruijn graphs. BOSS [5] is one the most succinct data
+structures for encoding de Bruijn graphs. The process of building the BOSS index of the
+
+CVIT 2016
+
+23:4
+
+Assembling Omnitigs using Hidden-Order de Bruijn Graphs
+
+K-order de Bruijn graph of a set of strings S = {S1, S2, . . .} is as follows: Pad every Si ∈ S
+with K copies of the symbol $ and scan all the resulting strings, obtaining the set K of all
+their (K + 1)mers. Then, sort K in lexicographic order from right to left, starting from their
+Kth position, with ties broken by the symbols at position K + 1. Notice that the ﬁrst K
+positions of all the (K + 1)mers (from now on referred to as the BOSS matrix, with one
+row per (K + 1)mer and one column per position in 1..K) contain all the possible Kmers
+present in S, whereas the position K + 1 (from now on referred to as the E array) contains
+all the outgoing edges of Kmers sorted in lexicographical order. To delimit the outgoing
+edges of every Kmer, create a bit vector B in which B[i] = 1 if E[i] is the last outgoing
+edge of some Kmer in the BOSS matrix. To encode the incoming edges, store in every E[i]
+the corresponding symbol c of the edge if E[i] is within a range of nodes suﬃxed by the
+same K − 1 characters, and E[i] is the ﬁrst occurrence of c in that range; otherwise store an
+alternative symbol c in E[i]. Finally, replace the BOSS matrix with an array C[1..σ] with
+the cumulative counts of the symbols of the column K, encode the E array using a wavelet
+tree, and compress the B vector with support for rank and select operations.
+
+Bowe et al. [5] proposed several navigational queries over the BOSS index, almost all of
+
+them with at most an O(log σ)-factor slowdown. The most relevant for this paper are:
+
+outdegree(v): number of outgoing edges of v.
+forward(v, a): node reached by following an edge from v labelled with symbol a.
+indegree(v): number of incoming edges of v.
+backward(v): list of the nodes with an outgoing edge to v.
+Boucher et al. [4] noticed that by considering just the last k columns in the BOSS matrix,
+with k ≤ K, the resulting nodes are the same as those in the de Bruijn graph of order
+k. This property implies that, for the same dataset, all the de Bruijn graphs up to order
+K can be implicitly encoded with the same BOSS index. To support the variable-order
+functionality, that is, changing the value of k when necessary, they augmented BOSS with
+the longest common suﬃx (LCS) array, and they call this new index the variable-order
+BOSS (VO-BOSS). The LCS array stores, for every node of maximal order K, the size of the
+longest suﬃx shared with its predecessor node in the right-to-left lexicographical ordering.
+Additionally, they deﬁned the following operations:
+
+shorter(v, k): range of the nodes suﬃxed by the last k characters of v.
+longer(v, k): list of the nodes whose labels have length k ≤ K and end with that of v.
+maxlen(v, a): a node in the index suﬃxed by the label of v, and that has an outgoing
+edge labelled with a.
+Given a node v of arbitrary order k0 ≤ K represented as a range [i, j] in the BOSS matrix,
+the operation shorter([i, j], k) can be implemented by searching for the largest i0 < i and the
+smallest j0 > j with LCS[i0 − 1], LCS[j0] < k and then returning [i0, j0]. For larger([i, j], k),
+it is necessary to ﬁrst obtain the set B = {b, i − 1 ≤ b ≤ j ∧ LCS[b] < k}, and then for
+every consecutive pair (b, b0), report the range [b + 1, b0]. The function maxlen([i, j], a) is the
+easiest: it suﬃces with searching in the range [i, j] a node of maximum K with an outgoing
+edge labelled with a.
+
+Variable order de Bruijn graphs and tries
+
+3
+As mentioned in Section 1, some assemblers produce several de Bruijn graphs with diﬀerent
+Ks and then incrementally construct the contigs from those graphs. An alternative option is
+
+D. Díaz-Domínguez et al.
+
+23:5
+
+K is necessary.
+
+to build the VO-BOSS index for the variable-order de Bruijn graph voDBGR
+K. The advantage
+of VO-BOSS is that it allows changing the order of the nodes on the ﬂy, without generating
+diﬀerent data structures for every k ≤ K. Still, VO-BOSS increases the space complexity
+of the regular BOSS by an O(log K) factor, because it needs to encode the LCS array of
+the Kmers as a wavelet tree to support the change of order eﬃciently. This is an important
+issue, because if K is too large, then memory requirements may increase signiﬁcantly. Thus,
+a more compact way of representing voDBGR
+
+K, if a node vk
+
+During the traversal of voDBGR
+
+i . However, not every change of order from k to k0 generates new edges.
+
+i with no valid edges is reached, then the
+context can be changed from k to k0 < k so the traversal can continue through the edges of
+the new node vk0
+(cid:73) Lemma 1. Let vi and vj be two nodes in a variable-order de Bruijn graph, with labels Si
+and Sj, respectively, where Sj is a proper suﬃx of Si. Then, if no proper suﬃx of Si of the
+form S Sj is left-maximal in K, then the outgoing edges from vi and vj are the same.
+Proof. Let S = aS0, where a ∈ Σ. If S0 is not left-maximal in K, then S0 is always preceded
+by a in K, and thus the set of occurrences of S0 and S in K are equal. By applying this
+argument successively, starting from S0 = Sj and ending with S = Si, we have that the set
+of occurrences of Si and Sj in K are the same. Therefore, the nodes vi and vj have the same
+(cid:74)
+outgoing edges.
+
+We use Lemma 1 for traversing voDBGR
+
+K eﬃciently. We synchronize the nodes in
+voDBGR
+K with the nodes in the compact trie TK induced by the reversals of the Kmers. In
+TK, every leaf represents a Kmer, and label(ti) denotes the left-maximal string spelled from
+the root to node ti. Note that label(ti) is a suﬃx of the Kmers represented by the leaves in
+the subtree rooted at ti. Thus, to shorten the context of node vk
+K, we can go to
+its corresponding node ti in TK, move to the parent of ti, say tj, and ﬁnally go back to the
+corresponding node vk0
+K. By Lemma 1, the nodes between ti and tk that were
+compacted in TK cannot yield new edges.
+in K, it has no edges
+i , we repeat the operation
+
+i has no new edges with respect to vk
+
+Still, it could be that, even when vk0
+
+i has more occurrences than vk
+
+in voDBGR
+
+i
+
+in voDBGR
+
+i
+
+i
+
+to new Kmers. Thus, if vk0
+until ﬁnding a node vk00
+
+To lengthen the context, the process is similar, but instead of going to the parents in TK,
+
+i with a shorter context that does have new edges.
+
+we have to traverse the subtree rooted at ti.
+
+3.1 HO-BOSS index
+K from k to k0 using TK does not require us to know
+Changing the order of a node in voDBGR
+the value of k or k0. Thus, we can use just the topology of TK for jumping from node v to
+its parent node v0 (or vice-versa), where the string depths of v and v0 have hidden values h
+and h0, respectively. We only know that vh0
+i with chances
+of continuing the graph traversal, and that is enough for assembly. For supporting this
+hidden-order feature, we augment BOSS with a bit vector F that encodes the topology of TK
+in balanced parenthesis format (BP). We call this new index hidden-order BOSS (HO-BOSS).
+We limit the size of the hidden order h to the range m ≤ h ≤ K, where m is the minimum
+order allowed by the user. This minimum order is aimed at preventing the context from
+becoming too short and thus uninformative for the assembly. Therefore, we modify F by
+removing all those nodes with string depth < m and then connecting the resulting subtrees
+to a dummy root. In this way, whenever we reach the root in F, we know that the context
+became shorter than the threshold m.
+
+represents the longest suﬃx of vh
+
+i
+
+CVIT 2016
+
+23:6
+
+Assembling Omnitigs using Hidden-Order de Bruijn Graphs
+
+While VO-BOSS requires O(n log K) bits of space to encode the LCS array, where
+n = |K|, HO-BOSS stores only F, requiring at most 4n + o(n) bits (since TK has n leaves
+and less than n internal nodes). HO-BOSS also stores the B, E, and C arrays of BOSS.
+
+The bitvector F can be built from the LCS array, in worst-case time O(nK) and
+O(n + K log n) bits of working space, by (easily) adapting an algorithm to build suﬃx tree
+topologies from the longest common preﬁx array (LCP, analogous to LCS) [11, Sec. 11.5.4].
+
+3.2 Operations over the HO-BOSS index
+Every node v ∈ TK can be identiﬁed in two ways: with the position pv of its open parenthesis
+in F, or with the range [i, j] of leaves under the subtree rooted at v. The ﬁrst method is
+referred to as the index nomenclature and the second one as the range nomenclature. As
+every leaf in TK is also a Kmer, we can use the range nomenclature to link nodes in TK with
+ranges in the BOSS matrix.
+
+We ﬁrst deﬁne four primitives over TK: close, enclose, lca, and children. All of them
+use the index nomenclature and will be used as base for more complex queries. They can all
+be computed in constant time [12].
+
+close(v): the position in F of the closing parenthesis of v.
+enclose(v): the parent of v.
+lca(v, v0): the lowest common ancestor of v and v0.
+children(v): the number of children of v.
+We also deﬁne two primitives for mapping nodes in TK to ranges in the BOSS matrix:
+id2range(v): transforms a node in index nomenclature to its range form.
+range2id(i, j): transforms a node in range nomenclature to its index form.
+To implement the two functions deﬁned above eﬃciently, we have to include two extra 
+functions, rank_leaf and select_leaf, which perform rank and select operations
+over the pattern “()” in F, which is implemented in constant time [12]. Thus, both
+operations, id2range(v) = [rank_leaf(v), rank_leaf(close(v))] and range2id(i, j) =
+lca(select_leaf(i), select_leaf(j)), require constant time too.
+
+Finally, to traverse the variable-order de Bruijn graph, we redeﬁne the following functions:
+shorter(i, j): the node [i0, j0] that is the parent of node [i, j].
+forward([i, j], a): the node [i0, j0] obtained by following the outgoing edge of [i, j] labelled
+with a.
+For shorter(i, j), ﬁrst we map the range [i, j] to a node v in TK. We then obtain its
+parent node v0, and ﬁnally, map v0 back to a range [i0, j0]. The whole operation is expressed
+as id2range(enclose(range2id(i, j))). Thus, operation shorter takes constant time.
+
+The operation forward([i, j], a) is detailed in Algorithm 1. In lines 1–2, the range (p, q)
+in the E array of the BOSS index is obtained. This range contains the outgoing edges for
+the Kmers within [i, j]. Then, the outgoing range [i0, j0] is inferred in lines 3–7 (see Bowe et
+al. [5]). Since [i0, j0] might be a subrange of the complete outgoing node, we need to obtain
+the range of the lowest common ancestor for leaves i0 and j0, which is done in lines 8–10.
+Notice that, if [i, j] represents string P, then forward([i, j], a) will return the range for string
+P a. This is diﬀerent from the classical forward operation in BOSS [5], in which the label of
+an outgoing node is of the same size as the current node.
+
+Operation forward takes O(log σ) time, as it involves a constant number of operations
+
+over a wavelet tree, bitvectors, and parentheses.
+
+With these operations, we have a powerful machinery to build omnitigs in voDBGR
+K.
+
+D. Díaz-Domínguez et al.
+
+23:7
+
+Data: HOBOSS(B, E, C, F ), [i, j], a
+Result: forward([i, j], a) in range nomenclature
+
+1 p ← B.select1(i − 1) + 1;
+2 q ← B.select1(j);
+3 sp ← E.ranka(p − 1) + 1;
+4 ep ← E.ranka(q);
+5 l ← ep − sp + 1;
+6 i0 ← C[a] + sp;
+7 j0 ← i0 + l − 1;
+8 vi0 ← F.select_leaf(i0);
+9 vj0 ← F.select_leaf(j0);
+10 return id2range(F.lca(vi0 , vj0));
+
+Algorithm 1: Forward operation in HO-BOSS.
+
+Assembling right-maximal omnitigs
+
+4
+Right-maximal (RM) omnitigs are those safe strings spelt by walks in voDBGR
+K with arbitrary
+indegree and outdegree strictly 1. RM omnitigs are expected to be present in circular and
+non-circular genomes and to be longer than unitigs. They are, however, more complicated to
+construct, because some RM omnitigs can be left-extensions of other RM omnitigs, so if we
+are not careful, we may report redundant sequences.
+
+The ﬁrst challenge is how to report just the longest RM omnitigs, that is, those that are
+not suﬃxes of other RM omnitigs. This problem can be solved by just considering those
+walks in voDBGR
+K whose ﬁrst node is a leaf in F (i.e., a complete Kmer) with outdegree 1
+and with all its incoming nodes with outdegree at least 2. We call these leaves the starting
+nodes. Notice that the starting nodes can be obtained by scanning the Kmers and performing
+outdegree and backward queries on the regular BOSS index.
+
+The second challenge is how to avoid retraversing paths that were visited before. For
+instance, consider two RM omnitigs, aP and bP. The walk spelling P is traversed twice. To
+solve this, we mark all the path-merging nodes in voDBGR
+K, that is, nodes with outdegree
+1 and indegree at least 2. For the marking process, we perform a depth-ﬁrst traversal over
+F, and ﬁll a bit vector P M of size at most 2n, so that P M[i] = 1 if the ith node in F is a
+path-merging node. We build the rank structures on P M. Associated with the 1s of P M,
+we will store in a vector V a pointer to the position in the previous omnitig that was being
+generated when we passed through node i, so that we make our current omnitig point to it
+instead of generating it again. Initially, V has all null values.
+
+Algorithm 2 describes the extension of an RM omnitig O, which starts empty. In line 2,
+the rank of the input starter node is obtained. In lines 3–22 the algorithm continues the walk
+as long as it is not retraversing a path and the nodes have outdegree 1. In lines 4–12 we
+handle the visited nodes. First, we check with P M if the current node is path-merging. If
+so, we check in V if it was visited before, in which case we just link O to the corresponding
+position of the previous omnitig and ﬁnish. If, instead, it is the ﬁrst time we visit this node,
+we mark it as visited by associating it with the current node of O, and continue the traversal.
+In lines 13–21, we do the forward process. First, in lines 13–15, we shorten the node with
+shorter, as much as necessary to ensure there is some outgoing edge, that is, there is some
+non-$ in E[nodeRange]. Once nodeRange contains some edge, we see in lines 16–21 if it
+contains just one symbol, say a. If so, we append that a to O and move on to the next node
+using forward. If, instead, nodeRange has more than one outgoing symbol, the generation
+of O is complete. The result of generating all the omnitigs for all the starter nodes is a set of
+
+CVIT 2016
+
+23:8
+
+Assembling Omnitigs using Hidden-Order de Bruijn Graphs
+
+Data: nodeRange, HOBOSS, P M, V
+Result: Omnitig O
+
+V [p] ← current (last) list node of O;
+
+if P M[nodeRank] = 1 then
+
+p ← P M.rank1(nodeRank);
+if V [p] 6= null then
+
+1 O ← empty linked list of nodes;
+2 nodeRank ← F.rank0(0(range2id(nodeRange));
+3 while true do
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22 end
+23 return O
+
+append a as a list node at the end of O;
+nodeRange ← forward(nodeRange, a);
+
+end
+while nodeRange has only $s do
+
+nodeRange ← shorter(nodeRange);
+
+else
+
+end
+
+else
+
+end
+
+break;
+
+link O with previous omnitig position, V [p];
+break;
+
+end
+if nodeRange has only as, as, and $s, for some a then
+
+Algorithm 2: Finding the longest RM omnitigs starting at a node.
+
+lists, where some can possibly merge into others. This saves both space and generation time.
+The missing components are how to determine that nodeRange contains only $s, or only
+as apart from $s. To do this eﬃciently, we represent E in a diﬀerent way: a bit vector
+BE so that BE[i] = 1 iﬀ E[i] 6= $, and a reduced string E0 so that, if E[i] 6= $, then
+E0[BE.rank1(i)] = E[i]. All the operations on E are easily translated into BE and E0: apart
+from accessing it, which we have just described, we have E.ranka(i) = E0.ranka(BE.rank1(i))
+if a 6= $ and E.rank$(i) = BE.rank0(i), and E.selecta(j) = BE.select1(E0.selecta(j)) if
+a 6= $ and E.select$(j) = BE.select0(j). With this representation we have that there are
+only $s in nodeRange = [i, j] iﬀ BE.rank1(j) = BE.rank1(i − 1). If there are some non-$s,
+we map the range E[i..j] to E0[i0, j0], where i0 = BE.rank1(i − 1) + 1 and j0 = BE.rank1(j).
+Then a is an outgoing symbol, where E0[i0] = a or E0[i0] = a. It is the only outgoing symbol
+iﬀ (ranka(E0, j0) − ranka(E0, i0)) + (ranka(E0, j0) − ranka(E0, i0)) = j0 − i0. Thus, every
+operation in Algorithm 2 takes time O(log σ).
+
+5
+
+Experiments
+
+Datasets, code, and machine. Three Illumina datasets of single-end reads of 150 characters 
+long were simulated from the reference genome of Escherichia coli str. K-12 substr.
+MG1655, with coverages 5x, 10x, and 15x. The program used to simulate the reads was
+wgsim [9], using error rate 0, mutation rate 0, and discarding regions which contain characters
+N. The sizes for the datasets are 62 MB for 5x, 124 MB for 10x, and 185 for 15x.
+
+Both the HO-BOSS data structure and the algorithm for building RM omnitigs were
+
+D. Díaz-Domínguez et al.
+
+23:9
+
+Figure 1 Statistics about the HO-BOSS index and the RM omnitigs algorithm. Each color
+represents a dataset and each shape a value of m (both shapes are often superimposed). A) size of
+the HO-BOSS index vs K. B) mean elapsed time for the construction of RM omnitigs vs K. C)
+mean memory peak during the RM omnitigs construction vs K. D) Percentage of the original input
+data set (read sets) that each HO-BOSS index represents, as a function of the number of Kmers.
+
+implemented 1 in C++, on top of the SDSL-lite 2 library.
+
+All the experiments were carried out on a machine with Debian 4.9, 252 GB of RAM and
+
+procesor Intel(R) Xeon(R) Silver @ 2.10GHz, with 32 cores.
+
+Memory and time usage. We generated 16 HO-BOSS indexes combining diﬀerent values
+for K (15, 20, . . ., 50) and for m (5, 10). We measured for every index its size (Figure 1A),
+the memory peak (Figure 1B), and the elapsed time (Figure 1C) during the RM omnitigs
+construction. Additionally, we evaluated the fraction that each index represents with respect
+to the size of the original dataset (Figure 1D). The size of the index and memory peak grow
+linearly with K. The former is about 0.8K% and 1.0K% of the original data size, whereas
+the latter is closer to 10K%. Indeed, our index amounts to only 7%–14% of the total space
+required by the process to ﬁnd the longest omnitigs (see table A1). The table shows that, if
+we used V as a bit vector (the minimum required to detect cycles in the omnitigs) and charge
+all the pointers and strings to the omnitig structure, then it takes 84%-92% of the space.
+
+On the other hand, the elapsed time does not change with K for the coverages 10x and
+15x, but it decreases with K for 5x. The latter is due to the topology of the de Bruijn
+graph: as K increases, the number of edges decreases, together with the number of possible
+walks spelling RM omnitigs. This is not the case for coverages 10x and 15x, because greater
+coverages prevent the reduction of edges.
+
+Figure 4 shows the fraction of space that every substructure of the index uses. As
+expected, the E array (the edges of the de Bruijn graph) and the bit vector encoding TK are
+
+1 https://bitbucket.org/DiegoDiazDominguez/boss-assembly
+2 https://github.com/simongog/sdsl-lite
+
+CVIT 2016
+
+1020304050607020304050KHO-BOSS index size (MB)Coverage51015Minimum order510250500750100020304050KMean memory peak (MB)Coverage51015Minimum order51010203040501e+072e+073e+074e+075e+07Number of Kmers% of the original input sizeCoverage51015Minimum order51010203020304050KMean elapsed time (seconds)Coverage51015Minimum order51010203040501e+072e+073e+074e+075e+07Number of Kmers% of the original input sizeCoverage51015Minimum order510A)B)C)D)23:10
+
+Assembling Omnitigs using Hidden-Order de Bruijn Graphs
+
+Dataset K # Kmers # starter Kmers # PM nodes Max RM omnitig Max unitig
+
+5x
+
+10x
+
+15x
+
+15
+20
+30
+50
+15
+20
+30
+50
+15
+20
+30
+50
+
+10120448
+12371884
+15959968
+23070324
+11286124
+15262160
+22308302
+36379537
+12246035
+17859860
+28196394
+48858570
+
+505884
+6956
+2674
+1156
+489177
+6676
+2553
+1111
+469933
+6342
+2432
+1053
+
+1568804
+3387628
+6962222
+14060718
+2333984
+5860764
+12890652
+26949353
+3063092
+8216992
+18534531
+39181770
+
+295
+21344
+31800
+49135
+295
+35421
+127947
+269665
+
+295
+35420
+127947
+269665
+
+118
+134
+134
+134
+107
+124
+124
+124
+73
+86
+86
+86
+
+Table 1 Statistics about the HO-BOSS indexes, for m = 10. Column Max RM omnitig shows
+the size of the maximum RM omnitig obtained for that index, while column Max unitig is the size
+of the maximum unitig obtained with the BOSS indexes with Kmer size ranging between m and K.
+Some rows were omitted to save space.
+
+the structures that use the most memory. The space distribution is stable across experiments.
+Table 1 shows statistics about the structure of the HO-BOSS index. The number of
+Kmers (i.e., graph nodes) increases more or less linearly with K, and also with the coverage.
+On the other hand, the number of starter nodes decreases with K, very sharply when moving
+from K = 15 to K = 20. This is expected since nodes with outdegree 1 are more common
+with larger K, and their targets are invalidated as starter nodes. The number of path-merging
+(PM) nodes also increases with K. The fraction of PM nodes with respect to the number
+of Kmers also increases with K, and with the coverage. The percentages range from 15%
+with K = 15 and 5x, to 80% with K = 50 and 15x. This fraction impacts on the size of the
+HO-BOSS index, because the size of the array V depends on the number of PM nodes.
+
+Table A2 measures the time and space usage during the construction of the omnitigs.
+We show the eﬀective number of traversed nodes (those reached by performing the forward
+operation in the graph) and the total number of nodes in the omnitigs (number of nodes
+reached by forward operation plus number of nodes linked in omnitigs due to path merging).
+The number of forward operations saved via path-merging is greater for low coverage (5x)
+and greater in general as K increases. The average time and working space spent per node
+remains similar in all the experiments. We note that the savings are not too high, although
+some method is needed anyway to detect repeated traversals because otherwise a traversal
+may fall in a loop of the graph.
+
+Quality of assembled omnitigs. We assessed the quality of the assembled RM omnitigs
+by mapping them back to the original reference genome using BLAST [1]. An RM omnitig
+was classiﬁed as correctly assembled if 100% of its sequence could be aligned to the reference
+genome, with neither mistmatches nor gaps. Figure 2 shows the fraction of RM omnitigs
+correctly assembled in each experiment. Additionally, Figure 3 shows the length distribution
+of the RM omnitigs correctly assembled. As expected, the results improve with higher
+coverage, being almost perfect for 10x and 15x. On 5x, we note that K = 15 yields the best
+results, although the omnitigs generated are much shorter (see Table 1).
+
+Comparing omnitig vs unitig lengths. We compare the sizes of the correctly assembled
+
+D. Díaz-Domínguez et al.
+
+23:11
+
+Figure 2 Omnitigs correctly assembled for coverages 5x, 10x, and 15x. The x-axis is the value
+for K used to build the HO-BOSS index and the y-axis the fraction of omnitigs that were correctly
+assembled. Colors refer to the minimum value m.
+
+Figure 3 Length distribution of correctly assembled omnitigs. The x-axis gives the values of K
+used to build the HO-BOSS indexes and the y-axis shows the length of the omnitigs. Plots in the
+columns represent the diﬀerent datasets and plots in the rows represent the diﬀerent values for m.
+
+omnitigs and their equivalent unitigs using the following procedure. First, we built 40 regular
+BOSS indexes for each dataset, with K ranging from 10 to 50, and the unitigs were inferred
+independently in those indexes. Subsequently, for every HO-BOSS index with m = 10 and
+15 ≤ K ≤ 50, we compare its RM omnitig of maximum size with all the unitigs of maximum
+size obtained in the regular BOSS indexes with 10 ≤ K0 ≤ K.
+
+The sizes of maximum omnitigs versus maximum unitigs are shown in Table 1. In Figure
+3 we can see that the longest unitigs are near log10 length = 2, below most of the omnitigs
+we generate and about an order of magnitude below the mean omnitig length.
+
+6
+
+Conclusion and further work
+
+We have presented HO-BOSS, an approach to assembling a subclass of omnitigs on variableorder 
+de Bruijn graphs without using and LCP array, and our experimental results show that
+we can extract remarkably long omnitigs that map perfectly to the source genomes. Our
+approach still needs work to handle, for example, sequencing errors or paired-reads.
+
+We hope HO-BOSS will serve as a starting point for the development of succinct genome
+assembers that produce longer sequences than current methods. In order for this hope to be
+realized, we are working on more eﬃcient algorithms to build the BOSS index, generate a
+canonical representation of the Kmers (linking the information of a Kmer with it reverse
+
+CVIT 2016
+
+5x10x15x1520253035404550152025303540455015202530354045500.000.250.500.751.00KFrac. correctly assembledMinimum order10510x15x5x10515202530354045501520253035404550152025303540455023452345KRM Omnitig size (log10)23:12
+
+Assembling Omnitigs using Hidden-Order de Bruijn Graphs
+
+complement), and resolve problematic substructures in the graph such as bubbles and tips.
+Our attempt to avoid retraversing suﬃxes of omnitigs already generated seems to reduce
+the amount of work only by a small margin (less than 15%), but it makes the process require
+an order of magnitude more memory than the succinct HO-BOSS index. In the ﬁnal version
+of this paper we will investigate an alternative that uses much less space: V is converted
+into a bit vector that marks the nodes visited for the current omnitig, with the purpose of
+avoiding cycles only; no attempt is made to detect repeated suﬃxes of other omnitigs.
+
+1
+
+3
+
+References
+S. Altschul, W. Gish, W. Miller, E. Myers, and D. Lipman. Basic local alignment search
+tool. Journal of Molecular Biology, 215:403–410, 1990.
+
+2 A. Bankevich et al. SPAdes: A New Genome Assembly Algorithm and Its Applications to
+
+Single-Cell Sequencing. Journal of Computational Biology, 19(5):455–477, 2012.
+J. Barbay, F. Claude, T. Gagie, G. Navarro, and Y. Nekrich. Eﬃcient fully-compressed
+sequence representations. Algorithmica, 69(1):232–268, 2014.
+
+4 C. Boucher, A. Bowe, T. Gagie, S. J. Puglisi, and K. Sadakane. Variable-order de Bruijn
+
+graphs. In Proc. DCC, pages 383–392, 2015.
+
+6
+
+5 A. Bowe, T. Onodera, K. Sadakane, and T. Shibuya. Succinct de Bruijn graphs. In Proc.
+
+WABI, pages 225–235, 2012.
+S. Cha and David M. Bird. Optimizing k-mer size using a variant grid search to enhance
+de novo genome assembly. Bioinformation, 12(2):36–40, 2016.
+
+7 D. R. Clark. Compact PAT Trees. PhD thesis, University of Waterloo, Canada, 1996.
+8 R. Grossi, A. Gupta, and J. S. Vitter. High-order entropy-compressed text indexes. In
+
+Proc. SODA, pages 841–850, 2003.
+
+9 H. Li. wgsim - Read simulator for next generation sequencing. Bioinformatics, 28:593–594,
+
+2012.
+
+2014.
+
+2016.
+
+10 Yu Lin and Pavel A. Pevzner. Manifold de Bruijn graphs. In Proc. WABI, pages 296–310,
+
+11 G. Navarro. Compact Data Structures – A practical approach. Cambridge University Press,
+
+12 G. Navarro and K. Sadakane. Fully-functional static and dynamic succinct trees. ACM
+
+Transactions on Algorithms, 10(3):article 16, 2014.
+
+13 Y. Peng, H. C. M. Leung, S. M. Yiu, and F. Y. L. Chin. IDBA - A practical iterative de
+
+Bruijn graph de novo assembler. In Proc. RECOMB, pages 426–440, 2010.
+
+14 R. Raman, V. Raman, and S. S. Rao. Succinct indexable dictionaries with applications
+to encoding k-ary trees, preﬁx sums and multisets. ACM Transactions on Algorithms,
+3(4):article 43, 2007.
+
+15 Alexandru I. Tomescu and Paul Medvedev. Safe and complete contig assembly via omnitigs.
+
+In Proc. RECOMB, pages 152–163, 2016.
+
+D. Díaz-Domínguez et al.
+
+A
+
+Appendix
+
+23:13
+
+Dataset K %HO-BOSS %V %Omni
+85.724
+86.374
+89.709
+91.517
+85.350
+87.347
+90.388
+91.921
+86.438
+84.014
+87.753
+90.301
+
+13.172
+12.135
+8.942
+7.254
+13.497
+11.236
+8.332
+6.899
+12.558
+14.360
+10.722
+8.334
+
+1.104
+1.491
+1.349
+1.228
+1.153
+1.417
+1.280
+1.180
+1.004
+1.626
+1.525
+1.365
+
+15
+20
+30
+50
+15
+20
+30
+50
+15
+20
+30
+50
+
+5x
+
+10x
+
+15x
+
+Table A1 Distribution of memory across the data structures during the memory peak of the
+omnitigs assembly. We show the percentage of memory occupied by the HO-BOSS index, by V and
+by the pointers and strings. Here, V is taken as a bit vector and its pointer is charged to %Omni.
+
+Dataset K traversed nodes
+
+omnitig nodes % reduction
+
+µseconds per node
+
+5x
+
+10x
+
+15x
+
+15
+20
+30
+50
+15
+20
+30
+50
+15
+20
+30
+50
+
+7922657
+6275049
+3670985
+2139434
+7659722
+8308020
+8264133
+7592128
+7370858
+8079033
+7637694
+7703818
+
+8019021
+7097839
+4298129
+2509511
+7743926
+8399299
+8489031
+8022769
+7448419
+8120524
+7688838
+7904738
+
+1.20
+11.59
+14.59
+14.75
+1.09
+1.09
+2.65
+5.39
+1.04
+0.51
+0.67
+2.54
+
+2.693
+2.684
+2.652
+2.740
+2.959
+2.949
+3.092
+3.083
+2.880
+3.029
+3.122
+3.210
+
+Table A2 Performance statistics. The third column shows the eﬀective number of traversed
+nodes in the variable order de Bruijn graph. The fourth column shows the total number of nodes
+that the assembled RM omnitigs represent. The ﬁfth column shows the percentage of the total
+number of nodes that were not traversed due to our merging approach and the sixth and seventh
+columns show the average time and working space used per traversed node. Some rows were omitted
+to save space.
+
+CVIT 2016
+
+23:14
+
+Assembling Omnitigs using Hidden-Order de Bruijn Graphs
+
+Figure 4 Fraction of memory that every substructure of the HO-BOSS index occupies. Plots in
+the columns represent the datasets while the plots in the rows represent the diﬀerent values for m.
+The y-axis is the fraction of memory used by every data structure and the x-axis is the value used
+for K.
+
+10x15x5x1051520253035404550152025303540455015202530354045500.000.250.500.751.000.000.250.500.751.00KHO-BOSS decompositionHO-BOSSEBT_KEBTK

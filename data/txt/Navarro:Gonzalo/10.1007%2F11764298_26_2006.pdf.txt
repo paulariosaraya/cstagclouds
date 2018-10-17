@@ -1,0 +1,1422 @@
+On the Least Cost for Proximity Searching in
+
+Metric Spaces(cid:2)
+
+Karina Figueroa1,2, Edgar Ch´avez1, Gonzalo Navarro2, and Rodrigo Paredes2
+
+2 Center for Web Research, Dept. of Computer Science, Universidad de Chile
+
+1 Universidad Michoacana, M´exico
+
+{karina, elchavez}@fismat.umich.mx
+{gnavarro, raparede}@dcc.uchile.cl
+
+Abstract. Proximity searching consists in retrieving from a database
+those elements that are similar to a query. As the distance is usually
+expensive to compute, the goal is to use as few distance computations
+as possible to satisfy queries. Indexes use precomputed distances among
+database elements to speed up queries. As such, a baseline is AESA,
+which stores all the distances among database objects, but has been
+unbeaten in query performance for 20 years. In this paper we show that
+it is possible to improve upon AESA by using a radically diﬀerent method
+to select promising database elements to compare against the query. Our
+experiments show improvements of up to 75% in document databases.
+We also explore the usage of our method as a probabilistic algorithm
+that may lose relevant answers. On a database of faces where any exact
+algorithm must examine virtually all elements, our probabilistic version
+obtains 85% of the correct answers by scanning only 10% of the database.
+
+1 Introduction
+
+Proximity or similarity searching is nowadays an essential tool in a number of
+practical tasks such as vector quantization of signals, pattern recognition, retrieval 
+of multimedia information, etc. In these applications there is a database
+(for example, a set of documents) and a similarity measure among its objects
+(for example, the cosine distance). The similarity is modeled by a distance function 
+deﬁned by experts in each application domain, which tells how similar two
+objects are. The distance function is normally considered quite expensive to
+compute, so that even I/O operations or the CPU cost of side computations are
+not considered. That is, the search complexity is taken as just the number of
+distance evaluations needed to answer a query, and thus the goal is to answer
+the queries by performing the minimum number of distance evaluations.
+
+To reduce the query cost, an index is built on the database before searching it.
+The index is a data structure that stores information on some distances among
+database elements. This information is used later to discard some elements without 
+comparing them directly with the query.
+
+(cid:2) Supported by CONACyT (Mexico) and Millennium Nucleus Center for Web Research,
+ Grant P04-067-F, Mideplan, (Chile).
+
+`A
+
+lvarez and M. Serna (Eds.): WEA 2006, LNCS 4007, pp. 279–290, 2006.
+
+C.
+c(cid:2) Springer-Verlag Berlin Heidelberg 2006
+
+280
+
+K. Figueroa et al.
+
+Diﬀerent indexes store diﬀerent information on the database distances [7].
+Some store a subset of the distances, e.g. all the distances between k chosen
+pivots and all the rest, or all the distances between an element and its subtree,
+in a tree-structured index. Some store just a range of distance values, and so on.
+In general, the more information an index stores, the lower query cost it achieves
+(although some use memory better than others). In this view, in a database of
+n objects the most information an index could store is the n(n − 1)/2 distances
+among all element pairs. This is usually avoided because it requires O(n2) space,
+but it is applicable in some areas such as pattern recognition, as well as to index
+database subsets. In particular, using all the available information establishes a
+baseline on how good an index could be. Actually, all the development on metric
+space indexing can be regarded as the quest for maintaining good eﬃciency while
+reducing the amount of information stored [7].
+
+The canonical algorithm that uses all the data is AESA [17]. For 20 years
+AESA has been the indexing technique requiring, by far, the least number of
+distance computations among all other indexes (which require much less space).
+In this paper we show, for the ﬁrst time, that it is possible to establish a
+new baseline on the number of distance evaluations for proximity searching.
+More speciﬁcally, AESA works by choosing a “pivot” from the remaining set
+of candidates and using it to prune more candidates. The closer the pivot to
+the query, the more eﬀective the pruning is. We introduce a new technique
+called iAESA to choose the next pivot, which guesses better a close candidate
+and yields reductions in the number of distance evaluations of up to 75% in
+document databases.
+
+In very high dimensions, even AESA and iAESA boil down to a sequential
+database scan. We explore the usage of iAESA as a probabilistic scheme that
+may lose some relevant answers, but could quickly ﬁnd most of them. We show
+that, for example, on a database of face images where no exact algorithm can
+obtain any signiﬁcant savings over a sequential scan, iAESA retrieves 85% of
+the correct answers by scanning just 10% of the database. This is 80% less than
+what would be needed to obtain the same result with probabilistic AESA.
+
+2 Related Work
+
+2.1 Notation and Basic Concepts
+
+Let (X, d) be a metric space, where X is the universe of objects and d the distance
+function among the objects in X. The distance function d : X×X → R+ is deﬁned
+by experts in the application domain and expresses the dissimilarity between
+objects in X. The distance function must satisfy the following properties: strict
+positiveness (d(x, y) > 0 ⇐⇒ x (cid:5)= y), symmetry (d(x, y) = d(y, x)) and triangle
+inequality (d(x, z) ≤ d(x, y) + d(y, z)).
+Let U ⊆ X be our database of size n, q ∈ X the query, and r ≥ 0. The similarity 
+queries can be classiﬁed into two basic types:
+
+On the Least Cost for Proximity Searching in Metric Spaces
+
+281
+
+– Range query, (q, r)d = {u ∈ U | d(u, q) ≤ r}
+– k-nearest neighbor query, kNN(q)d = A such that ∀u ∈ A, v ∈ U − A,
+
+d(u, q) ≤ d(v, q), and |A| = k.
+The naive approach to these kind of queries is to compare the whole database
+against the query. This solution, however, requires n distance computations. An
+index is a data structure on U that solves queries of either type trying to use less
+than n distance evaluations. As the objects are black-boxes, the search always
+proceeds by comparing q against some element of U, discarding candidates using
+that distance and the help of the index, and so on until every element is either
+discarded or reported.
+
+The performance of the algorithms in metric spaces is aﬀected by the intrinsic 
+dimension of data [7]. When the dimension grows, the mean of a random
+distance increases and the variance diminishes. In high dimensions, there are no
+algorithms that can avoid sequential scan. AESA is also aﬀected by dimension
+in spite of being the best proximity search algorithm in metric spaces.
+
+2.2 AESA
+
+The Approximating and Eliminating Search Algorithm (AESA) was introduced
+by E. Vidal in 1986 [17]. AESA needs to compute and store a matrix as an index,
+recording every distance d(u, v), ∀u, v ∈ U, that is O(n2) distances. During the
+search process, an element from the remaining candidates, called a “pivot”, is
+chosen and compared against the query. AESA uses the matrix of distances
+to discard remaining candidates using the triangle inequality. The algorithm is
+described in Section 2.3.
+
+Although O(n2) space can be a large amount of memory, there are applications
+with small enough databases (up to few thousand objects) where managing all
+the O(n2) distances is possible. For this kind of applications, AESA is still a
+practical solution and the one performing least distance computations.
+
+In the case of larger databases, where O(n2) distances cannot be stored, it is
+still possible to partition the database with another technique and apply AESA
+on each partition [11].
+
+AESA has been for 20 years the algorithm that computes the least number 
+of distance evaluations to answer proximity queries. There have been some
+algorithms aimed at reducing its preprocessing time or space used. LAESA
+[13] chooses k elements of U as potential pivots, then reducing the space to
+O(kn). An improved version of LAESA is Tree LAESA (TLAESA) [12] which
+achieves sublinear side computations at query time at the expense of doubling
+the number of distance computations on average. Reduced Overhead AESA
+(ROAESA) [18] strictly calculates the same distances as AESA but reduces
+the query processing time. Recently, graph t-spanner indexes [15] were used to
+simulate AESA, obtaining almost the same number of distance calculations and
+using much less memory. In fact, all the development on indexes for metric
+spaces can be seen as attempts to simulate the performance of AESA using less
+memory [7].
+
+282
+
+K. Figueroa et al.
+
+2.3 Searching Using AESA
+
+Like most indexing algorithms, AESA solves nearest neighbor queries by choosing 
+a pivot u ∈ U to compare against q, then ﬁltering out as many candidates
+of U as possible, and repeating until all candidates are compared or discarded.
+AESA proposes a speciﬁc method to select the pivots: The next pivot to compare
+against q is chosen as the candidate u minimizing
+
+D(u) =
+
+|d(u, p) − d(p, q)|,
+
+(1)
+
+(cid:2)
+
+p∈|P|
+
+where P are those pivots already compared against q (thus the d(p, q) distances 
+are known, whereas the d(u, p) distances are stored in the matrix). The
+goal of minimizing D(u) is to ﬁnd a pivot as close as possible to q. The algorithm 
+to answer a closest neighbor query 1-NN(q)d is summarized in ﬁve
+steps.
+
+AESA
+
+iAESA
+
+← 0
+
+D(u)
+
+r ← ∞
+
+1. Let P ← ∅ set of pivots
+2. Let F ← ∅ set of ﬁltered elements
+3.
+4. For u ∈ U, D(u) ← 0, Dmaxu
+5. while U (cid:6)= P ∪ F do
+p ← argminu∈U−P−F
+6.
+P ← P ∪ {p}
+7.
+if d(q, p) < r then
+8.
+9.
+10.
+11.
+12.
+13.
+14.
+15.
+16.
+17. return p∗
+
+for u ∈ U − P − F do
+← max (Dmaxu
+> r then
+
+r ← d(p, q)
+p∗ ← p
+
+Dmaxu
+if Dmaxu
+
+D(u) ← D(u) + |d(q, p) − d(u, p)|
+
+F ← F ∪ {u}
+
+else
+
+, |d(q, p) − d(u, p)|)
+
+← 0
+
+F (u)
+
+r ← ∞, Πq ←<>
+
+1. Let P ← ∅ set of pivots
+2. Let F ← ∅ set of ﬁltered elements
+3.
+4. For u ∈ U, F (u) ← 0, Πu ←<>
+5. For u ∈ U, Dmaxu
+6. while U (cid:6)= P ∪ F do
+p ← argminu∈U−P−F
+7.
+P ← P ∪ {p}
+8.
+insert p in Πq
+9.
+if d(q, p) < r then
+10.
+11.
+12.
+13.
+14.
+15.
+16.
+17.
+18.
+19.
+20. return p∗
+
+for u ∈ U − P − F do
+← max (Dmaxu
+> r then
+
+insert p in Πu
+F (u) ← F (Πq, Πu)
+
+r ← d(p, q)
+p∗ ← p
+
+Dmaxu
+if Dmaxu
+
+F ← F ∪ {u}
+
+else
+
+, |d(q, p) − d(u, p)|)
+
+Fig. 1. AESA and iAESA algorithms to retrieve the nearest neighbor (iAESA is described 
+in Section 3)
+
+1. Initialization. The sets of pivots P and ﬁltered elements F are empty. Let
+← 0 and r ← ∞. Steps 2-5 are repeated until
+
+D(u) ← 0 for u, Dmaxu
+U = P ∪ F.
+(1). That is p ← argminu∈U−F−P D(u).
+
+2. Approximating. In this step a new pivot p is selected according to Equation
+
+On the Least Cost for Proximity Searching in Metric Spaces
+
+283
+
+3. Distance computation. Element p is compared against the query q by
+
+computing d(p, q). The new p will be added to the set of used pivots P.
+4. Updating the NN. If d(q, p) < r, the current nearest neighbor and r are
+updated. Every object in U − F − P updates its approximation criterion
+according to Equation (1), that is D(u) ← D(u) + |d(u, p) − d(p, q)| and
+Dmaxu
+5. Eliminating. Those u ∈ U− F− P such that Dmaxu > r are discarded using
+the triangle inequality. The elements ﬁltered in this step are added to F. The
+process continues at step 2.
+
+← max(Dmaxu,|d(u, p) − d(p, q)|).
+
+The nearest neighbor query process of AESA is presented in Fig. 1 (left).
+Range query process (q, r)d can be implemented similarly by keeping r ﬁxed and
+reporting every p that d(p, q) ≤ r.
+
+These algorithms generalize to k-NN queries, where k > 1, by maintaining a
+∗ found until now, so that r is the distance to
+
+pool with the k closest elements p
+the current k-th nearest neighbor.
+
+2.4 Proximity Preserving Order
+
+We introduce some terminology needed to explain our technique [5].
+Let P ⊆ U. Every element u ∈ U deﬁnes a preorder ≤u in P given by the
+distance to u. It is deﬁned for y, z ∈ P, as y ≤u z ⇔ d(u, y) ≤ d(u, z). The
+relation ≤u is a preorder and not an order because some elements can be at the
+same distance of u, and then ∃y (cid:5)= z such that y ≤u z ∧ z ≤u y.
+
+Every object u can compute its preorder of P and associate it to a permutation,
+because the preorder induces a total order in the quotient set. Let us deﬁne
+Πu = p1, p2, . . . , p|P| where pi ≤u pi+1 the permutation of u. The elements at
+−1
+u (pi) to
+the same distance take an arbitrary but consistent order. We use Π
+identify the position of element pi in the permutation Πu.
+
+It is important to notice that two equal elements must have the same permutation,
+ while two similar objects will hopefully have a similar permutation. So if
+Πu is similar to Πq we expect u to be close to q.
+
+Similarity between the permutations of q and u can be measured by Kendall
+Tau, Spearman Rho, or Spearman Footrule metric [10], among others. As all
+of these have a comparable predictive power [5], we choose Spearman Footrule
+because it is not expensive to compute. This measure is deﬁned as follows:
+
+F (u) = F (Πu, Πq) =
+
+|P|(cid:2)
+
+i=1
+
+|Π
+
+u (pi) − Π
+−1
+
+−1
+q
+
+(pi)|,
+
+(2)
+
+where P is the current set of pivots. For example, let Πq = p1, p2, p3, p4, p5 be
+the permutation of the query, and Πu = p3, p2, p1, p5, p4 the permutation of an
+element u ∈ U. According to Equation (2), we have F (Πq, Πu) = |1 − 3| + |2 −
+2| + |3 − 1| + |4 − 5| + |5 − 4| = 6.
+
+284
+
+K. Figueroa et al.
+
+3 Our Proposal: iAESA
+
+From Section 2.2, we notice that the only way to improve the performance of
+AESA seems to be by modifying the approximation criterion, that is, by proposing 
+a diﬀerent method to select the next pivot.
+
+We propose to select as the new pivot the element whose permutation is the
+
+most similar to the permutation of the query. We describe this process next.
+
+3.1 Searching Using iAESA
+
+The algorithm consists basically in modifying the approximation criterion, which
+will be replaced by the similarity between permutations. The permutations will
+be formed by the pivots already used.
+
+Instead of D(u), we will use F (u), which is initialized at 0 and updated upon
+choosing a new pivot p according to Equation (2). The new pivot will be the one
+with smallest F (u). Fig. 1 (right) gives the algorithm.
+
+3.2 Comparing AESA with iAESA
+
+In Fig. 2 we compare iAESA with AESA, using the same example shown in [17].
+The example retrieves the nearest neighbor. In the ﬁgure (left side) the objects
+are p1, . . . , p7 and q is the query; the solid lines are the terms of Equation (1);
+the dashed lines indicate the process to select the next pivot (labeled step-1,
+step-2 and step-3); the circle and the semicircles are the distances from a pivot
+to the query, and the semicircles are labeled by the order of execution, step-1,
+step-2 and step-3. They help viewing which elements are to be chosen given the
+approximation criterion.
+
+P5
+
+Step−1
+Step−3
+Step−2
+
+q
+
+P4
+
+d(p2,q)
+
+P7
+d(p1,q)
+
+P1
+
+)|
+
+2
+
+q , p
+
+(
+
+d
+
+−
+
+)
+
+2
+
+6 , p
+
+p
+
+(
+
+| d
+
+P
+
+6
+
+d ( p 3 , q )
+
+Step−1
+
+P2
+
+3
+−
+p
+e
+t
+
+S
+
+2
+−
+p
+Ste
+
+P3
+
+P5
+P1P2
+
+P1P2
+
+P7
+
+d ( p 1 , q )
+
+P1
+
+P1P2
+
+P6
+
+Step−1
+
+Step−2
+P4
+
+Step−1
+
+P
+
+1P2
+P3
+
+q
+
+P2P1
+
+P2P1
+
+Ste
+
+p
+
+−
+
+2
+
+P2
+
+d(p2,q)
+
+Fig. 2. On the left, the example shown in [17] to explain AESA. On the right, iAESA
+process for the same set of elements. The order of selection is step-1, step-2 and step-3.
+Note that iAESA uses one pivot less than AESA in this example.
+
+On the Least Cost for Proximity Searching in Metric Spaces
+
+285
+
+AESA initially selected p1. The next pivot was p2 because it minimizes Equation 
+(1) (step-1). The next pivot is p3 (step-2) and ﬁnally p4 (step-4) according
+to the approximation criterion.
+
+On the other hand, in the process of iAESA, p1 and p2 are selected in the
+same way as AESA. We have drawn the permutation of the elements at this
+point. Note that p4 has the same permutation as Πq = {p2, p1}, therefore p4 is
+the next (and last) pivot. In this example iAESA uses the pivots (p1, p2, p4), one
+less than AESA.
+The CPU time complexity of AESA is O(|P| · n), as |P| is the number of
+iterations over the elements not yet discarded and D(u) is updated in constant
+time. iAESA complexity is higher because we need O(|P|) time to update Πu
+and F (u). This yields a total complexity of O(|P|2 · n).
+
+3.3 Combining AESA and iAESA
+
+AESA and iAESA criteria can be combined into an algorithm that we call
+iAESA2. The idea is to modify the approximation criterion of iAESA (i.e., the
+similarity between permutations) using AESA approximation criterion D(u) to
+break ties in F (u). These ties are common when there are few pivots. The CPU
+time complexity of iAESA2 is also O(|P|2 · n).
+
+In other words, iAESA2 uses two approximation criteria: a primary one given
+by the least value of Spearman Footrule metric (i.e. the most similar permuta-
+tion) and a secondary one given by the smallest D(u).
+
+4 Probabilistic iAESA
+
+A serious problem of all algorithms in metric spaces, even for AESA, is that when
+the dimension of the space grows [7], the whole database needs to be reviewed.
+In this case a probabilistic algorithm (which can miss some relevant answers) is
+a practical tool. Any exact algorithm can be turned into probabilistic, by letting
+it work until some predeﬁned work threshold and measuring how many relevant
+answers did it ﬁnd.
+
+Probabilistic algorithms have been proposed both for vector spaces [1, 19] and
+for general metric spaces [9, 8, 6, 4]. In [4] they use a technique to obtain probabilistic 
+algorithms that is relevant to this work. They use diﬀerent techniques to
+sort the database according to some promise value. As they traverse the database
+in such order, they obtain more and more relevant answers to the query. A good
+database ordering is one that obtains most of the relevant answers by traversing
+a small fraction of the database. In other words, given a limited amount of work,
+the algorithm ﬁnds each correct answer with some probability, and it can reﬁne
+the answer incrementally if more work is allowed. Thus, the problem of ﬁnding
+good probabilistic search algorithms translates into ﬁnding a good ordering of
+the database given a query q.
+
+Under this model, a probabilistic version of k-NN AESA, iAESA and iAESA2
+consists in reviewing objects up to some fraction of the database and reporting
+
+286
+
+K. Figueroa et al.
+
+the k closest object found until then. In Fig. 1, we should replace the while
+condition (line 5) by while |P| < percentage of database. For range queries we
+would simply report any relevant element found until the scanning is stopped.
+
+5 Experimental Results
+
+We conducted experiments on diﬀerent synthetic and real-life metric databases.
+The real-life metric spaces are TREC-3 documents under cosine distance [2], and
+a database of feature vectors of face images under Euclidean distance [14]. The
+synthetic metric spaces are random vectors in the unitary cube.
+
+5.1 Exact iAESA: Unitary Cube
+The performance of the existing algorithms, to answer both range and k-nearest
+neighbor queries, worsens as the dimension of the space grows [3]. Therefore, it
+is interesting to experiment with spaces with diﬀerent dimensions.
+
+A way to control the dimension of the space is to generate synthetic sets
+uniformly distributed in the unitary cube, and use this set as an abstract metric
+space. We experimented with 4 to 14 dimensions, for databases of size from 5,000
+to 20,000 elements. The performance of our technique can be seen in Fig. 3.
+Notice that, as we increase the dimension of the data, the problem becomes
+more diﬃcult. Nevertheless, iAESA retains its (slight) advantage over AESA
+when the dimension grows. In the best case, iAESA requires 17% less distance
+evaluations than AESA. iAESA2 had the same performance as iAESA, so we
+omitted it in this experiment. On the other hand, we note that iAESA loses its
+advantage over AESA as the number k of nearest neighbors sought grows. For
+example, in dimension 14 AESA takes over for k > 5.
+
+l
+
+s
+n
+o
+i
+t
+a
+u
+a
+v
+e
+ 
+e
+c
+n
+a
+t
+s
+D
+
+i
+
+ 1024
+
+ 512
+
+ 256
+
+ 128
+
+ 64
+
+ 32
+
+ 16
+
+ 8
+
+ 4
+
+iAESA n=5000
+AESA n=5000
+iAESA n=10000
+AESA n=10000
+iAESA n=15000
+AESA n=15000
+iAESA n=20000
+AESA n=20000
+
+l
+
+s
+n
+o
+i
+t
+a
+u
+a
+v
+e
+ 
+e
+c
+n
+a
+t
+s
+D
+
+i
+
+ 1024
+
+ 512
+
+ 256
+
+ 128
+
+iAESA dim 12
+AESA dim 12
+iAESA dim 14
+AESA dim 14
+
+ 4
+
+ 6
+
+ 8
+
+ 10
+
+ 12
+
+ 14
+
+ 2
+
+ 3
+
+ 4
+
+ 5
+
+ 6
+
+ 7
+
+ 8
+
+Dimension
+
+k nearest neighbors
+
+Fig. 3. Performance of our technique against AESA for diﬀerent dimensions and k =
+2 (left side). On the right, we retrieve diﬀerent numbers k of nearest neighbors, on
+dimensions 12 and 14 and n = 5, 000. Note the logscale.
+
+5.2 Exact iAESA: Documents
+A set of 1265 English documents obtained from the Wall Street Journal 87-89
+collection from TREC-3 was indexed. We compare the documents under the
+vector space, using the cosine distance [2].
+
+On the Least Cost for Proximity Searching in Metric Spaces
+
+287
+
+ 40
+
+ 35
+
+ 30
+
+ 25
+
+ 20
+
+ 15
+
+ 10
+
+ 5
+
+ 0
+
+iAESA
+AESA
+iAESA2
+
+iAESA
+AESA
+iAESA2
+
+ 0.18
+
+ 0.16
+
+ 0.14
+
+ 0.12
+
+ 0.1
+
+ 0.08
+
+ 0.06
+
+ 0.04
+
+ 0.02
+
+)
+s
+d
+n
+o
+c
+e
+s
+(
+ 
+e
+m
+T
+
+i
+
+ 0
+
+ 2
+
+ 6
+
+ 4
+ 8
+k Nearest Neighbors
+
+ 10
+
+ 12
+
+ 0
+
+ 0
+
+ 2
+
+ 6
+
+ 4
+ 8
+k Nearest Neighbors
+
+ 10
+
+ 12
+
+l
+
+s
+n
+o
+i
+t
+a
+u
+a
+v
+e
+ 
+e
+c
+n
+a
+t
+s
+D
+
+i
+
+Fig. 4. Comparing the performance of our technique against AESA on a document
+database (1265 documents)
+
+Fig. 4 shows the results on this space. This time iAESA improves upon AESA
+as the number k of nearest neighbors retrieved grows over 8. On the left we show
+distance computations. It can be seen that iAESA2 is clearly better than both
+AESA and iAESA in all cases, improving upon AESA by up to 75%, when k = 1.
+Fig. 4 (right) displays overall CPU time. It can be seen that, even though iAESA
+and iAESA2 suﬀer from a higher number of side CPU computations, they are
+still preferable over AESA.
+
+As a sanity check, we compared these results against choosing the next pivot
+at random. This turned out to make four times more evaluations than iAESA.
+
+5.3 Probabilistic iAESA: Unitary Cube
+
+We experimented with 3,000 synthetic random vectors in the unitary cube of
+128 dimensions. Any exact algorithm is forced to compare every element in such
+a high-dimensional space. Fig. 5 (left) shows the percentage of successful queries
+when the number of objects compared against the query is limited. That is, we
+plot the percentage of queries that retrieved all their correct k nearest neighbors
+after scanning a fraction of the database. We can see that iAESA ﬁnds the k
+nearest neighbors faster than AESA, and that iAESA2 is the fastest for large
+
+i
+
+s
+r
+o
+b
+h
+g
+e
+n
+ 
+t
+s
+e
+r
+a
+e
+n
+ 
+k
+ 
+s
+t
+i
+ 
+d
+e
+v
+e
+i
+r
+t
+e
+r
+ 
+t
+a
+h
+t
+ 
+s
+e
+i
+r
+e
+u
+q
+%
+
+ 
+
+ 100
+
+ 90
+
+ 80
+
+ 70
+
+ 60
+
+ 50
+
+ 40
+
+ 30
+
+ 20
+
+ 10
+
+ 0
+
+ 2
+
+ 3
+
+ 1.035
+
+ 1.03
+
+ 1.025
+
+ 1.02
+
+ 1.015
+
+ 1.01
+
+ 1.005
+
+r
+o
+r
+r
+e
+ 
+e
+v
+i
+t
+a
+e
+R
+
+l
+
+ 9
+
+ 10
+
+ 1
+
+ 2
+
+ 3
+
+iAESA k=1
+AESA k=1
+iAESA2 k=1
+iAESA k=2
+AESA k=2
+iAESA2 k=2
+
+ 5
+
+ 8
+ 4
+Percentage of database reviewed
+
+ 6
+
+ 7
+
+ 9
+
+ 10
+
+iAESA k=1
+AESA k=1
+iAESA2 k=1
+iAESA k=2
+AESA k=2
+iAESA2 k=2
+
+ 5
+
+ 8
+ 4
+Percentage of database reviewed
+
+ 6
+
+ 7
+
+Fig. 5. Searching for k nearest neighbors on 3,000 random vectors in 128 dimensions.
+On the left, fraction of correct queries. On the right, distance approximation ratio for
+the unsuccessful queries.
+
+288
+
+K. Figueroa et al.
+
+d
+e
+v
+e
+i
+r
+t
+e
+r
+ 
+
+N
+N
+k
+ 
+f
+
+ 
+
+o
+n
+o
+
+i
+t
+c
+a
+r
+f
+
+ 1
+
+ 0.9
+
+ 0.8
+
+ 0.7
+
+ 0.6
+
+ 0.5
+
+ 0.4
+
+ 0.3
+
+ 0.2
+
+ 2
+
+ 3
+
+iAESA k=2
+AESA k=2
+iAESA2 k=2
+iAESA k=5
+AESA k=5
+iAESA2 k=5
+
+ 5
+
+ 4
+ 8
+Percentage of database reviewed
+
+ 6
+
+ 7
+
+ 9
+
+ 10
+
+Fig. 6. Fraction of the answer retrieved as the scanning progresses. Random vectors
+on dimension 128 and n = 3000.
+
+k. AESA, on the other hand, needs to compare almost 80% of the database in
+order to retrieve 95% of the answer.
+
+On the right we show the ratio among the distance to the k-th NN found by
+the algorithm versus the distance to the true k-th NN. In this computation we
+exclude the queries where the algorithm ﬁnds all the k correct neighbors, that
+is, on queries considered unsuccessful on the left plot.
+Note that we have deﬁned a query as unsuccessful even if it ﬁnds k − 1 out of
+the k correct elements. Fig. 6 plots the fraction of the correct nearest neighbors
+found as we scan the database. For example, for with iAESA2 we need to scan
+about 7% of the database to ﬁnd 90% of the answers.
+
+5.4 Probabilistic iAESA: Face Images
+
+Many real databases are composed of few objects, each of very high intrinsic
+dimension. This is the case the FERET database of face images [16]. We use a
+target set with 762 images of 254 diﬀerent classes (3 similar images per class),
+and a query set of 254 images (1 image per class). The intrinsic dimension of the
+
+i
+
+r
+o
+b
+h
+g
+e
+n
+ 
+t
+s
+e
+r
+a
+e
+n
+ 
+k
+ 
+s
+t
+i
+ 
+d
+e
+v
+e
+i
+r
+t
+e
+r
+ 
+t
+a
+h
+t
+ 
+s
+e
+i
+r
+e
+u
+q
+%
+
+ 
+
+ 90
+
+ 80
+
+ 70
+
+ 60
+
+ 50
+
+ 40
+
+ 30
+
+ 20
+
+ 10
+
+ 0
+
+ 2
+
+ 3
+
+r
+o
+r
+r
+e
+ 
+e
+v
+i
+t
+a
+e
+R
+
+l
+
+ 1.24
+
+ 1.22
+
+ 1.2
+
+ 1.18
+
+ 1.16
+
+ 1.14
+
+ 1.12
+
+ 1.1
+
+ 1.08
+
+ 1.06
+
+ 1.04
+
+ 2
+
+ 3
+
+ 9
+
+ 10
+
+iAESA k=1
+AESA k=1
+iAESA2 k=1
+iAESA k=5
+AESA k=5
+iAESA2 k=5
+
+ 5
+
+ 8
+ 4
+Percentage of database reviewed
+
+ 6
+
+ 7
+
+iAESA k=1
+AESA k=1
+iAESA2 k=1
+iAESA k=5
+AESA k=5
+iAESA2 k=5
+
+ 5
+
+ 8
+ 4
+Percentage of database reviewed
+
+ 6
+
+ 7
+
+ 9
+
+ 10
+
+Fig. 7. Searching for the k nearest neighbors in a real-life image database of 762 faces.
+On the left, fraction of correct queries. On the right, ratio of distances to the k-th NN
+found versus the real k-th NN.
+
+On the Least Cost for Proximity Searching in Metric Spaces
+
+289
+
+database is around 40, which is considered intractable: exact AESA and iAESA
+must scan 90% of the database in order to answer k-NN queries on this space.
+The performance of the probabilistic algorithms is compared in Fig. 7. It
+can be seen that larger fractions of the database must be scanned in order to
+satisfactorily solve queries with larger k. Again, iAESA2 is faster than the others.
+
+6 Conclusions and Future Work
+
+Proximity searching in metric spaces consists in retrieving the elements from the
+database that are relevant to a given query. The similarity between objects is
+measured by a distance function that is usually expensive to compute. AESA [17]
+has been without question, for 20 years, the most successful algorithm to solve
+similarity queries, because it computes the least number of distance evaluations
+to answer them. We present a new technique, called iAESA, able to improve
+upon AESA by up to 75% over diﬀerent metric databases.
+
+In very high dimensions there are no exact algorithms able to avoid sequential
+scan. We propose a new probabilistic algorithm based on iAESA, which is able
+to solve a large fraction of queries by scanning a small fraction of the database.
+For example, on a faces image database, iAESA solves 85% of the queries by
+checking just 10% of the database.
+
+The only weak point of our approach is the extra CPU time required to reduce
+the distance computations. This can be signiﬁcant if the distances are not very
+expensive to compute. We plan to address this issue in two ways. One is to avoid,
+upon the insertion of a new pivot, the full recomputation of the permutation of
+each element as well as its distance to the query permutation. We are exploring
+a scheme that reduces this work by about 50%, and further reductions could
+be possible by using smarter data structures. Another idea is based on the fact
+that the distances to the query permutation can only grow as more pivots are
+inserted. Thus we can delay the updating of the permutation of every element
+until it would become the next pivot. At this point the pivot insertions delayed
+are carried out on the candidate’s permutation and its distance to the query
+permutation is updated. This may push the candidate behind on the priority
+queue and forces us to choose the next best candidate, until we get an up-todate 
+next candidate. Thus many elements could be removed from the candidate
+set without ever having updated their permutations, thus saving CPU time.
+
+References
+
+1. S. Arya, D. Mount, N. Netanyahu, R. Silverman, and A. Wu. An optimal algorithm
+for approximate nearest neighbor searching in ﬁxed dimension. In Proc. 5th ACMSIAM 
+Symposium on Discrete Algorithms (SODA’94), pages 573–583, 1994.
+
+2. R. Baeza-Yates and B. Ribeiro. Modern Information Retrieval. Addison-Wesley,
+
+1999.
+
+3. C. B¨ohm, S. Berchtold, and D. A. Keim. Searching in high-dimensional spacesindex 
+structures for improving the performance of multimedia databases. ACM
+Computing Surveys, 33(3):322–373, 2001.
+
+290
+
+K. Figueroa et al.
+
+4. B. Bustos and G. Navarro. Probabilistic proximity search algorithms based on
+
+compact partitions. Journal of Discrete Algorithms (JDA), 2(1):115–134, 2003.
+
+5. E. Ch´avez, K. Figueroa, and G. Navarro. Proximity searching in high dimensional
+spaces with a proximity preserving order. In MICAI 2005: Advances in Artiﬁcial
+Intelligence, volume 3789 of LNCS, pages 405–414, 2005.
+
+6. E. Ch´avez and G. Navarro. Probabilistic proximity search: Fighting the curse of
+dimensionality in metric spaces. Information Processing Letters, 85(1):39–46, 2003.
+7. E. Ch´avez, G. Navarro, R. Baeza-Yates, and J. Marroqu´ın. Proximity searching
+
+in metric spaces. ACM Computing Surveys, 33(3):273–321, 2001.
+
+8. P. Ciaccia and M. Patella. Searching in metric spaces with user-deﬁned and approximate 
+distances. ACM Trans. on Database Systems, 27(4):398–437, 2002.
+
+9. K. Clarkson. Nearest neighbor queries in metric spaces. Discrete Computational
+
+Geometry, 22(1):63–93, 1999.
+
+10. R. Fagin, R. Kumar, and D. Sivakumar. Comparing top k lists. SIAM J. Discrete
+
+Math, 17(1):134–160, 2003.
+
+11. K. Fredriksson. Parallel and memory adaptive metric indexes. Pattern Recognition
+
+Letters, to appear.
+
+12. L. Mic´o, J. Oncina, and R. Carrasco. A fast branch and bound nearest neighbour
+
+classiﬁer in metric spaces. Pattern Recognition Letters, 17:731–739, 1996.
+
+13. L. Mic´o, J. Oncina, and E. Vidal. A new version of the nearest-neighbor approximating 
+and eliminating search (AESA) with linear preprocessing-time and memory
+requirements. Pattern Recognition Letters, 15:9–17, 1994.
+
+14. P. Navarrete and J. Ruiz-Del-Solar. Analysis and comparison of eigenspace-based
+Int. Journal of Pattern Recognition and Artiﬁcial
+
+face recognition approaches.
+Intelligence, 16(7):817–830, 2002.
+
+15. G. Navarro, R. Paredes, and E. Ch´avez. t-spanners as a data structure for metric
+space searching. In SPIRE 2002: 9th International Symposium on String Processing
+and Information Retrieval, LNCS 2476, pages 298–309, 2002.
+
+16. P. Phillips, H. Wechsler, J. Huang, and P. Rauss. The FERET database and
+evaluation procedure for face recognition algorithms. Image and Vision Computing
+Journal, 16(5):295–306, 1998.
+
+17. E. Vidal. An algorithm for ﬁnding nearest neighbors in (approximately) constant
+
+average time. Pattern Recognition Letters, 4:145–157, 1986.
+
+18. J. Vilar. Reducing the overhead of the AESA metric-space nearest neighbor searching 
+algorithm. Information Processing Letters, 56:256–271, 1995.
+
+19. D. White and R. Jain. Algorithms and strategies for similarity retrieval. Technical
+
+Report VCL-96-101, Visual Computing Laboratory, U. of California, 1996.
+
+
