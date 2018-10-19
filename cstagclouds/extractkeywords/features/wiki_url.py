@@ -1,8 +1,22 @@
 # http://www.logarithmic.net/pfh/blog/01186620415
+import gzip
+import os
+import shutil
+import urllib
+
+
+def download_wiki_titles(filename):
+    # urllib.request.urlretrieve("https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-all-titles-in-ns0.gz",
+    #                            filename + '.gz')
+    with gzip.open(filename + '.gz', 'rb') as f_in:
+        with open(filename, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
 
 
 class Searcher:
     def __init__(self, filename):
+        if not os.path.exists(filename):
+            download_wiki_titles(filename)
         self.f = open(filename, 'rb')
         self.f.seek(0, 2)
         self.length = self.f.tell()

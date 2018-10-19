@@ -54,7 +54,7 @@ class AuthorKeywords:
         bin_searcher = Searcher(
             os.path.join(__location__, 'features/enwiki-latest-all-titles-in-ns0'))
         # Tfidf cal
-        tfidf_calc = TfidfCalculator(os.path.join(__location__, "txt/*/"),
+        tfidf_calc = TfidfCalculator(self.dir.replace(self.author, '*'),
                                      [element[0] for element in keywords_sorted])
         tfidf = tfidf_calc.get_tfidf_feats(self.author)
 
