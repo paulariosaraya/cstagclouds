@@ -1,6 +1,8 @@
 # PubTag
 PubTag: Generating Research Tag-Clouds with Keyphrase Extraction and Learning-to-Rank
 
+[Link to the paper](https://ieeexplore.ieee.org/document/8609671)
+
 ## Data
 - A labelled dataset of 1,126 author-scored keyphrases extracted from the text of papers coauthored
 by 12 Computer Science professors, which can be found in [data/scored_keyphrases](https://github.com/burningreds/cstagclouds/tree/master/data/scored_keyphrases).
